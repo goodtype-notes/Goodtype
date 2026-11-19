@@ -838,9 +838,18 @@ export function createSelection(env: SelectionEnvironment) {
     let anchor: ViewRect | null = null;
     const objectId = selectedObjectId();
     if (objectId) {
-      anchor = env.workspace
-        .querySelector<HTMLElement>(`.active-page [data-object-id="${CSS.escape(objectId)}"]`)
-        ?.getBoundingClientRect() ?? null;
+      // A selected shape draws its handles in a second layer under the same id; the rotate handle
+      // sits above the outline, so placing the bar against the outline alone covered it.
+      const rects = [...env.workspace
+        .querySelectorAll<Element>(`.active-page [data-object-id="${CSS.escape(objectId)}"]`)]
+        .map((element) => element.getBoundingClientRect());
+      if (rects.length) {
+        const left = Math.min(...rects.map((rect) => rect.left));
+        const top = Math.min(...rects.map((rect) => rect.top));
+        const right = Math.max(...rects.map((rect) => rect.right));
+        const bottom = Math.max(...rects.map((rect) => rect.bottom));
+        anchor = { left, top, right, bottom, width: right - left, height: bottom - top };
+      }
     } else {
       const bounds = env.regionBounds ?? mixedSelectionBounds ?? selectionBounds(env.strokes, inkActionIds());
       const frame = env.pageFrame?.getBoundingClientRect();
