@@ -12,6 +12,7 @@
     resizeShape,
     rotateShape,
     rotationHandlePoint,
+    selectionAnchors,
     toggleSplineClosed,
     type ShapeAnchor,
   } from "../shape/edit";
@@ -75,9 +76,13 @@
   let gesture = $state<Gesture | null>(null);
   /// The end a dragged line handle has met, marked until the drag ends.
   let snapRing = $state<Point | null>(null);
+  /// The curve knot last touched, whose tangent arms show while the curve is only selected.
+  let activeNode = $state<number | null>(null);
   const path = $derived(shapePath(preview.geometry));
   const bounds = $derived(shapeBounds(preview.geometry));
-  const anchors = $derived(anchorPoints(preview.geometry));
+  const anchors = $derived(
+    editing ? anchorPoints(preview.geometry) : selectionAnchors(preview.geometry, activeNode),
+  );
   const closed = $derived(
     preview.geometry.kind === "rectangle" ||
       preview.geometry.kind === "ellipse" ||
@@ -91,10 +96,13 @@
   /// either end fixes a slightly wrong angle or length in one move. The box, rotate and resize
   /// controls only restate what the ends already do.
   const endsOnly = $derived(preview.geometry.kind === "line");
-  const showAnchors = $derived(editing || endsOnly);
 
   $effect(() => {
     if (!gesture) preview = shape;
+  });
+
+  $effect(() => {
+    if (!selected) activeNode = null;
   });
 
   function begin(event: PointerEvent, kind: Gesture["kind"], anchor?: ShapeAnchor) {
@@ -102,6 +110,7 @@
     event.preventDefault();
     event.stopPropagation();
     onSelect?.();
+    if (anchor && typeof anchor !== "string" && !("handle" in anchor)) activeNode = anchor.node;
     (event.currentTarget as SVGElement).setPointerCapture(event.pointerId);
     gesture = {
       kind,
@@ -328,7 +337,7 @@
         stroke-dasharray={`${4 * controlScale} ${3 * controlScale}`}
       ></rect>
       {/if}
-      {#if !showAnchors}
+      {#if !editing && !endsOnly}
         <line
           class="handle-line"
           x1={(bounds.left + bounds.right) / 2}
@@ -352,6 +361,9 @@
           onkeydown={objectKeydown}
         ></circle>
         <circle class="control" cx={rotationHandle.x} cy={rotationHandle.y} r={4.5 * controlScale}></circle>
+      {/if}
+      <!-- Rectangles and ellipses resize from their own corners and sides; a curve has only knots. -->
+      {#if !editing && spline}
         <circle
           class="control-hit"
           cx={bounds.right}
@@ -367,7 +379,7 @@
           onkeydown={objectKeydown}
         ></circle>
         <circle class="control" cx={bounds.right} cy={bounds.bottom} r={5 * controlScale}></circle>
-      {:else}
+      {/if}
         {#each anchors as item, index (`${anchorName(item.anchor)}-${index}`)}
           {#if typeof item.anchor !== "string" && "handle" in item.anchor}
             {@const knot = nodePoint(item.anchor)}
@@ -386,10 +398,10 @@
         {#each anchors as item, index (`${anchorName(item.anchor)}-${index}`)}
           {@const handle = typeof item.anchor !== "string" && "handle" in item.anchor}
           <circle
-            class="control-hit"
+            class="control-hit anchor"
             cx={item.point.x}
             cy={item.point.y}
-            r={22 * controlScale}
+            r={(spline && !editing ? 14 : 22) * controlScale}
             role="button"
             tabindex={grabbable ? 0 : -1}
             aria-label={$t("workspace.move2", { "value1": anchorName(item.anchor) })}
@@ -407,7 +419,6 @@
             r={(handle ? 3.5 : 5) * controlScale}
           ></circle>
         {/each}
-      {/if}
   </g>
   {#if snapRing}
     <circle class="snap-ring" cx={snapRing.x} cy={snapRing.y} r={4 / zoom} stroke-width={1.5 / zoom}></circle>
@@ -428,7 +439,7 @@
   .grabbable .control-hit { pointer-events: all; }
   .control-hit.rotate { cursor: grab; }
   .control-hit.rotate:active { cursor: grabbing; }
-  .editing .control-hit { cursor: move; }
+  .control-hit.anchor, .editing .control-hit { cursor: move; }
   .control-hit:focus-visible { fill: var(--accent-fill); }
   .control { fill: var(--paper); stroke: var(--blueprint); stroke-width: 1.5px; pointer-events: none; }
   .control.handle { fill: var(--blueprint); }

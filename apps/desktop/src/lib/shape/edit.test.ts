@@ -9,6 +9,7 @@ import {
   resizeShape,
   rotateShape,
   rotationHandlePoint,
+  selectionAnchors,
   toggleSplineClosed,
 } from "./edit";
 import { MIN_SHAPE_SIZE_PT, shapeBounds } from "./geometry";
@@ -165,5 +166,45 @@ describe("spline editing", () => {
     const rotated = moveShapeAnchor({ ...line, rotation: 10 }, "line-end", { x: -23.4, y: 64.3 }, true);
     const local = (rotated.geometry as { end: { x: number; y: number } }).end;
     expect((Math.atan2(local.y, local.x) * 180) / Math.PI + 10).toBeCloseTo(45);
+  });
+});
+
+describe("handles on a selected shape", () => {
+  const ellipse: ShapeView = { ...rectangle, geometry: { kind: "ellipse", widthPt: 40, heightPt: 40 } };
+
+  it("shows corners for a rectangle, sides for an ellipse and arms only for the touched knot", () => {
+    expect(selectionAnchors(rectangle.geometry, null).map(({ anchor }) => anchor))
+      .toEqual(["north-west", "north-east", "south-east", "south-west"]);
+    expect(selectionAnchors(ellipse.geometry, null).map(({ anchor }) => anchor))
+      .toEqual(["north", "east", "south", "west"]);
+    const curve: ShapeGeometry = {
+      kind: "spline",
+      closed: false,
+      nodes: [
+        { point: { x: 0, y: 0 }, handleIn: null, handleOut: { x: 5, y: 0 } },
+        { point: { x: 20, y: 10 }, handleIn: { x: -5, y: 0 }, handleOut: { x: 5, y: 0 } },
+        { point: { x: 40, y: 0 }, handleIn: { x: -5, y: 0 }, handleOut: null },
+      ],
+    };
+    expect(selectionAnchors(curve, null)).toHaveLength(3);
+    expect(selectionAnchors(curve, 1).map(({ anchor }) => anchor)).toEqual([
+      { node: 0 },
+      { node: 1 },
+      { node: 1, handle: "in" },
+      { node: 1, handle: "out" },
+      { node: 2 },
+    ]);
+  });
+
+  it("keeps a rectangle's proportions from a corner with Shift", () => {
+    const changed = moveShapeAnchor(rectangle, "south-east", { x: 40, y: 0 }, true);
+    expect(changed).toMatchObject({ x: 10, y: 20, geometry: { widthPt: 120, heightPt: 60 } });
+  });
+
+  it("keeps a circle round from a side with Shift, growing about its middle", () => {
+    const changed = moveShapeAnchor(ellipse, "east", { x: 20, y: 0 }, true);
+    expect(changed).toMatchObject({ x: 10, y: 10, geometry: { widthPt: 60, heightPt: 60 } });
+    const free = moveShapeAnchor(ellipse, "east", { x: 20, y: 0 });
+    expect(free).toMatchObject({ x: 10, y: 20, geometry: { widthPt: 60, heightPt: 40 } });
   });
 });

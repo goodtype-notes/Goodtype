@@ -403,3 +403,65 @@ describe("a line keeps the angle it was drawn at", () => {
     expect(angleOf(recognizeHeldShape(drawnAt(37), style, { snapDegrees: 15 }))).toBeCloseTo(30, 0);
   });
 });
+
+/// A hand-drawn polyline through `corners`, with the same kind of drift and jitter as `handBox`.
+function handPolyline(corners: { x: number; y: number }[], seed: number, noise = 0.6): StrokePoint[] {
+  const next = random(seed);
+  const tilt = (next() - 0.5) * 0.3;
+  const lengths = corners.slice(1).map((to, at) => Math.hypot(to.x - corners[at].x, to.y - corners[at].y));
+  const total = lengths.reduce((sum, length) => sum + length, 0);
+  const count = Math.round(total / 1.5);
+  return Array.from({ length: count + 1 }, (_, index) => {
+    let remaining = (index / count) * total;
+    let at = 0;
+    while (at < lengths.length - 1 && remaining > lengths[at]) remaining -= lengths[at++];
+    const from = corners[at];
+    const to = corners[at + 1];
+    const along = remaining / lengths[at];
+    const drift = Math.sin(along * 3.1 + at * 2.3) * lengths[at] * 0.012 + (next() - 0.5) * 2 * noise;
+    const x = from.x + (to.x - from.x) * along + (-(to.y - from.y) / lengths[at]) * drift;
+    const y = from.y + (to.y - from.y) * along + ((to.x - from.x) / lengths[at]) * drift;
+    return {
+      x: 200 + x * Math.cos(tilt) - y * Math.sin(tilt),
+      y: 200 + x * Math.sin(tilt) + y * Math.cos(tilt),
+      pressure: 0.5,
+      timeMs: index * 8,
+      tiltX: 0,
+      tiltY: 0,
+    };
+  });
+}
+
+describe("marks with corners keep them", () => {
+  const root = [{ x: 0, y: 30 }, { x: 8, y: 26 }, { x: 18, y: 60 }, { x: 34, y: 0 }, { x: 110, y: 0 }];
+  const bracket = [{ x: 24, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 80 }, { x: 24, y: 80 }];
+  const closing = bracket.map(({ x, y }) => ({ x: 24 - x, y }));
+
+  /// How many of 40 hand-drawn copies come out as a curve of exactly the drawn corners, all sharp.
+  const sharp = (corners: { x: number; y: number }[]) => {
+    let clean = 0;
+    for (let seed = 1; seed <= 40; seed += 1) {
+      const geometry = recognizeHeldShape(handPolyline(corners, seed), style)?.draft.geometry;
+      if (
+        geometry?.kind === "spline" &&
+        geometry.nodes.length === corners.length &&
+        geometry.nodes.every((node) => node.handleIn === null && node.handleOut === null)
+      ) clean += 1;
+    }
+    return clean;
+  };
+
+  it("draws a held root sign and brackets as straight segments meeting at sharp corners", () => {
+    expect({ root: sharp(root), bracket: sharp(bracket), closing: sharp(closing) })
+      .toEqual({ root: 40, bracket: 40, closing: 40 });
+  });
+
+  it("leaves a smooth open arc smooth", () => {
+    const arc = recognizeHeldShape(handRing(60, 220, 0.75, 3), style)?.draft.geometry;
+    expect(arc?.kind).toBe("spline");
+    if (arc?.kind !== "spline") return;
+    const inner = arc.nodes.slice(1, -1);
+    expect(inner.length).toBeGreaterThan(0);
+    expect(inner.every((node) => node.handleIn !== null && node.handleOut !== null)).toBe(true);
+  });
+});
