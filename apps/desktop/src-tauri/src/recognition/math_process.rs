@@ -129,7 +129,7 @@ impl MathProcess {
             slot.take();
         }
         if slot.is_none()
-            && let Some(executable) = crate::importer::math_executable(app)?
+            && let Some(executable) = crate::addons::recognize::math_executable(app)?
         {
             *slot = Some(Session::start(&executable)?);
         }
@@ -166,7 +166,7 @@ impl MathProcess {
 struct Session {
     child: Child,
     #[cfg(windows)]
-    _job: crate::importer::job::Job,
+    _job: crate::addons::job::Job,
     input: mpsc::Sender<Vec<u8>>,
     output: mpsc::Receiver<Result<String, String>>,
     id: u64,
@@ -185,7 +185,7 @@ impl Session {
             .map_err(|_| "math recognizer stopped or timed out".to_owned())?
     }
     fn start(executable: &std::path::Path) -> Result<Self, String> {
-        if !crate::importer::platform_supported() {
+        if !crate::addons::platform_supported() {
             return Err("math recognition requires Windows x64".into());
         }
         let mut command = Command::new(executable);
@@ -202,7 +202,7 @@ impl Session {
         }
         #[cfg(windows)]
         let job =
-            crate::importer::job::Job::new(3 * 1024 * 1024 * 1024).map_err(|e| e.to_string())?;
+            crate::addons::job::Job::new(3 * 1024 * 1024 * 1024).map_err(|e| e.to_string())?;
         let mut child = command.spawn().map_err(|e| e.to_string())?;
         #[cfg(windows)]
         if let Err(error) = job.assign(&child) {

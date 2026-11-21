@@ -24,7 +24,7 @@ pub type Strokes = Vec<Vec<[f64; 2]>>;
 pub struct Capabilities {
     /// Installed handwriting recognizers, by their Windows display name. Empty means no text.
     pub recognizers: Vec<String>,
-    pub math: crate::importer::ImporterStatus,
+    pub math: crate::addons::ImporterStatus,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,9 +87,11 @@ fn origin(strokes: &Strokes) -> (f64, f64) {
 #[tauri::command]
 pub async fn recognition_capabilities(
     app: tauri::AppHandle,
-    importers: tauri::State<'_, crate::importer::Importers>,
+    importers: tauri::State<'_, crate::addons::Importers>,
 ) -> Result<Capabilities, String> {
-    let math = crate::importer::importer_status(app, importers, "math".into()).await?;
+    let math =
+        crate::addons::importer_status(app, importers, crate::addons::recognize::MATH.id.into())
+            .await?;
     let recognizers = tauri::async_runtime::spawn_blocking(native::capabilities)
         .await
         .map_err(|e| e.to_string())?;

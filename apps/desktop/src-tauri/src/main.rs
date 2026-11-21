@@ -1,9 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod addons;
 mod computation;
 mod export;
 mod helper;
-mod importer;
 mod library;
 mod notebook;
 mod preset;
@@ -25,7 +25,7 @@ fn main() {
         .manage(computation::RuntimeState::default())
         .manage(helper::Helper::default())
         .manage(tinymist::Tinymist::default())
-        .manage(importer::Importers::default())
+        .manage(addons::Importers::default())
         .manage(recognition::math_process::MathProcess::default())
         .setup(|app| {
             let handle = app.handle().clone();
@@ -83,14 +83,15 @@ fn main() {
             library::library_favourites,
             library::set_library_favourite,
             library::list_library_favourites,
-            importer::importer_status,
-            importer::importer_install,
-            importer::importer_check_update,
-            importer::importer_update,
-            importer::importer_cancel,
-            importer::importer_dismiss,
-            importer::import_pick_source,
-            importer::import_start,
+            addons::addon_catalog,
+            addons::importer_status,
+            addons::importer_install,
+            addons::importer_check_update,
+            addons::importer_update,
+            addons::importer_cancel,
+            addons::importer_dismiss,
+            addons::import::import_pick_source,
+            addons::import::import_start,
             workspace::phase0_notebook_root,
             workspace::pick_notebook_root,
             workspace::open_recent_root,
@@ -163,7 +164,7 @@ fn main() {
             recognition::recognize_ink_text,
             recognition::recognize_ink_math,
             recognition::prepare_math_recognition,
-            importer::remove_math_recognizer,
+            addons::recognize::remove_math_recognizer,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build Goodtype")

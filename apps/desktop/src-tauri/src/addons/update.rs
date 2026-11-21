@@ -5,7 +5,7 @@ use ed25519_dalek::{Signature, VerifyingKey};
 use serde::Deserialize;
 
 use super::{
-    MAX_PACKAGE_BYTES, PROTOCOL_VERSION, PinnedRelease, ReleaseView, SCHEMA_VERSION, TARGET, Tool,
+    Addon, MAX_PACKAGE_BYTES, PROTOCOL_VERSION, PinnedRelease, ReleaseView, SCHEMA_VERSION, TARGET,
     github_asset,
 };
 
@@ -95,7 +95,7 @@ fn is_hash(value: &str, length: usize) -> bool {
 /// Authenticates `bytes` with `key` and checks they describe a compatible, clean, stable release
 /// of `tool` from its own repository.
 fn verify(
-    tool: &Tool,
+    tool: &Addon,
     bytes: &[u8],
     signature: &[u8],
     key: &[u8; 32],
@@ -144,7 +144,7 @@ fn verify(
     })
 }
 
-fn fetch(tool: &Tool, url: &str, limit: u64) -> Result<Vec<u8>, String> {
+fn fetch(tool: &Addon, url: &str, limit: u64) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     github_asset(tool, url, true)?
         .into_reader()
@@ -158,7 +158,7 @@ fn fetch(tool: &Tool, url: &str, limit: u64) -> Result<Vec<u8>, String> {
 }
 
 pub(super) fn check(
-    tool: &Tool,
+    tool: &Addon,
     installed: Option<&str>,
 ) -> Result<Option<VerifiedUpdate>, String> {
     let bytes = fetch(tool, &tool.latest_descriptor(), MAX_DESCRIPTOR)?;
@@ -192,12 +192,12 @@ pub(super) fn check(
 
 #[cfg(test)]
 mod tests {
-    use super::super::{GOODNOTES, ONENOTE};
+    use super::super::catalog::{GOODNOTES, ONENOTE};
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
     use serde_json::json;
 
-    fn descriptor(tool: &Tool) -> serde_json::Value {
+    fn descriptor(tool: &Addon) -> serde_json::Value {
         let name = format!("{}-0.1.1-windows-x64.zip", tool.package);
         json!({"version":"0.1.1", "protocolVersion":1, "notebookSchemaVersion":SCHEMA_VERSION,
             "target":TARGET, "sourceDirty":false, "sourceCommit":"1".repeat(40), "decoderCommit":"2".repeat(40),
@@ -281,7 +281,7 @@ mod tests {
         }
     }
 
-    fn tool_from_env() -> &'static Tool {
+    fn tool_from_env() -> &'static Addon {
         match std::env::var("IMPORTER_TOOL").as_deref() {
             Ok("onenote") => &ONENOTE,
             _ => &GOODNOTES,
