@@ -496,6 +496,19 @@ fn is_bytecode_cache(relative: &str) -> bool {
         && relative.to_ascii_lowercase().ends_with(".pyc")
 }
 
+const PROVENANCE: &str = ".goodtype-provenance.json";
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Provenance {
+    archive_sha256: String,
+    inventory_sha256: String,
+}
+
+fn installation_digest(path: &Path) -> Result<String, String> {
+    sha256_file(&path.join(PACKAGE_MANIFEST))
+}
+
 /// Checks an unpacked package against its own manifest: every listed file present with the
 /// listed size and hash, nothing unlisted apart from Python bytecode caches, which are removed.
 /// Returns the manifest.
@@ -525,7 +538,7 @@ pub fn verify_package(tool: &Addon, dir: &Path) -> Result<PackageManifest, Strin
         }
     }
     for file in actual {
-        if file == PACKAGE_MANIFEST || listed.contains(&file.to_lowercase()) {
+        if file == PACKAGE_MANIFEST || file == PROVENANCE || listed.contains(&file.to_lowercase()) {
             continue;
         }
         if is_bytecode_cache(&file) {
@@ -675,9 +688,14 @@ pub fn install_archive(
     release: &PinnedRelease,
     probe: &dyn Fn(&Path) -> Result<ToolVersion, String>,
 ) -> Result<String, String> {
-    install_with_policy(dir, archive, release, probe, |_| {
-        dir.activate(release.version)
-    })
+    install_with_policy(
+        dir,
+        archive,
+        release,
+        probe,
+        |_| Ok(()),
+        |_| dir.activate(release.version),
+    )
 }
 
 fn install_with_policy(
@@ -685,6 +703,7 @@ fn install_with_policy(
     archive: &Path,
     release: &PinnedRelease,
     probe: &dyn Fn(&Path) -> Result<ToolVersion, String>,
+    approve: impl FnOnce(&manifest::Manifest) -> Result<(), String>,
     activate: impl FnOnce(&manifest::Manifest) -> Result<(), String>,
 ) -> Result<String, String> {
     if fs::metadata(archive).map_err(|e| e.to_string())?.len() != release.size {
@@ -701,6 +720,13 @@ fn install_with_policy(
     let mut installed_target = None;
     let result = (|| {
         extract_package(archive, &package_folder(dir.1, release.version), &staging)?;
+        if package_files(&staging)?
+            .iter()
+            .any(|file| file.eq_ignore_ascii_case(PROVENANCE))
+            || staging.join(PROVENANCE).exists()
+        {
+            return Err("the package contains reserved host metadata".into());
+        }
         // Recognition addons ship no importer manifest. Record every file from the pinned, verified ZIP locally.
         if !dir.1.imports_notebooks() {
             let files = package_files(&staging)?
@@ -733,6 +759,17 @@ fn install_with_policy(
         let declaration =
             manifest::load(dir.1, &staging, release.version, &manifest, Some(release))
                 .map_err(manager::manifest_problem)?;
+        if !staging.join(manifest::FILE).exists() {
+            crate::store::write_json(
+                &staging.join(PROVENANCE),
+                &Provenance {
+                    archive_sha256: hash,
+                    inventory_sha256: installation_digest(&staging)?,
+                },
+                4096,
+            )?;
+        }
+        approve(&declaration)?;
         let tool = probe(&staging)?;
         check_contract(dir.1, &manifest, Some(&tool), Some(release))?;
         let target = dir.version_dir(release.version)?;
@@ -1027,6 +1064,9 @@ pub enum Activity {
         total: u64,
     },
     Installing,
+    AwaitingApproval {
+        approval: Approval,
+    },
     #[serde(rename_all = "camelCase")]
     InstallFailed {
         message: String,
@@ -1055,10 +1095,18 @@ impl Activity {
             Self::Checking
                 | Self::Downloading { .. }
                 | Self::Installing
+                | Self::AwaitingApproval { .. }
                 | Self::Importing { .. }
                 | Self::Publishing
         )
     }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct Approval {
+    token: String,
+    version: String,
+    permissions: Vec<manifest::Permission>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1083,6 +1131,21 @@ impl State {
     fn busy(&self) -> bool {
         self.stopping_import || self.activity.as_ref().is_some_and(Activity::is_busy)
     }
+
+    fn dismiss(&mut self) {
+        if !self.busy()
+            && matches!(
+                self.activity,
+                Some(
+                    Activity::Finished { .. }
+                        | Activity::ImportFailed { .. }
+                        | Activity::InstallFailed { .. }
+                )
+            )
+        {
+            self.activity = Some(Activity::Idle);
+        }
+    }
 }
 
 /// One importer's job. One download or import at a time per importer.
@@ -1101,6 +1164,11 @@ impl Importer {
 
     fn busy(&self) -> bool {
         self.state.lock().unwrap().busy()
+    }
+
+    fn lock_idle(&self) -> Option<std::sync::MutexGuard<'_, State>> {
+        let state = self.state.lock().unwrap();
+        (!state.busy()).then_some(state)
     }
 
     fn begin(&self, activity: Activity) -> Result<(), String> {
@@ -1180,6 +1248,7 @@ pub struct ImporterStatus {
     pub disabled: bool,
     pub catalog_permissions: &'static [manifest::Permission],
     /// Why an installed copy cannot be used, if it cannot.
+    pub needs_reinstall: bool,
     pub installed_problem: Option<String>,
     pub source: Option<SourceView>,
     pub activity: Activity,
@@ -1249,15 +1318,24 @@ pub async fn importer_status(
             state.startup_invalid,
         )
     };
-    let disabled = platform_supported()
-        && install_dir(&app, tool)?.active().is_some()
-        && !manager::enabled(&app, tool)?;
+    let mut needs_reinstall = false;
+    let mut disabled = false;
     let (installed, installed_problem) = if startup_invalid {
         (None, Some("addon package verification failed".into()))
-    } else if platform_supported() && !disabled {
-        match installed_contract(&install_dir(&app, tool)?) {
-            Ok(found) => (found.map(|(version, _)| version), None),
-            Err(problem) => (None, Some(problem)),
+    } else if platform_supported()
+        && let Some((version, path)) = install_dir(&app, tool)?.active()
+    {
+        match manager::installed(tool, &path, &version, false) {
+            Ok(_) if manager::enabled(&app, tool)? => (Some(version), None),
+            Ok(_) => {
+                disabled = true;
+                (None, None)
+            }
+            Err(manifest::Error::NeedsReinstall) => {
+                needs_reinstall = true;
+                (None, None)
+            }
+            Err(problem) => (None, Some(manager::manifest_problem(problem))),
         }
     } else {
         (None, None)
@@ -1271,6 +1349,7 @@ pub async fn importer_status(
         installed,
         disabled,
         catalog_permissions: tool.permissions(),
+        needs_reinstall,
         installed_problem,
         source: source.as_deref().and_then(source_view),
         activity: activity.unwrap_or(Activity::Idle),
@@ -1420,10 +1499,14 @@ pub fn importer_update(
 #[tauri::command]
 pub fn importer_cancel(importers: tauri::State<'_, Importers>, tool: String) -> Result<(), String> {
     let (importer, _) = importers.get(&tool)?;
-    importer.cancel.store(true, Ordering::SeqCst);
     let mut state = importer.state.lock().unwrap();
+    importer.cancel.store(true, Ordering::SeqCst);
+    let awaiting = matches!(state.activity, Some(Activity::AwaitingApproval { .. }));
     if let Some(Activity::Importing { cancelling, .. }) = state.activity.as_mut() {
         *cancelling = true;
+    }
+    if awaiting {
+        importer.import_finished.notify_all();
     }
     Ok(())
 }
@@ -1435,9 +1518,7 @@ pub fn importer_dismiss(
     tool: String,
 ) -> Result<(), String> {
     let (importer, _) = importers.get(&tool)?;
-    if !importer.busy() {
-        importer.state.lock().unwrap().activity = Some(Activity::Idle);
-    }
+    importer.state.lock().unwrap().dismiss();
     Ok(())
 }
 

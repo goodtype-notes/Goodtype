@@ -2,7 +2,7 @@ import { get } from "svelte/store";
 import { locale } from "../i18n";
 import { translate, formatNumber } from "../i18n";
 import { invoke } from "@tauri-apps/api/core";
-import { importAddons, type AddonPermission } from "./addons";
+import { importAddons, type AddonApproval, type AddonPermission } from "./addons";
 
 // The optional import addons (ADR 0029, 0032, 0045). Rust owns the download, the
 // installation, the source path and the process; this side only asks and shows.
@@ -34,6 +34,7 @@ export type ImporterActivity =
   | { kind: "checking" }
   | { kind: "downloading"; received: number; total: number }
   | { kind: "installing" }
+  | { kind: "awaitingApproval"; approval: AddonApproval }
   | { kind: "installFailed"; message: string }
   | { kind: "importing"; done: number; total: number; cancelling: boolean }
   | { kind: "publishing" }
@@ -47,6 +48,7 @@ export type ImporterStatus = {
   installed: string | null;
   disabled: boolean;
   catalogPermissions: AddonPermission[];
+  needsReinstall: boolean;
   installedProblem: string | null;
   source: { name: string; sizeBytes: number } | null;
   activity: ImporterActivity;
@@ -92,7 +94,7 @@ export async function allImporterStatus(): Promise<Record<ImporterId, ImporterSt
 
 /** True while a download, install or import is running. */
 export function importerBusy(activity: ImporterActivity): boolean {
-  return ["checking", "downloading", "installing", "importing", "publishing"].includes(activity.kind);
+  return ["checking", "downloading", "installing", "awaitingApproval", "importing", "publishing"].includes(activity.kind);
 }
 
 export function megabytes(bytes: number): string {

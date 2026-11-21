@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AddonApproval from "../workspace/AddonApproval.svelte";
   import AddonPermissions from "../workspace/AddonPermissions.svelte";
   import { ADDON_AVAILABILITY_CHANGED } from "../ipc/addons";
   import { t } from "../i18n";
@@ -270,6 +271,10 @@
         <div class="spacer"></div>
         <button type="button" class="control" onclick={cancel}>{$t("library.cancel")}</button>
       </div>
+    {:else if activity.kind === "awaitingApproval"}
+      {#key activity.approval.token}
+        <AddonApproval id={tool} approval={activity.approval} {refresh} />
+      {/key}
     {:else if activity.kind === "installing"}
       <p class="status">{$t("library.verifyingAndInstallingThePackage")}</p>
       <div class="progress indeterminate" role="progressbar" aria-label={$t("library.installation")}><span></span></div>
@@ -377,7 +382,9 @@
       {#if downloadRelease}
         <AddonPermissions permissions={status.catalogPermissions} />
       {/if}
-      {#if status.installedProblem}
+      {#if status.needsReinstall}
+        <p class="problem" role="alert">{$t("addons.manager.status.needs-reinstall")}</p>
+      {:else if status.installedProblem}
         <p class="problem" role="alert">{$t("library.theInstalledImporterCannotBeUsed", { "installedProblem": status.installedProblem })}</p>
       {/if}
       {#if activity.kind === "installFailed"}

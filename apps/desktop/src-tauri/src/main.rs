@@ -88,6 +88,8 @@ fn main() {
             library::list_library_favourites,
             addons::addon_catalog,
             addons::manager::addon_list,
+            addons::manager::addon_approve,
+            addons::manager::addon_reset_policy,
             addons::manager::addon_set_enabled,
             addons::manager::addon_remove,
             addons::manager::addon_set_direct_apply,

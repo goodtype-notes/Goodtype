@@ -7,29 +7,52 @@ const MAX_POLICY_BYTES: usize = 64 * 1024;
 static POLICY: Mutex<()> = Mutex::new(());
 
 #[derive(Default, Deserialize, Serialize)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Policy {
     allow_direct_apply: bool,
     addons: BTreeMap<String, Preference>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Preference {
     enabled: bool,
     direct_apply: bool,
 }
 
-fn read_policy(path: &Path) -> Result<Policy, String> {
-    if !path.try_exists().map_err(|error| error.to_string())? {
-        return Ok(Policy::default());
-    }
+fn read_policy_file(path: &Path) -> Result<Policy, String> {
     serde_json::from_slice(&read_bounded(path, MAX_POLICY_BYTES)?)
         .map_err(|error| error.to_string())
 }
 
+fn first_run(path: &Path) -> bool {
+    matches!(path.try_exists(), Ok(false))
+        && matches!(path.with_extension("json.bak").try_exists(), Ok(false))
+}
+
+fn read_policy(path: &Path) -> Result<Policy, String> {
+    if first_run(path) {
+        return Ok(Policy::default());
+    }
+    read_policy_file(path).or_else(|_| {
+        let backup = read_policy_file(&path.with_extension("json.bak"))?;
+        crate::store::write_json(path, &backup, MAX_POLICY_BYTES)?;
+        Ok(backup)
+    })
+}
+
 fn write_policy(path: &Path, policy: &Policy) -> Result<(), String> {
-    crate::store::write_json(path, policy, MAX_POLICY_BYTES)
+    let backup = path.with_extension("json.bak");
+    let prior = read_policy_file(path).ok();
+    let bytes = crate::store::json_bytes(policy, MAX_POLICY_BYTES)?;
+    crate::store::write_atomic(&backup, &bytes)?;
+    if let Err(error) = crate::store::write_atomic(path, &bytes) {
+        if let Some(prior) = prior {
+            crate::store::write_json(&backup, &prior, MAX_POLICY_BYTES)?;
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn patch_file(path: &Path, update: impl FnOnce(&mut Policy)) -> Result<(), String> {
@@ -50,6 +73,7 @@ fn policy(app: &tauri::AppHandle) -> Result<Policy, String> {
 
 pub(super) fn manifest_problem(error: Error) -> String {
     match error {
+        Error::NeedsReinstall => "addon needs reinstall".into(),
         Error::Invalid => "invalid addon manifest or package".into(),
         Error::Incompatible(_) => "incompatible addon API".into(),
     }
@@ -64,6 +88,26 @@ pub(super) fn installed(
     if is_package_link(&fs::symlink_metadata(path).map_err(|_| Error::Invalid)?) {
         return Err(Error::Invalid);
     }
+    let legacy_pin = if !path.join(manifest::FILE).exists() && addon.legacy == Some(version) {
+        // A same-user process that can rewrite app-local data is outside the threat model.
+        let provenance: Provenance = read_bounded(&path.join(PROVENANCE), 4096)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .ok_or(Error::NeedsReinstall)?;
+        let pin = addon
+            .pinned
+            .filter(|pin| {
+                pin.version == version
+                    && pin.sha256.eq_ignore_ascii_case(&provenance.archive_sha256)
+            })
+            .ok_or(Error::NeedsReinstall)?;
+        if installation_digest(path).map_err(|_| Error::Invalid)? != provenance.inventory_sha256 {
+            return Err(Error::NeedsReinstall);
+        }
+        Some(pin)
+    } else {
+        None
+    };
     let inventory = if verify {
         verify_package(addon, path).map_err(|_| Error::Invalid)?
     } else {
@@ -76,31 +120,33 @@ pub(super) fn installed(
     if inventory.version != version {
         return Err(Error::Invalid);
     }
-    check_contract(addon, &inventory, None, None).map_err(|_| Error::Invalid)?;
-    manifest::load(addon, path, version, &inventory, None)
+    check_contract(addon, &inventory, None, legacy_pin.as_ref()).map_err(|_| Error::Invalid)?;
+    manifest::load(addon, path, version, &inventory, legacy_pin.as_ref())
 }
 
 pub(crate) fn startup(app: &tauri::AppHandle) -> Result<(), String> {
     if !platform_supported() {
         return Ok(());
     }
+    let path = crate::settings::config_file(app, CONFIG)?;
+    let migrate = first_run(&path);
+    let mut defaults = Policy::default();
+    let _ = policy(app);
     for addon in CATALOG {
         let dir = install_dir(app, addon)?;
+        discard_staging(&dir)?;
         let Some((version, path)) = dir.active() else {
             continue;
         };
         match installed(addon, &path, &version, true) {
-            Ok(_)
-                if addon.legacy == Some(&version)
-                    && !path.join(manifest::FILE).exists()
-                    && !policy(app)?.addons.contains_key(addon.id) =>
-            {
-                patch(app, |policy| {
-                    policy.addons.entry(addon.id.into()).or_insert(Preference {
+            Ok(_) if migrate && !path.join(manifest::FILE).exists() => {
+                defaults.addons.insert(
+                    addon.id.into(),
+                    Preference {
                         enabled: true,
                         direct_apply: false,
-                    });
-                })?;
+                    },
+                );
             }
             Err(Error::Invalid) => {
                 app.state::<Importers>()
@@ -114,6 +160,76 @@ pub(crate) fn startup(app: &tauri::AppHandle) -> Result<(), String> {
             _ => {}
         }
     }
+    if migrate {
+        let _lock = POLICY.lock().unwrap();
+        write_policy(&crate::settings::config_file(app, CONFIG)?, &defaults)?;
+    }
+    Ok(())
+}
+
+fn discard_staging(dir: &InstallDir) -> Result<(), String> {
+    let root = fs::canonicalize(&dir.0).map_err(|error| error.to_string())?;
+    for entry in fs::read_dir(&root)
+        .map_err(|error| error.to_string())?
+        .flatten()
+    {
+        let name = entry.file_name();
+        let Some((pid, nonce)) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix("staging-"))
+            .and_then(|suffix| suffix.split_once('-'))
+        else {
+            continue;
+        };
+        if u32::from_str_radix(pid, 16).is_err() || u128::from_str_radix(nonce, 16).is_err() {
+            continue;
+        }
+        if let Ok(metadata) = fs::symlink_metadata(entry.path())
+            && metadata.is_dir()
+            && !is_package_link(&metadata)
+            && let Ok(path) = fs::canonicalize(entry.path())
+            && path.parent() == Some(root.as_path())
+        {
+            fs::remove_dir_all(path).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn await_approval(job: &Importer, approval: Approval) -> Result<(), String> {
+    let mut state = job.state.lock().unwrap();
+    if job.cancel.load(Ordering::SeqCst) {
+        return Err(CANCELLED.into());
+    }
+    state.activity = Some(Activity::AwaitingApproval { approval });
+    let state = job
+        .import_finished
+        .wait_while(state, |state| {
+            !job.cancel.load(Ordering::SeqCst)
+                && matches!(state.activity, Some(Activity::AwaitingApproval { .. }))
+        })
+        .unwrap();
+    if !matches!(state.activity, Some(Activity::Installing)) {
+        return Err(CANCELLED.into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn addon_approve(
+    importers: tauri::State<'_, Importers>,
+    id: String,
+    token: String,
+) -> Result<(), String> {
+    let (job, _) = importers.get(&id)?;
+    let mut state = job.state.lock().unwrap();
+    if job.cancel.load(Ordering::SeqCst)
+        || !matches!(&state.activity, Some(Activity::AwaitingApproval { approval }) if approval.token == token)
+    {
+        return Err("approval-unavailable".into());
+    }
+    state.activity = Some(Activity::Installing);
+    job.import_finished.notify_all();
     Ok(())
 }
 
@@ -127,11 +243,35 @@ pub(super) fn install(
     let previous_declaration = previous
         .as_ref()
         .and_then(|(version, path)| installed(dir.1, path, version, true).ok());
+    let importers = app.state::<Importers>();
+    let (job, _) = importers.get(dir.1.id)?;
+    let prior_policy = policy(app)?;
+    let recorded = prior_policy.addons.contains_key(dir.1.id);
     install_with_policy(
         dir,
         archive,
         release,
         &|path| probe_tool(dir.1, path),
+        |candidate| {
+            if !recorded
+                || !previous_declaration
+                    .as_ref()
+                    .is_some_and(|old| old.same_scope(candidate))
+            {
+                await_approval(
+                    job,
+                    Approval {
+                        token: unique_suffix(),
+                        version: release.version.into(),
+                        permissions: candidate.permissions.clone(),
+                    },
+                )?;
+            } else if job.cancel.load(Ordering::SeqCst) {
+                return Err(CANCELLED.into());
+            }
+            shutdown(app, dir.1);
+            Ok(())
+        },
         |candidate| {
             let _lock = POLICY.lock().unwrap();
             let path = crate::settings::config_file(app, CONFIG)?;
@@ -181,7 +321,8 @@ fn install_preference(
 }
 
 pub(super) fn enabled(app: &tauri::AppHandle, addon: &Addon) -> Result<bool, String> {
-    Ok(policy(app)?
+    Ok(policy(app)
+        .unwrap_or_default()
         .addons
         .get(addon.id)
         .is_some_and(|entry| entry.enabled))
@@ -217,12 +358,14 @@ enum Status {
     Disabled,
     IncompatibleApi,
     VerificationFailed,
+    NeedsReinstall,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ManagerView {
     allow_direct_apply: bool,
+    recovery: bool,
     addons: Vec<ManagedAddon>,
 }
 
@@ -249,6 +392,7 @@ struct ManagedAddon {
     direct_apply: bool,
     activity: &'static str,
     progress: Option<(u64, u64)>,
+    approval: Option<Approval>,
 }
 
 #[derive(Serialize)]
@@ -262,7 +406,9 @@ pub async fn addon_list(
     app: tauri::AppHandle,
     importers: tauri::State<'_, Importers>,
 ) -> Result<ManagerView, String> {
-    let policy = policy(&app).map_err(|_| "policy-read-failed")?;
+    let policy = policy(&app);
+    let recovery = policy.is_err();
+    let policy = policy.unwrap_or_default();
     let mut addons = Vec::with_capacity(CATALOG.len());
     for &addon in CATALOG {
         let (job, _) = importers.get(addon.id)?;
@@ -295,6 +441,7 @@ pub async fn addon_list(
                     Status::IncompatibleApi
                 }
                 Err(Error::Invalid) => Status::VerificationFailed,
+                Err(Error::NeedsReinstall) => Status::NeedsReinstall,
             };
         }
         let state = job.state.lock().unwrap();
@@ -306,6 +453,7 @@ pub async fn addon_list(
             Activity::Checking => ("checking", None),
             Activity::Downloading { received, total } => ("downloading", Some((*received, *total))),
             Activity::Installing => ("installing", None),
+            Activity::AwaitingApproval { .. } => ("awaitingApproval", None),
             Activity::InstallFailed { message } if message == "incompatible addon API" => {
                 ("updateIncompatible", None)
             }
@@ -356,12 +504,27 @@ pub async fn addon_list(
             direct_apply: preference.direct_apply,
             activity,
             progress,
+            approval: match &state.activity {
+                Some(Activity::AwaitingApproval { approval }) => Some(approval.clone()),
+                _ => None,
+            },
         });
     }
     Ok(ManagerView {
         allow_direct_apply: policy.allow_direct_apply,
+        recovery,
         addons,
     })
+}
+
+#[tauri::command]
+pub fn addon_reset_policy(app: tauri::AppHandle) -> Result<(), String> {
+    let _lock = POLICY.lock().unwrap();
+    let path = crate::settings::config_file(&app, CONFIG)?;
+    if read_policy(&path).is_err() {
+        write_policy(&path, &Policy::default()).map_err(|_| "policy-write-failed")?;
+    }
+    Ok(())
 }
 
 fn shutdown(app: &tauri::AppHandle, addon: &Addon) {
@@ -481,6 +644,42 @@ pub async fn addon_set_direct_apply(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restores_disabled_policy_from_backup_if_primary_is_deleted_or_corrupt() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join(CONFIG);
+        assert!(first_run(&path));
+        patch_file(&path, |policy| {
+            policy
+                .addons
+                .insert(catalog::GOODNOTES.id.into(), Preference::default());
+        })
+        .unwrap();
+        fs::remove_file(&path).unwrap();
+        assert!(!first_run(&path));
+        assert!(!read_policy(&path).unwrap().addons[catalog::GOODNOTES.id].enabled);
+        assert!(path.is_file());
+        fs::write(&path, b"{").unwrap();
+        assert!(!read_policy(&path).unwrap().addons[catalog::GOODNOTES.id].enabled);
+        assert!(read_policy_file(&path).is_ok());
+    }
+
+    #[test]
+    fn unrecoverable_policy_refuses_patches_until_explicit_reset() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join(CONFIG);
+        fs::write(&path, b"{").unwrap();
+        assert!(!first_run(&path));
+        assert!(read_policy(&path).is_err());
+        fs::write(path.with_extension("json.bak"), b"{}").unwrap();
+        assert!(patch_file(&path, |_| panic!("a corrupt policy must not be patched")).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"{");
+        write_policy(&path, &Policy::default()).unwrap();
+        let policy = read_policy(&path).unwrap();
+        assert!(!policy.allow_direct_apply && policy.addons.is_empty());
+        assert!(!first_run(&path));
+    }
 
     #[test]
     fn policy_defaults_and_independent_patches_survive_restart() {

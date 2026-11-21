@@ -3,6 +3,14 @@ import type { Catalog } from "./en";
 export const de = {
   addons: {
     manager: {
+      recovery: "Die Addon-Einstellungen konnten nicht wiederhergestellt werden. Alle Addons sind deaktiviert.",
+      resetPolicy: "Addon-Einstellungen zurücksetzen",
+      resetTitle: "Addon-Einstellungen zurücksetzen?",
+      resetDetail: "Dies löscht die Addon-Einstellungen und lässt alle Addons deaktiviert. Installierte Dateien und Notizbücher bleiben erhalten.",
+      reinstall: "Neu installieren",
+      approvalPermissions: "Von dieser Version angeforderte Berechtigungen",
+      approvalDetail: "Prüfe die Berechtigungen für Version {{version}} vor der Installation.",
+      approve: "Freigeben und installieren",
       "title": "Erweiterungen",
       "search": "Erweiterung Addon Plugin Import Erkennung Berechtigungen Aktualisierung Installation",
       "manage": "Verwalten",
@@ -39,6 +47,7 @@ export const de = {
       "current": "Keine neuere verifizierte Version gefunden.",
       "global": "Erweiterungen dürfen Änderungen direkt anwenden",
       "status": {
+        "needs-reinstall": "Neuinstallation erforderlich",
         "unsupported-os": "Windows x64 erforderlich",
         "unpublished": "Keine verifizierte Version veröffentlicht",
         "available": "Zur Installation verfügbar",
@@ -48,6 +57,7 @@ export const de = {
         "verification-failed": "Paketprüfung fehlgeschlagen"
       },
       "activity": {
+        awaitingApproval: "Wartet auf Freigabe der Berechtigungen",
         "checking": "Suche nach einem verifizierten Update …",
         "downloading": "Download läuft …",
         "installing": "Wird geprüft und installiert …",

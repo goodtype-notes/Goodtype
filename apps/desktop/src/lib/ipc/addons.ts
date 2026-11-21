@@ -47,11 +47,13 @@ export type AddonPermission =
 
 type Release = { version: string; sizeBytes: number };
 
+export type AddonApproval = { token: string; version: string; permissions: AddonPermission[] };
+
 export type ManagedAddon = {
   id: string;
   name: { en: string; de: string };
   installed: string | null;
-  status: "unsupported-os" | "unpublished" | "available" | "enabled" | "disabled" | "incompatible-api" | "verification-failed";
+  status: "unsupported-os" | "unpublished" | "available" | "enabled" | "disabled" | "incompatible-api" | "verification-failed" | "needs-reinstall";
   expectedApi: string;
   foundApi: string | null;
   permissions: AddonPermission[];
@@ -66,11 +68,12 @@ export type ManagedAddon = {
   updateFailed: boolean;
   canCheckUpdate: boolean;
   directApply: boolean;
-  activity: "idle" | "checking" | "downloading" | "installing" | "installFailed" | "updateIncompatible" | "importing" | "publishing" | "finished" | "importFailed";
+  activity: "awaitingApproval" | "idle" | "checking" | "downloading" | "installing" | "installFailed" | "updateIncompatible" | "importing" | "publishing" | "finished" | "importFailed";
+  approval: AddonApproval | null;
   progress: [number, number] | null;
 };
 
-export type AddonManager = { allowDirectApply: boolean; addons: ManagedAddon[] };
+export type AddonManager = { allowDirectApply: boolean; recovery: boolean; addons: ManagedAddon[] };
 
 export const listAddons = () => invoke<AddonManager>("addon_list");
 export const ADDON_AVAILABILITY_CHANGED = "goodtype:addon-availability-changed";
@@ -85,3 +88,6 @@ export async function removeAddon(id: string) {
 }
 export const setAddonDirectApply = (id: string | null, allowed: boolean) =>
   invoke<void>("addon_set_direct_apply", { id, allowed });
+
+export const resetAddonPolicy = () => invoke<void>("addon_reset_policy");
+export const approveAddon = (id: string, token: string) => invoke<void>("addon_approve", { id, token });

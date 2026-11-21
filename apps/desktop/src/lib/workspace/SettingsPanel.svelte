@@ -1,6 +1,7 @@
 <script lang="ts">
+  import ConfirmDialog from "./ConfirmDialog.svelte";
   import AddonManagerSheet from "./AddonManager.svelte";
-  import { listAddons, setAddonDirectApply, type AddonManager } from "../ipc/addons";
+  import { listAddons, resetAddonPolicy, setAddonDirectApply, type AddonManager } from "../ipc/addons";
   import CodexSettings from "../helper/CodexSettings.svelte";
   import HelperSetup from "../helper/HelperSetup.svelte";
   import { onMount, tick, untrack } from "svelte";
@@ -58,6 +59,7 @@
   const groups = $derived(settingGroups($t, [...new Set([...fonts, settings.inlineTextFont, selectedBlockFont].filter((font): font is string => Boolean(font)))], settings.aiHelper.enabled, addonManager, $locale));
   let addonId = $state<string>();
   let addonError = $state<"loadFailed" | "policyFailed" | null>(null);
+  let confirmReset = $state(false);
   let policyPending = $state(false);
   const managedAddon = $derived(addonManager?.addons.find(addon => addon.id === addonId));
 
@@ -71,6 +73,20 @@
       if (addonError === "loadFailed") addonError = null;
     } catch {
       if (request === addonRequest) addonError = "loadFailed";
+    }
+  }
+
+  async function resetPolicy() {
+    confirmReset = false;
+    policyPending = true;
+    addonError = null;
+    try {
+      await resetAddonPolicy();
+      await refreshAddons();
+    } catch {
+      addonError = "policyFailed";
+    } finally {
+      policyPending = false;
     }
   }
 
@@ -181,7 +197,13 @@
   {:else if item.control.kind === "addonPolicy"}
     <button type="button" role="switch" aria-checked={addonManager?.allowDirectApply ?? false}
       aria-label={item.label} class="toggle" class:on={addonManager?.allowDirectApply}
-      disabled={!addonManager || policyPending} onclick={() => void toggleAddonPolicy()}><span></span></button>
+      disabled={!addonManager || addonManager.recovery || policyPending} onclick={() => void toggleAddonPolicy()}><span></span></button>
+    {#if addonManager?.recovery}
+      <p role="alert" class="hint">{$t("addons.manager.recovery")}</p>
+      <button type="button" class="run" disabled={policyPending} onclick={() => confirmReset = true}>
+        {$t("addons.manager.resetPolicy")}
+      </button>
+    {/if}
     {#if addonError}<p role="alert" class="hint">{$t(`addons.manager.${addonError}`)}</p>{/if}
   {:else if item.control.kind === "addon"}
     {@const id = item.control.addonId}
@@ -335,6 +357,12 @@
 
 {#if managedAddon}
   <AddonManagerSheet addon={managedAddon} refresh={refreshAddons} onClose={() => addonId = undefined} />
+{/if}
+
+{#if confirmReset}
+  <ConfirmDialog title={$t("addons.manager.resetTitle")} detail={$t("addons.manager.resetDetail")}
+    confirmLabel={$t("addons.manager.resetPolicy")} onCancel={() => confirmReset = false}
+    onConfirm={() => void resetPolicy()} />
 {/if}
 
 <style>

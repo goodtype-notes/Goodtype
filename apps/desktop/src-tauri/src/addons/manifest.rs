@@ -92,6 +92,7 @@ pub(super) struct Manifest {
 #[derive(Debug, PartialEq)]
 pub(super) enum Error {
     Invalid,
+    NeedsReinstall,
     Incompatible(String),
 }
 
@@ -125,7 +126,7 @@ impl Addon {
                 pin.version == version
                     && inventory.version == version
                     && inventory.decoder_commit == pin.decoder_commit
-                    && release.is_none_or(|candidate| {
+                    && release.is_some_and(|candidate| {
                         candidate.sha256 == pin.sha256 && candidate.size == pin.size
                     })
             })
@@ -420,7 +421,7 @@ mod tests {
                 files: vec![],
             };
             assert!(load(addon, home.path(), pin.version, &inventory, Some(&pin)).is_ok());
-            assert!(load(addon, home.path(), pin.version, &inventory, None).is_ok());
+            assert!(load(addon, home.path(), pin.version, &inventory, None).is_err());
             let wrong_archive = PinnedRelease {
                 sha256: "different",
                 ..pin

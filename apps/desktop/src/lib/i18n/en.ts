@@ -1,6 +1,14 @@
 export const en = {
   addons: {
     manager: {
+      recovery: "Addon settings could not be recovered. All addons are disabled.",
+      resetPolicy: "Reset addon settings",
+      resetTitle: "Reset addon settings?",
+      resetDetail: "This clears addon preferences and leaves all addons disabled. Installed files and notebooks are kept.",
+      reinstall: "Reinstall",
+      approvalPermissions: "Permissions declared by this release",
+      approvalDetail: "Review the permissions for version {{version}} before installing it.",
+      approve: "Approve and install",
       "title": "Addons",
       "search": "addon extension plugin importer recognition permissions update install",
       "manage": "Manage",
@@ -37,6 +45,7 @@ export const en = {
       "current": "No newer verified release was found.",
       "global": "Allow addons to apply changes directly",
       "status": {
+        "needs-reinstall": "Reinstall required",
         "unsupported-os": "Windows x64 required",
         "unpublished": "No verified release published",
         "available": "Available to install",
@@ -46,6 +55,7 @@ export const en = {
         "verification-failed": "Package verification failed"
       },
       "activity": {
+        awaitingApproval: "Waiting for permission approval",
         "checking": "Checking for a verified update…",
         "downloading": "Downloading…",
         "installing": "Verifying and installing…",

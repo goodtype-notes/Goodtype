@@ -2,10 +2,10 @@
   import { t } from "../i18n";
   import type { AddonPermission } from "../ipc/addons";
 
-  let { permissions, update = false }: { permissions: AddonPermission[]; update?: boolean } = $props();
+  let { permissions, update = false, approval = false }: { permissions: AddonPermission[]; update?: boolean; approval?: boolean } = $props();
 </script>
 
-<p class="label">{$t(update ? "addons.manager.updatePermissions" : "addons.manager.permissions")}</p>
+<p class="label">{$t(approval ? "addons.manager.approvalPermissions" : update ? "addons.manager.updatePermissions" : "addons.manager.permissions")}</p>
 {#if permissions.length}
   <ul>
     {#each permissions as permission (permission)}

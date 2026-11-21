@@ -14,6 +14,7 @@
     removeMathRecognizer,
     type InkPolylines,
   } from "../ipc/recognition";
+  import AddonApproval from "../workspace/AddonApproval.svelte";
   import AddonPermissions from "../workspace/AddonPermissions.svelte";
   import ConfirmDialog from "../workspace/ConfirmDialog.svelte";
   import { ADDON_AVAILABILITY_CHANGED, mathRecognitionAddon, type RecognitionAddon } from "../ipc/addons";
@@ -93,7 +94,7 @@
         warmed = true;
         void prepareMathRecognition().catch((error) => { if (!disposed) fail(error); });
       }
-      if (found.activity.kind === "downloading" || found.activity.kind === "installing") {
+      if (["downloading", "installing", "awaitingApproval"].includes(found.activity.kind)) {
         pollTimer = setTimeout(() => void refresh(), 400);
       }
     } catch (error) {
@@ -271,6 +272,10 @@
             <span class="figure">{$t("transcription.downloadProgress", { received: megabytes(addon.activity.received), total: megabytes(addon.activity.total) })}</span>
             <button type="button" class="control" onclick={() => void cancelDownload()}>{$t("transcription.cancel")}</button>
           </div>
+        {:else if addon?.activity.kind === "awaitingApproval"}
+          {#key addon.activity.approval.token}
+            <AddonApproval id={recognizerAddon.id} approval={addon.activity.approval} {refresh} />
+          {/key}
         {:else if addon?.activity.kind === "installing"}
           <p class="lead">{$t("transcription.installingAddon")}</p>
           <div class="progress indeterminate" role="progressbar" aria-label={$t("transcription.installation")}><span></span></div>
@@ -290,7 +295,9 @@
           {#if addon?.activity.kind === "installFailed"}
             <p class="message problem" role="alert">{$t("transcription.failed", { details: addon.activity.message })}</p>
           {/if}
-          {#if addon?.installedProblem}
+          {#if addon?.needsReinstall}
+            <p class="message problem" role="alert">{$t("addons.manager.status.needs-reinstall")}</p>
+          {:else if addon?.installedProblem}
             <p class="message problem" role="alert">{$t("transcription.failed", { details: addon.installedProblem })}</p>
           {/if}
           {#if addon?.release && addon.platformSupported}

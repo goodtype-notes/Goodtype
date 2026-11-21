@@ -115,16 +115,23 @@ impl MathProcess {
         self.session.lock().unwrap().take();
     }
     pub fn prepare(&self, app: &tauri::AppHandle) -> Result<(), String> {
-        let mut slot = self.session.lock().unwrap();
-        self.ensure(app, &mut slot)
+        crate::addons::recognize::with_math_installation(app, |installation| {
+            self.ensure(&mut self.session.lock().unwrap(), installation)
+        })
     }
-    fn ensure(&self, app: &tauri::AppHandle, slot: &mut Option<Session>) -> Result<(), String> {
-        if !crate::addons::recognize::math_available(app)? {
+
+    fn ensure(
+        &self,
+        slot: &mut Option<Session>,
+        installation: Option<(std::path::PathBuf, String)>,
+    ) -> Result<(), String> {
+        let Some(generation) = installation else {
             slot.take();
             return Ok(());
-        }
+        };
         if let Some(session) = slot.as_mut()
-            && (idle(session.used.elapsed())
+            && (session.generation != generation
+                || idle(session.used.elapsed())
                 || session
                     .child
                     .try_wait()
@@ -133,10 +140,9 @@ impl MathProcess {
         {
             slot.take();
         }
-        if slot.is_none()
-            && let Some(executable) = crate::addons::recognize::math_executable(app)?
-        {
-            *slot = Some(Session::start(&executable)?);
+        if slot.is_none() {
+            let session = Session::start(&generation.0, generation.1)?;
+            *slot = Some(session);
         }
         Ok(())
     }
@@ -145,34 +151,33 @@ impl MathProcess {
         app: &tauri::AppHandle,
         selection: MathSelection,
     ) -> Result<String, String> {
-        let mut slot = self.session.lock().unwrap();
-        self.ensure(app, &mut slot)?;
-        let session = slot.as_mut().ok_or("math recognizer is not installed")?;
-        session.id = session
-            .id
-            .checked_add(1)
-            .ok_or("math request id exhausted")?;
-        let bytes = request(session.id, &selection)?;
-        let reply = session
-            .input
-            .send(bytes)
-            .map_err(|_| "math recognizer stopped".to_owned())
-            .and_then(|_| session.line(Duration::from_secs(30)))
-            .and_then(|line| response(&line, session.id));
-        session.used = Instant::now();
-        // A stopped, late or garbled helper is restarted next time; its 4 s model load is only
-        // paid again when something is actually wrong with the process.
-        if reply.is_err() {
-            slot.take();
-        }
-        if !crate::addons::recognize::math_available(app)? {
-            slot.take();
-            return Err("math recognizer was disabled or removed".into());
-        }
-        reply?
+        crate::addons::recognize::with_math_installation(app, |installation| {
+            let mut slot = self.session.lock().unwrap();
+            self.ensure(&mut slot, installation)?;
+            let session = slot.as_mut().ok_or("math recognizer is not installed")?;
+            session.id = session
+                .id
+                .checked_add(1)
+                .ok_or("math request id exhausted")?;
+            let bytes = request(session.id, &selection)?;
+            let reply = session
+                .input
+                .send(bytes)
+                .map_err(|_| "math recognizer stopped".to_owned())
+                .and_then(|_| session.line(Duration::from_secs(30)))
+                .and_then(|line| response(&line, session.id));
+            session.used = Instant::now();
+            // A stopped, late or garbled helper is restarted next time; its 4 s model load is only
+            // paid again when something is actually wrong with the process.
+            if reply.is_err() {
+                slot.take();
+            }
+            reply?
+        })
     }
 }
 struct Session {
+    generation: (std::path::PathBuf, String),
     child: Child,
     #[cfg(windows)]
     _job: crate::addons::job::Job,
@@ -193,7 +198,7 @@ impl Session {
             .recv_timeout(timeout)
             .map_err(|_| "math recognizer stopped or timed out".to_owned())?
     }
-    fn start(executable: &std::path::Path) -> Result<Self, String> {
+    fn start(executable: &std::path::Path, digest: String) -> Result<Self, String> {
         if !crate::addons::platform_supported() {
             return Err("math recognition requires Windows x64".into());
         }
@@ -240,6 +245,7 @@ impl Session {
             }
         });
         let session = Self {
+            generation: (executable.to_path_buf(), digest),
             child,
             #[cfg(windows)]
             _job: job,

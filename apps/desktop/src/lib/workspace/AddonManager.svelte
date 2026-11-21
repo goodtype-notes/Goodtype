@@ -2,6 +2,7 @@
   import { t, locale, formatNumber } from "../i18n";
   import { removeAddon, setAddonDirectApply, setAddonEnabled, type ManagedAddon } from "../ipc/addons";
   import { cancelImporter, checkImporterUpdate, installImporter, megabytes, updateImporter } from "../ipc/importer";
+  import AddonApproval from "./AddonApproval.svelte";
   import AddonPermissions from "./AddonPermissions.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import Dialog from "./Dialog.svelte";
@@ -16,7 +17,7 @@
   let confirming = $state(false);
   let problem = $state<"actionFailed" | "policyFailed" | "removeFailed" | null>(null);
   const name = $derived($locale === "de" ? addon.name.de : addon.name.en);
-  const busy = $derived(["checking", "downloading", "installing", "importing", "publishing"].includes(addon.activity));
+  const busy = $derived(["checking", "downloading", "installing", "awaitingApproval", "importing", "publishing"].includes(addon.activity));
   const release = $derived(addon.update ?? addon.release);
 
   async function run(action: (id: string) => Promise<void>, failure: typeof problem = "actionFailed") {
@@ -53,7 +54,7 @@
 
   <section>
     <AddonPermissions permissions={addon.permissions} />
-    {#if addon.update && addon.catalogPermissions.some(permission => !addon.permissions.includes(permission))}
+    {#if !addon.approval && addon.update && addon.catalogPermissions.some(permission => !addon.permissions.includes(permission))}
       <AddonPermissions permissions={addon.catalogPermissions} update />
     {/if}
     {#if addon.status === "disabled"}
@@ -90,7 +91,14 @@
     <p role="status" class="hint">{$t("addons.manager.current")}</p>
   {/if}
 
+  {#if addon.approval}
+    {#key addon.approval.token}
+      <AddonApproval id={addon.id} approval={addon.approval} {refresh} />
+    {/key}
+  {/if}
+
   {#snippet actions()}
+    {#if !addon.approval}
     {#if addon.activity === "downloading" || addon.activity === "importing"}
       <button class="control" disabled={pending} onclick={() => void run(cancelImporter)}>{$t("library.cancel")}</button>
       {#if addon.activity === "importing" && addon.status === "enabled"}
@@ -107,8 +115,8 @@
         {/if}
         {#if addon.update}
           <button class="primary" disabled={busy || pending} onclick={() => void run(updateImporter)}>{$t("addons.manager.update")}</button>
-        {:else if addon.status === "available" && addon.release}
-          <button class="primary" disabled={busy || pending} onclick={() => void run(installImporter)}>{$t("addons.manager.install")}</button>
+        {:else if (addon.status === "available" || addon.status === "needs-reinstall") && addon.release}
+          <button class="primary" disabled={busy || pending} onclick={() => void run(installImporter)}>{$t(addon.status === "needs-reinstall" ? "addons.manager.reinstall" : "addons.manager.install")}</button>
         {/if}
         {#if addon.status === "enabled" || addon.status === "disabled"}
           <button class="control" disabled={busy || pending} onclick={() => void run(id => setAddonEnabled(id, addon.status === "disabled"))}>
@@ -116,6 +124,7 @@
           </button>
         {/if}
       {/if}
+    {/if}
     {/if}
   {/snippet}
 </Dialog>

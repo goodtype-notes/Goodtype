@@ -1008,3 +1008,148 @@ fn lifecycle_cancels_and_joins_imports_but_cannot_interrupt_publication() {
         Some(Activity::Publishing)
     ));
 }
+
+#[test]
+fn candidate_permissions_are_checked_before_probe_and_cancellation_discards_staging() {
+    let home = tempfile::tempdir().unwrap();
+    let dir = InstallDir(home.path().to_path_buf(), &GOODNOTES);
+    let bytes = package(&GOODNOTES, VERSION, false, None);
+    let archive = home.path().join("candidate.zip");
+    fs::write(&archive, &bytes).unwrap();
+    let result = install_with_policy(
+        &dir,
+        &archive,
+        &pin(&GOODNOTES, &bytes),
+        &|_| panic!("candidate ran without approval"),
+        |declaration| {
+            assert_eq!(declaration.permissions, GOODNOTES.permissions());
+            Err(CANCELLED.into())
+        },
+        |_| panic!("candidate activated without approval"),
+    );
+    assert_eq!(result.unwrap_err(), CANCELLED);
+    assert!(dir.active().is_none());
+    assert!(
+        fs::read_dir(home.path())
+            .unwrap()
+            .flatten()
+            .all(|entry| { !entry.file_name().to_string_lossy().starts_with("staging-") })
+    );
+}
+
+#[test]
+fn legacy_fallback_requires_host_provenance_matching_the_pin_and_inventory() {
+    let exe = b"test helper";
+    let executable = GOODNOTES.executable();
+    let top = package_folder(&GOODNOTES, VERSION);
+    let inventory = serde_json::json!({
+        "version": VERSION, "protocolVersion": 1, "notebookSchemaVersion": goodtype_core::BINARY_INK_SCHEMA_VERSION,
+        "target": TARGET, "decoderCommit": "abc",
+        "files": [{"path": executable, "sizeBytes": exe.len(), "sha256": sha(exe)}]
+    })
+    .to_string();
+    let bytes = zip_bytes(&[
+        (&format!("{top}/{executable}"), exe),
+        (&format!("{top}/{PACKAGE_MANIFEST}"), inventory.as_bytes()),
+    ]);
+    let release = pin(&GOODNOTES, &bytes);
+    let addon = Box::leak(Box::new(Addon {
+        pinned: Some(release),
+        legacy: Some(VERSION),
+        id: GOODNOTES.id,
+        name: GOODNOTES.name,
+        package: GOODNOTES.package,
+        repository: GOODNOTES.repository,
+        public_key: GOODNOTES.public_key,
+        i18n_prefix: GOODNOTES.i18n_prefix,
+        en: GOODNOTES.en,
+        de: GOODNOTES.de,
+        kind: Kind::Import {
+            filter: "fixture",
+            extensions: &["zip"],
+            batch: "fixture",
+            artwork: false,
+        },
+    }));
+    let home = tempfile::tempdir().unwrap();
+    let dir = InstallDir(home.path().to_path_buf(), addon);
+    let archive = home.path().join("legacy.zip");
+    fs::write(&archive, &bytes).unwrap();
+    install_archive(&dir, &archive, &release, &|_| {
+        let mut version = good_probe(addon)?;
+        version.notebook_schema_version = goodtype_core::BINARY_INK_SCHEMA_VERSION;
+        Ok(version)
+    })
+    .unwrap();
+    let (_, path) = dir.active().unwrap();
+    assert!(manager::installed(addon, &path, VERSION, true).is_ok());
+
+    let marker = path.join(PROVENANCE);
+    let original = fs::read(&marker).unwrap();
+    fs::remove_file(&marker).unwrap();
+    assert_eq!(
+        manager::installed(addon, &path, VERSION, false).err(),
+        Some(manifest::Error::NeedsReinstall)
+    );
+    let mut forged: Provenance = serde_json::from_slice(&original).unwrap();
+    forged.archive_sha256 = "0".repeat(64);
+    crate::store::write_json(&marker, &forged, 4096).unwrap();
+    assert_eq!(
+        manager::installed(addon, &path, VERSION, false).err(),
+        Some(manifest::Error::NeedsReinstall)
+    );
+    fs::write(&marker, original).unwrap();
+    fs::write(path.join(PACKAGE_MANIFEST), format!("{inventory} ")).unwrap();
+    assert_eq!(
+        manager::installed(addon, &path, VERSION, true).err(),
+        Some(manifest::Error::NeedsReinstall)
+    );
+}
+
+#[test]
+fn recognition_dispatch_holds_the_lifecycle_reservation_and_detects_replaced_inventory() {
+    let job = Importer::default();
+    let dispatch = job.lock_idle().unwrap();
+    assert!(job.state.try_lock().is_err());
+    drop(dispatch);
+    job.stop_import_and_reserve().unwrap();
+    assert!(job.lock_idle().is_none());
+
+    let home = tempfile::tempdir().unwrap();
+    let inventory = home.path().join(PACKAGE_MANIFEST);
+    fs::write(&inventory, b"previous inventory").unwrap();
+    let before = installation_digest(home.path()).unwrap();
+    fs::write(&inventory, b"new inventory, same location").unwrap();
+    assert_ne!(before, installation_digest(home.path()).unwrap());
+}
+
+#[test]
+fn dismiss_leaves_pending_or_reserved_jobs_intact() {
+    let mut state = State::default();
+    for activity in [
+        Activity::AwaitingApproval {
+            approval: Approval {
+                token: "token".into(),
+                version: VERSION.into(),
+                permissions: vec![],
+            },
+        },
+        Activity::Publishing,
+    ] {
+        state.activity = Some(activity);
+        state.dismiss();
+        assert!(state.busy());
+    }
+    state.activity = Some(Activity::InstallFailed {
+        message: "failed".into(),
+    });
+    state.stopping_import = true;
+    state.dismiss();
+    assert!(matches!(
+        state.activity,
+        Some(Activity::InstallFailed { .. })
+    ));
+    state.stopping_import = false;
+    state.dismiss();
+    assert!(matches!(state.activity, Some(Activity::Idle)));
+}

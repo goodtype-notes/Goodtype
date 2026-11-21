@@ -274,6 +274,22 @@ MUST NOT extend deadlines. A warm process MUST be restricted to one verified
 version and authorization context. End it on disable, remove, update, shutdown
 or a change of notebook or grant.
 
+## Installation security notes
+
+The host checks the archive against the built-in pin or verified release
+descriptor and verifies the staged inventory and manifest before running a
+probe. A first install or a changed capability scope pauses for approval of the
+candidate's declared permissions. Cancel or restart discards the candidate.
+
+Legacy packages without an addon manifest are eligible only when a host-written
+provenance record binds their inventory digest to the catalog's exact archive
+pin. Earlier installations without this record require reinstalling. A
+same-user process able to rewrite app-local data is outside the threat model.
+
+Addon policy is stored with an atomic last-good backup. If neither existing copy
+is readable, addon execution remains disabled until the user confirms resetting
+the preferences.
+
 ## Legacy importer CLI adapter
 
 **Implemented (existing adapter, retained in Step 1).** The Goodnotes and

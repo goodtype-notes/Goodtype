@@ -106,9 +106,9 @@ describe("bundled English and German interface", () => {
       permissions: ["picked-import-file"], catalogPermissions: ["picked-import-file"],
       formats: ["one"], memoryBytes: 1024, timeoutSeconds: 30, outputBytes: 1024,
       release: null, update: null, updateChecked: false, updateFailed: false,
-      canCheckUpdate: true, directApply: false, activity: "idle", progress: null,
+      canCheckUpdate: true, directApply: false, activity: "idle", approval: null, progress: null,
     };
-    const manager = { allowDirectApply: false, addons: [addon] };
+    const manager = { allowDirectApply: false, recovery: false, addons: [addon] };
     for (const language of ["en", "de"] as const) {
       setLanguage(language);
       const groups = settingGroups(get(t), [], false, manager, language);
