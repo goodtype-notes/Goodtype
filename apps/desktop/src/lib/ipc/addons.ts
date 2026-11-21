@@ -73,7 +73,15 @@ export type ManagedAddon = {
 export type AddonManager = { allowDirectApply: boolean; addons: ManagedAddon[] };
 
 export const listAddons = () => invoke<AddonManager>("addon_list");
-export const setAddonEnabled = (id: string, enabled: boolean) => invoke<void>("addon_set_enabled", { id, enabled });
-export const removeAddon = (id: string) => invoke<void>("addon_remove", { id });
+export const ADDON_AVAILABILITY_CHANGED = "goodtype:addon-availability-changed";
+export async function setAddonEnabled(id: string, enabled: boolean) {
+  await invoke<void>("addon_set_enabled", { id, enabled });
+  window.dispatchEvent(new Event(ADDON_AVAILABILITY_CHANGED));
+}
+
+export async function removeAddon(id: string) {
+  await invoke<void>("addon_remove", { id });
+  window.dispatchEvent(new Event(ADDON_AVAILABILITY_CHANGED));
+}
 export const setAddonDirectApply = (id: string | null, allowed: boolean) =>
   invoke<void>("addon_set_direct_apply", { id, allowed });

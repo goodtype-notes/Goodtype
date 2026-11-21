@@ -2,7 +2,7 @@ import { get } from "svelte/store";
 import { locale } from "../i18n";
 import { translate, formatNumber } from "../i18n";
 import { invoke } from "@tauri-apps/api/core";
-import { importAddons } from "./addons";
+import { importAddons, type AddonPermission } from "./addons";
 
 // The optional import addons (ADR 0029, 0032, 0045). Rust owns the download, the
 // installation, the source path and the process; this side only asks and shows.
@@ -46,6 +46,7 @@ export type ImporterStatus = {
   release: { version: string; sizeBytes: number } | null;
   installed: string | null;
   disabled: boolean;
+  catalogPermissions: AddonPermission[];
   installedProblem: string | null;
   source: { name: string; sizeBytes: number } | null;
   activity: ImporterActivity;

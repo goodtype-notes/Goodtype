@@ -14,7 +14,9 @@
     removeMathRecognizer,
     type InkPolylines,
   } from "../ipc/recognition";
-  import { mathRecognitionAddon, type RecognitionAddon } from "../ipc/addons";
+  import AddonPermissions from "../workspace/AddonPermissions.svelte";
+  import ConfirmDialog from "../workspace/ConfirmDialog.svelte";
+  import { ADDON_AVAILABILITY_CHANGED, mathRecognitionAddon, type RecognitionAddon } from "../ipc/addons";
   import { cancelImporter, importerStatus, installImporter, megabytes, type ImporterStatus } from "../ipc/importer";
   import type { Bounds } from "../ink/selection";
   import { editDistance, transcriptionSource, type TranscriptionKind } from "./transcription";
@@ -36,6 +38,7 @@
 
   let addon = $state<ImporterStatus | null>(null);
   let addonBusy = $state(false);
+  let confirmingRemoval = $state(false);
   let kind = $state<TranscriptionKind | null>(null);
   let busy = $state(false);
   /** A status line; `problem` ones are failures the writer has to act on. */
@@ -78,6 +81,13 @@
       const found = await importerStatus(entry.id);
       if (disposed) return;
       addon = found;
+      if (found.disabled && kind === "math") {
+        request++;
+        kind = null;
+        message = null;
+        busy = false;
+        warmed = false;
+      }
       if (found.installed && !warmed) {
         // Load the model now, while the writer is still deciding, not when they press Math.
         warmed = true;
@@ -95,7 +105,13 @@
     addon = math;
     void refresh();
     firstChoice?.focus();
-    return () => { disposed = true; clearTimeout(pollTimer); request++; };
+    window.addEventListener(ADDON_AVAILABILITY_CHANGED, refresh);
+    return () => {
+      disposed = true;
+      clearTimeout(pollTimer);
+      request++;
+      window.removeEventListener(ADDON_AVAILABILITY_CHANGED, refresh);
+    };
   });
 
   async function download() {
@@ -260,6 +276,9 @@
           <div class="progress indeterminate" role="progressbar" aria-label={$t("transcription.installation")}><span></span></div>
         {:else}
           <p class="lead">{$t(`${recognizerAddon.i18nPrefix}.description`)}</p>
+          {#if addon?.release}
+            <AddonPermissions permissions={addon.catalogPermissions} />
+          {/if}
           <dl class="facts">
             <dt>{$t("transcription.factSource")}</dt>
             <dd>{addon?.release ? $t("transcription.factSourceRelease", { size: megabytes(addon.release.sizeBytes) }) : $t("transcription.factSourceNone")}</dd>
@@ -301,7 +320,7 @@
       <details class="addon">
         <summary>{$t("transcription.addonInstalled", { version: addon.installed })}</summary>
         <p class="hint">{$t("transcription.addonDetail")}</p>
-        <button type="button" class="control" disabled={addonBusy || busy} onclick={() => void removeAddon()}>{$t("transcription.removeAddon")}</button>
+        <button type="button" class="control" disabled={addonBusy || busy} onclick={() => confirmingRemoval = true}>{$t("transcription.removeAddon")}</button>
       </details>
     {/if}
   </div>
@@ -311,6 +330,13 @@
     <button type="button" class="primary" disabled={!kind || busy || offering || !value.trim()} onclick={insert}>{$t("transcription.insert")}</button>
   </footer>
 </div>
+
+{#if confirmingRemoval && recognizerAddon}
+  <ConfirmDialog title={$t("addons.manager.confirmTitle", { name: $t(`${recognizerAddon.i18nPrefix}.label`) })}
+    detail={$t("addons.manager.confirmDetail")} confirmLabel={$t("addons.manager.remove")}
+    onCancel={() => confirmingRemoval = false}
+    onConfirm={() => { confirmingRemoval = false; void removeAddon(); }} />
+{/if}
 
 <style>
   .transcription {

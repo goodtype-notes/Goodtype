@@ -1,4 +1,6 @@
 <script lang="ts">
+  import AddonPermissions from "../workspace/AddonPermissions.svelte";
+  import { ADDON_AVAILABILITY_CHANGED } from "../ipc/addons";
   import { t } from "../i18n";
   import { onDestroy, onMount, tick } from "svelte";
   import Dialog from "../workspace/Dialog.svelte";
@@ -114,6 +116,8 @@
   onMount(() => {
     void refresh();
     void tick().then(() => tabs[tool]?.focus());
+    window.addEventListener(ADDON_AVAILABILITY_CHANGED, refresh);
+    return () => window.removeEventListener(ADDON_AVAILABILITY_CHANGED, refresh);
   });
 
   onDestroy(() => {
@@ -370,6 +374,9 @@
         <dt>{$t("library.afterDownload")}</dt>
         <dd>{$t("library.importWorksOfflineImportedNotebooksDoNot")}</dd>
       </dl>
+      {#if downloadRelease}
+        <AddonPermissions permissions={status.catalogPermissions} />
+      {/if}
       {#if status.installedProblem}
         <p class="problem" role="alert">{$t("library.theInstalledImporterCannotBeUsed", { "installedProblem": status.installedProblem })}</p>
       {/if}
@@ -397,6 +404,7 @@
     {:else}
       <div class="updates">
         {#if status.update}
+          <AddonPermissions permissions={status.catalogPermissions} update />
           <div class="row">
             <span class="hint">{$t("library.versionAvailable", { "version": status.update.version, "value4": megabytes(status.update.sizeBytes) })}</span>
             <button type="button" class="primary" disabled={checking} onclick={update}>{$t("library.update")}</button>

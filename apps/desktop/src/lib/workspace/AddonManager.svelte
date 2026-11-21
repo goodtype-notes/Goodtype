@@ -2,6 +2,7 @@
   import { t, locale, formatNumber } from "../i18n";
   import { removeAddon, setAddonDirectApply, setAddonEnabled, type ManagedAddon } from "../ipc/addons";
   import { cancelImporter, checkImporterUpdate, installImporter, megabytes, updateImporter } from "../ipc/importer";
+  import AddonPermissions from "./AddonPermissions.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import Dialog from "./Dialog.svelte";
 
@@ -51,23 +52,9 @@
   </dl>
 
   <section>
-    <h3>{$t("addons.manager.permissions")}</h3>
-    {#if addon.permissions.length}
-      <ul>
-        {#each addon.permissions as permission (permission)}
-          <li>{$t(`addons.manager.permission.${permission}`)}</li>
-        {/each}
-      </ul>
-    {:else}
-      <p class="hint">{$t("addons.manager.noPermissions")}</p>
-    {/if}
+    <AddonPermissions permissions={addon.permissions} />
     {#if addon.update && addon.catalogPermissions.some(permission => !addon.permissions.includes(permission))}
-      <h3>{$t("addons.manager.updatePermissions")}</h3>
-      <ul>
-        {#each addon.catalogPermissions as permission (permission)}
-          <li>{$t(`addons.manager.permission.${permission}`)}</li>
-        {/each}
-      </ul>
+      <AddonPermissions permissions={addon.catalogPermissions} update />
     {/if}
     {#if addon.status === "disabled"}
       <p class="hint">{$t("addons.manager.reviewPermissions")}</p>
@@ -106,6 +93,10 @@
   {#snippet actions()}
     {#if addon.activity === "downloading" || addon.activity === "importing"}
       <button class="control" disabled={pending} onclick={() => void run(cancelImporter)}>{$t("library.cancel")}</button>
+      {#if addon.activity === "importing" && addon.status === "enabled"}
+        <button class="control" disabled={pending} onclick={() => void run(id => setAddonEnabled(id, false))}>{$t("addons.manager.disable")}</button>
+        <button class="danger" disabled={pending} onclick={() => confirming = true}>{$t("addons.manager.remove")}</button>
+      {/if}
     {:else}
       {#if addon.installed}
         <button class="danger" disabled={busy || pending} onclick={() => confirming = true}>{$t("addons.manager.remove")}</button>
@@ -136,8 +127,6 @@
 {/if}
 
 <style>
-  h3 { font: inherit; font-weight: 600; margin: 0 0 6px; }
-  ul { padding-inline-start: 20px; margin: 0 0 8px; line-height: 1.5; }
   .direct { display: flex; align-items: center; gap: 8px; }
   progress { width: 100%; accent-color: var(--blueprint); }
 </style>
