@@ -84,6 +84,10 @@ unique and the default MUST equal one of them. Settings values MUST NOT
 denote paths, commands or secrets. The manifest supplies no launch arguments
 or environment.
 
+In `goodtype-api 0.1` settings descriptors are reserved: a host MUST reject a
+manifest whose `settings` array is not empty. A later beta API version enables
+them together with host rendering (rollout Step 4).
+
 Illustrative manifest for a future repackaged OneNote release.
 
 ```json
