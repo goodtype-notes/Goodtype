@@ -1,0 +1,38 @@
+{
+  "addons": [
+    {
+      "id": "goodnotes",
+      "publicKey": "428cc68f6d0b38eae74dcb211e4877c6eb51548daabf24de64a185885c825b3c",
+      "repository": "/Just8it/Goodtype-Goodnodes-importer",
+      "versions": [
+        {
+          "api": "goodtype-api 0.1",
+          "sha256": "ef8bfd150626eab885cf1479131e5945fcfd2a9da4152aab3a03311507db5742",
+          "size": 14881982,
+          "target": "x86_64-pc-windows-msvc",
+          "url": "https://github.com/Just8it/Goodtype-Goodnodes-importer/releases/download/v0.1.1/goodtype-goodnotes-importer-0.1.1-windows-x64.zip",
+          "version": "0.1.1"
+        }
+      ]
+    },
+    {
+      "id": "onenote",
+      "publicKey": "73bce698801a59fe2d423fd9c6dba8687fe3b92f60bb9f27499e7242c2336c3b",
+      "repository": "/Just8it/Goodtype-OneNote-Importer",
+      "versions": [
+        {
+          "api": "goodtype-api 0.1",
+          "sha256": "a09f7899eef1280819a7da0b12e1355a76e2a71c774e738b0945e07bac9a63dc",
+          "size": 1927930,
+          "target": "x86_64-pc-windows-msvc",
+          "url": "https://github.com/Just8it/Goodtype-OneNote-Importer/releases/download/v0.1.0/goodtype-onenote-importer-0.1.0-windows-x64.zip",
+          "version": "0.1.0"
+        }
+      ]
+    }
+  ],
+  "expires": "2027-03-21T11:36:11Z",
+  "format": 1,
+  "issued": "2026-11-21T11:36:11Z",
+  "sequence": 1
+}

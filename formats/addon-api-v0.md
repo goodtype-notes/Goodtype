@@ -149,7 +149,7 @@ accurately disclose which boundary applies.
 
 ## Registry index format 1
 
-**Specified (Step 2b).** The first-party GitHub registry publishes `index.json`
+**Implemented (Step 2b).** The first-party GitHub registry publishes `index.json`
 and its detached `index.json.sig`. The index MUST be at most 1 MiB. The host
 MUST verify the raw 64-byte Ed25519 signature over the exact index bytes with
 the embedded registry key before parsing UTF-8 JSON. Unknown fields, duplicate
@@ -201,9 +201,13 @@ the addon's signed descriptor and manifest conformance.
 The bundled signed snapshot seeds the rollback floor and provides first-launch
 and offline metadata. The host MUST persist the highest accepted sequence and
 reject lower sequences and expired indexes. Cached index data and check state
-belong in app-local data. Failed checks and expiration MUST leave installed
+belong in app-local data. The cache atomically stores the sequence, last
+successful check (Unix seconds), and base64-encoded signed bytes and signature.
+Failed checks and expiration MUST leave installed
 addons usable offline. Fetch from the fixed registry GitHub Releases endpoint.
-Redirects MUST use HTTPS and the existing release asset host allowlist
+Redirects MUST use HTTPS. GitHub's latest endpoint may redirect to the same
+asset under a tag in the registry repository. Other redirects MUST use the
+existing release asset host allowlist
 (`objects.githubusercontent.com`, `release-assets.githubusercontent.com`,
 `github-releases.githubusercontent.com`), with at most five redirects.
 
@@ -328,3 +332,8 @@ can retain valid completed results after cancellation.
 | `goodtype-api 0.1` | Initial beta specification for manifest v1, index format 1 and draft session v0. Documents the retained CLI adapter. | Initial version. |
 
 Step 2 implemented strict manifest validation, exact legacy declarations, and the local Addons manager without changing the 0.1 wire contract.
+
+Step 2b implemented signed GitHub registry discovery, a bundled offline snapshot,
+local rollback protection and optional automatic checks. Installs from the index
+verify the archive against the index and the addon's independently signed
+descriptor before package validation.

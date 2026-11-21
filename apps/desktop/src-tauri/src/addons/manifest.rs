@@ -104,7 +104,7 @@ pub(super) fn release_version(version: &str) -> bool {
             .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
-fn identifier(value: &str) -> bool {
+pub(super) fn identifier(value: &str) -> bool {
     value.len() <= 48
         && value.split('-').all(|part| {
             !part.is_empty()

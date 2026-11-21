@@ -304,6 +304,40 @@ fn activation_failure_restores_same_version_and_success_cleans_inactive_versions
 }
 
 #[test]
+fn a_verified_update_retains_the_previous_release_for_local_rollback() {
+    let home = tempfile::tempdir().unwrap();
+    let tool = &GOODNOTES;
+    let dir = InstallDir(home.path().to_path_buf(), tool);
+    let archive = home.path().join("package.zip");
+    for version in ["9.9.8", VERSION] {
+        let bytes = package(tool, version, false, None);
+        fs::write(&archive, &bytes).unwrap();
+        install_archive(
+            &dir,
+            &archive,
+            &PinnedRelease {
+                version,
+                ..pin(tool, &bytes)
+            },
+            &|_| {
+                Ok(ToolVersion {
+                    version: version.into(),
+                    ..good_probe(tool)?
+                })
+            },
+        )
+        .unwrap();
+    }
+    assert_eq!(dir.active().unwrap().0, VERSION);
+    let (previous, path) = dir.previous().unwrap();
+    assert_eq!(previous, "9.9.8");
+    manager::installed(tool, &path, &previous, true).unwrap();
+    dir.activate(&previous).unwrap();
+    assert_eq!(dir.active().unwrap().0, previous);
+    assert_eq!(dir.previous().unwrap().0, VERSION);
+}
+
+#[test]
 fn python_caches_are_cleared_but_other_additions_still_fail() {
     let home = tempfile::tempdir().unwrap();
     let dir = InstallDir(home.path().to_path_buf(), &GOODNOTES);

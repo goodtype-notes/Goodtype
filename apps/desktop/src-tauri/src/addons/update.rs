@@ -5,8 +5,7 @@ use ed25519_dalek::{Signature, VerifyingKey};
 use serde::Deserialize;
 
 use super::{
-    Addon, MAX_PACKAGE_BYTES, PROTOCOL_VERSION, PinnedRelease, ReleaseView, SCHEMA_VERSION, TARGET,
-    github_asset,
+    Addon, MAX_PACKAGE_BYTES, PROTOCOL_VERSION, PinnedRelease, SCHEMA_VERSION, TARGET, github_asset,
 };
 
 const MAX_DESCRIPTOR: u64 = 64 * 1024;
@@ -28,13 +27,6 @@ impl VerifiedUpdate {
             url: &self.url,
             sha256: &self.sha256,
             decoder_commit: &self.decoder_commit,
-        }
-    }
-
-    pub fn view(&self) -> ReleaseView {
-        ReleaseView {
-            version: self.version.clone(),
-            size_bytes: self.size,
         }
     }
 }
@@ -81,15 +73,30 @@ fn stable_version(version: &str) -> Result<[u32; 3], String> {
         .map_err(|_| "not a three-part importer version".into())
 }
 
-pub(super) fn require_newer(version: &str, installed: &str) -> Result<(), String> {
+#[cfg(test)]
+fn require_newer(version: &str, installed: &str) -> Result<(), String> {
     if stable_version(version)? <= stable_version(installed)? {
         return Err("a newer or equal importer version is already installed".into());
     }
     Ok(())
 }
 
-fn is_hash(value: &str, length: usize) -> bool {
+pub(super) fn is_hash(value: &str, length: usize) -> bool {
     value.len() == length && value.bytes().all(|c| c.is_ascii_hexdigit())
+}
+
+pub(super) fn verify_signature(
+    bytes: &[u8],
+    signature: &[u8],
+    key: &[u8; 32],
+) -> Result<(), String> {
+    VerifyingKey::from_bytes(key)
+        .map_err(|_| "invalid release verification key")?
+        .verify_strict(
+            bytes,
+            &Signature::from_slice(signature).map_err(|_| "invalid release signature length")?,
+        )
+        .map_err(|_| "invalid release signature".into())
 }
 
 /// Authenticates `bytes` with `key` and checks they describe a compatible, clean, stable release
@@ -103,13 +110,7 @@ fn verify(
     if bytes.len() as u64 > MAX_DESCRIPTOR {
         return Err("importer update metadata is too large".into());
     }
-    VerifyingKey::from_bytes(key)
-        .map_err(|_| "invalid importer verification key")?
-        .verify_strict(
-            bytes,
-            &Signature::from_slice(signature).map_err(|_| "invalid importer signature length")?,
-        )
-        .map_err(|_| "the importer update signature is invalid; the installed version was kept")?;
+    verify_signature(bytes, signature, key)?;
     let descriptor: Descriptor = serde_json::from_slice(bytes)
         .map_err(|error| format!("invalid importer update metadata ({error})"))?;
     stable_version(&descriptor.version)?;
@@ -144,9 +145,13 @@ fn verify(
     })
 }
 
-fn fetch(tool: &Addon, url: &str, limit: u64) -> Result<Vec<u8>, String> {
+pub(super) fn fetch(
+    url: &str,
+    limit: u64,
+    allowed: impl Fn(&str, bool) -> bool,
+) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
-    github_asset(tool, url, true)?
+    github_asset(url, allowed)?
         .into_reader()
         .take(limit + 1)
         .read_to_end(&mut bytes)
@@ -157,37 +162,35 @@ fn fetch(tool: &Addon, url: &str, limit: u64) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-pub(super) fn check(
+pub(super) fn descriptor_for(
     tool: &Addon,
-    installed: Option<&str>,
-) -> Result<Option<VerifiedUpdate>, String> {
-    let bytes = fetch(tool, &tool.latest_descriptor(), MAX_DESCRIPTOR)?;
-    // This untrusted version is used only to form a fixed-repository signature URL.
-    let untrusted: Descriptor =
-        serde_json::from_slice(&bytes).map_err(|_| "malformed importer release descriptor")?;
-    stable_version(&untrusted.version)?;
-    let signature = fetch(
-        tool,
-        &format!(
-            "{}/v{}/importer-update.json.sig",
-            tool.release_url(),
-            untrusted.version
-        ),
-        64,
+    release: &super::registry::Release,
+) -> Result<VerifiedUpdate, String> {
+    let (folder, _) = release
+        .url
+        .rsplit_once('/')
+        .ok_or("invalid addon asset URL")?;
+    let allowed = |url: &str, redirected| super::download_url_allowed(tool, url, redirected);
+    let bytes = fetch(
+        &format!("{folder}/importer-update.json"),
+        MAX_DESCRIPTOR,
+        allowed,
     )?;
+    let signature = fetch(&format!("{folder}/importer-update.json.sig"), 64, allowed)?;
     let verified = verify(
         tool,
         &bytes,
         &signature,
         &tool.public_key.ok_or("no signed update key is available")?,
     )?;
-    if let Some(version) = installed.or_else(|| tool.pinned.as_ref().map(|pin| pin.version)) {
-        let ordering = stable_version(&verified.version)?.cmp(&stable_version(version)?);
-        if !ordering.is_gt() {
-            return Ok(None);
-        }
+    if verified.version != release.version
+        || verified.url != release.url
+        || verified.size != release.size
+        || !verified.sha256.eq_ignore_ascii_case(&release.sha256)
+    {
+        return Err("signed addon descriptor differs from its index entry".into());
     }
-    Ok(Some(verified))
+    Ok(verified)
 }
 
 #[cfg(test)]
@@ -286,22 +289,6 @@ mod tests {
             Ok("onenote") => &ONENOTE,
             _ => &GOODNOTES,
         }
-    }
-
-    /// `IMPORTER_TOOL=onenote|goodnotes cargo test live_update -- --ignored --nocapture`
-    #[test]
-    #[ignore = "explicit live GitHub update discovery check"]
-    fn live_update_check_authenticates_the_published_stable_release() {
-        let tool = tool_from_env();
-        let release = check(tool, Some("0.0.0"))
-            .unwrap()
-            .expect("a signed stable release");
-        require_newer(&release.version, "0.0.0").unwrap();
-        assert!(release.url.starts_with(&tool.release_url()));
-        println!(
-            "Live update discovery authenticated {} importer {} ({} bytes).",
-            tool.id, release.version, release.size
-        );
     }
 
     /// `IMPORTER_TOOL=onenote|goodnotes IMPORTER_UPDATE_FIXTURE=<downloaded release assets>`

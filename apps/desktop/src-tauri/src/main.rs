@@ -26,6 +26,7 @@ fn main() {
         .manage(helper::Helper::default())
         .manage(tinymist::Tinymist::default())
         .manage(addons::Importers::default())
+        .manage(addons::registry::Checks::default())
         .manage(recognition::math_process::MathProcess::default())
         .setup(|app| {
             let handle = app.handle().clone();
@@ -90,8 +91,11 @@ fn main() {
             addons::manager::addon_list,
             addons::manager::addon_approve,
             addons::manager::addon_reset_policy,
+            addons::manager::addon_set_auto_check,
+            addons::registry::addon_check_registry,
             addons::manager::addon_set_enabled,
             addons::manager::addon_remove,
+            addons::manager::addon_rollback,
             addons::manager::addon_set_direct_apply,
             addons::importer_status,
             addons::importer_install,

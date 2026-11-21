@@ -26,6 +26,7 @@ pub(crate) mod import;
 pub(crate) mod manager;
 mod manifest;
 pub(crate) mod recognize;
+pub(crate) mod registry;
 mod update;
 
 use catalog::CATALOG;
@@ -137,14 +138,6 @@ impl Addon {
             self.release_path().trim_end_matches('/')
         )
     }
-
-    /// The fixed latest-release update descriptor, only ever read by an explicit update check.
-    fn latest_descriptor(&self) -> String {
-        format!(
-            "https://github.com{}/releases/latest/download/importer-update.json",
-            self.repository
-        )
-    }
 }
 
 const PROTOCOL_VERSION: u64 = 1;
@@ -212,17 +205,11 @@ fn https_agent() -> Result<ureq::Agent, String> {
         .build())
 }
 
-fn github_asset(
-    tool: &Addon,
-    url: &str,
-    allow_update_pointer: bool,
-) -> Result<ureq::Response, String> {
+fn github_asset(url: &str, allowed: impl Fn(&str, bool) -> bool) -> Result<ureq::Response, String> {
     let agent = https_agent()?;
     let mut url = url.to_owned();
     for redirects in 0..=MAX_REDIRECTS {
-        if !(download_url_allowed(tool, &url, redirects > 0)
-            || allow_update_pointer && url == tool.latest_descriptor())
-        {
+        if !allowed(&url, redirects > 0) {
             return Err("refused an unexpected importer release URL".into());
         }
         let response = agent
@@ -253,7 +240,9 @@ fn download(
         return Err("the pinned importer package size is out of range".into());
     }
     let started = Instant::now();
-    let response = github_asset(tool, release.url, false)?;
+    let response = github_asset(release.url, |url, redirected| {
+        download_url_allowed(tool, url, redirected)
+    })?;
     if let Some(length) = response
         .header("content-length")
         .and_then(|value| value.parse::<u64>().ok())
@@ -625,6 +614,8 @@ pub fn check_contract(
 #[derive(Debug, Deserialize, Serialize)]
 struct Active {
     version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    previous: Option<String>,
 }
 
 /// `<app-local-data>/<tool>-importer`: `versions/<version>/`, `active.json`, and transient
@@ -647,19 +638,41 @@ impl InstallDir {
         Ok(self.versions().join(version))
     }
 
-    /// The installed version that `active.json` names, if its folder still holds the tool.
-    pub fn active(&self) -> Option<(String, PathBuf)> {
-        let bytes = read_bounded(&self.0.join("active.json"), 4096).ok()?;
-        let active: Active = serde_json::from_slice(&bytes).ok()?;
-        let dir = self.version_dir(&active.version).ok()?;
+    fn pointer(&self) -> Option<Active> {
+        serde_json::from_slice(&read_bounded(&self.0.join("active.json"), 4096).ok()?).ok()
+    }
+
+    fn installed_version(&self, version: String) -> Option<(String, PathBuf)> {
+        let dir = self.version_dir(&version).ok()?;
         dir.join(self.1.executable())
             .is_file()
-            .then_some((active.version, dir))
+            .then_some((version, dir))
+    }
+
+    /// The installed version that the pointer names, if its folder still holds the tool.
+    pub fn active(&self) -> Option<(String, PathBuf)> {
+        self.installed_version(self.pointer()?.version)
+    }
+
+    fn previous(&self) -> Option<(String, PathBuf)> {
+        let pointer = self.pointer()?;
+        let previous = pointer
+            .previous
+            .filter(|previous| previous != &pointer.version)?;
+        self.installed_version(previous)
     }
 
     fn activate(&self, version: &str) -> Result<(), String> {
+        let previous = self.pointer().and_then(|pointer| {
+            if pointer.version == version {
+                pointer.previous
+            } else {
+                Some(pointer.version)
+            }
+        });
         let bytes = serde_json::to_vec(&Active {
             version: version.to_owned(),
+            previous,
         })
         .map_err(|error| error.to_string())?;
         crate::store::write_atomic(&self.0.join("active.json"), &bytes)
@@ -796,7 +809,11 @@ fn install_with_policy(
         if let Some(previous) = retired {
             let _ = fs::remove_dir_all(previous);
         }
-        prune_versions(dir, release.version);
+        prune_versions(
+            dir,
+            release.version,
+            dir.previous().as_ref().map(|(version, _)| version.as_str()),
+        );
     }
     if staging.exists() {
         let _ = fs::remove_dir_all(&staging);
@@ -805,7 +822,7 @@ fn install_with_policy(
 }
 
 /// Only installer-owned version directories are cleanup targets, after successful activation.
-fn prune_versions(dir: &InstallDir, active: &str) {
+fn prune_versions(dir: &InstallDir, active: &str, previous: Option<&str>) {
     let Ok(root) = fs::canonicalize(dir.versions()) else {
         return;
     };
@@ -814,6 +831,7 @@ fn prune_versions(dir: &InstallDir, active: &str) {
     };
     for entry in entries.flatten() {
         if entry.file_name() == active
+            || previous.is_some_and(|version| entry.file_name() == version)
             || !entry
                 .file_type()
                 .is_ok_and(|kind| kind.is_dir() && !kind.is_symlink())
@@ -1120,9 +1138,6 @@ pub struct SourceView {
 struct State {
     activity: Option<Activity>,
     source: Option<PathBuf>,
-    update: Option<update::VerifiedUpdate>,
-    update_checked: bool,
-    update_problem: Option<String>,
     startup_invalid: bool,
     stopping_import: bool,
 }
@@ -1307,14 +1322,11 @@ pub async fn importer_status(
     tool: String,
 ) -> Result<ImporterStatus, String> {
     let (importer, tool) = importers.get(&tool)?;
-    let (activity, source, update, update_checked, update_problem, startup_invalid) = {
+    let (activity, source, startup_invalid) = {
         let state = importer.state.lock().unwrap();
         (
             state.activity.clone(),
             state.source.clone(),
-            state.update.as_ref().map(|release| release.view()),
-            state.update_checked,
-            state.update_problem.clone(),
             state.startup_invalid,
         )
     };
@@ -1340,103 +1352,69 @@ pub async fn importer_status(
     } else {
         (None, None)
     };
+    let registry = registry::current(&app).ok();
+    let checks = app.state::<registry::Checks>();
+    let view = checks.view(registry.as_ref());
+    let active_version = install_dir(&app, tool)?
+        .active()
+        .map(|(version, _)| version);
+    let update = registry
+        .as_ref()
+        .and_then(|registry| registry.release(tool, active_version.as_deref()));
+    let release = update
+        .filter(|_| active_version.is_none())
+        .map(registry::Release::view)
+        .or_else(|| {
+            tool.pinned.map(|pin| ReleaseView {
+                version: pin.version.into(),
+                size_bytes: pin.size,
+            })
+        });
+    let update = update.filter(|_| active_version.is_some());
     Ok(ImporterStatus {
         platform_supported: platform_supported(),
-        release: tool.pinned.map(|pin| ReleaseView {
-            version: pin.version.into(),
-            size_bytes: pin.size,
-        }),
+        release,
         installed,
         disabled,
         catalog_permissions: tool.permissions(),
         needs_reinstall,
         installed_problem,
         source: source.as_deref().and_then(source_view),
-        activity: activity.unwrap_or(Activity::Idle),
-        update,
-        update_checked,
-        update_problem,
+        activity: if view.checking
+            && tool.public_key.is_some()
+            && matches!(activity, None | Some(Activity::Idle))
+        {
+            Activity::Checking
+        } else {
+            activity.unwrap_or(Activity::Idle)
+        },
+        update: update.map(registry::Release::view),
+        update_checked: registry
+            .as_ref()
+            .is_some_and(|registry| registry.last_check.is_some()),
+        update_problem: view.failed.then(|| "addon registry check failed".into()),
     })
 }
 
-/// Downloads and installs the pinned release. Only ever called from the user's explicit action.
+/// Only explicit user actions can download and activate a package.
 #[tauri::command]
 pub fn importer_install(
     app: tauri::AppHandle,
     importers: tauri::State<'_, Importers>,
     tool: String,
 ) -> Result<(), String> {
-    let (importer, tool) = importers.get(&tool)?;
-    if !platform_supported() {
-        return Err("the importer is available for Windows x64 only".into());
-    }
-    let Some(release) = tool.pinned else {
-        return Err("no tested importer release is available yet".into());
-    };
-    if importer.busy() {
-        return Err("the importer is busy".into());
-    }
-    let dir = install_dir(&app, tool)?;
-    importer.begin(Activity::Downloading {
-        received: 0,
-        total: release.size,
-    })?;
-    let state = importer.state.clone();
-    let cancel = importer.cancel.clone();
-    std::thread::spawn(move || {
-        let set = |activity| state.lock().unwrap().activity = Some(activity);
-        let archive = dir.scratch("download-").with_extension("part");
-        let result = download(tool, &release, &archive, &cancel, &|received, total| {
-            set(Activity::Downloading { received, total });
-        })
-        .and_then(|_| {
-            set(Activity::Installing);
-            manager::install(&app, &dir, &archive, &release)
-        });
-        let _ = fs::remove_file(&archive);
-        let mut state = state.lock().unwrap();
-        state.activity = Some(match result {
-            Ok(_) => {
-                state.startup_invalid = false;
-                Activity::Idle
-            }
-            Err(message) if message == CANCELLED => Activity::Idle,
-            Err(message) => Activity::InstallFailed { message },
-        });
-    });
-    Ok(())
+    start_install(app, importers, &tool, false)
 }
 
 #[tauri::command]
-pub fn importer_check_update(
-    app: tauri::AppHandle,
-    importers: tauri::State<'_, Importers>,
-    tool: String,
-) -> Result<(), String> {
-    let (importer, tool) = importers.get(&tool)?;
-    if tool.public_key.is_none() {
+pub async fn importer_check_update(app: tauri::AppHandle, tool: String) -> Result<(), String> {
+    if !CATALOG
+        .iter()
+        .any(|addon| addon.id == tool && addon.public_key.is_some())
+    {
         return Err("no signed update key is available".into());
     }
-    if !platform_supported() || importer.busy() {
-        return Err("the importer cannot check for updates right now".into());
-    }
-    let dir = install_dir(&app, tool)?;
-    let installed = dir.active().map(|(version, _)| version);
-    importer.begin(Activity::Checking)?;
-    let state = importer.state.clone();
-    std::thread::spawn(move || {
-        let result = update::check(tool, installed.as_deref());
-        let mut state = state.lock().unwrap();
-        state.update_checked = true;
-        state.update = None;
-        state.update_problem = None;
-        match result {
-            Ok(release) => state.update = release,
-            Err(message) => state.update_problem = Some(message),
-        }
-        state.activity = Some(Activity::Idle);
-    });
-    Ok(())
+    registry::addon_check_registry(app, registry::Check::Manual).await
 }
 
 #[tauri::command]
@@ -1445,46 +1423,81 @@ pub fn importer_update(
     importers: tauri::State<'_, Importers>,
     tool: String,
 ) -> Result<(), String> {
-    let (importer, tool) = importers.get(&tool)?;
-    if tool.public_key.is_none() {
-        return Err("no signed update key is available".into());
-    }
-    if !platform_supported() || importer.busy() {
-        return Err("the importer cannot update right now".into());
+    start_install(app, importers, &tool, true)
+}
+
+fn start_install(
+    app: tauri::AppHandle,
+    importers: tauri::State<'_, Importers>,
+    id: &str,
+    updating: bool,
+) -> Result<(), String> {
+    let (importer, tool) = importers.get(id)?;
+    if !platform_supported() {
+        return Err("the addon is available for Windows x64 only".into());
     }
     let dir = install_dir(&app, tool)?;
-    let candidate = importer
-        .state
-        .lock()
-        .unwrap()
-        .update
-        .clone()
-        .ok_or("check for an importer update first")?;
-    if let Some((installed, _)) = dir.active() {
-        update::require_newer(&candidate.version, &installed)?;
-    }
-    importer.begin(Activity::Downloading {
+    importer.begin(Activity::Installing)?;
+    let registry = registry::current(&app).ok();
+    let active = dir.active().map(|(version, _)| version);
+    let candidate = registry
+        .as_ref()
+        .and_then(|registry| registry.release(tool, active.as_deref()))
+        .cloned();
+    let pin = if updating || active.is_some() {
+        None
+    } else {
+        tool.pinned
+    };
+    let Some(size) = candidate
+        .as_ref()
+        .map(|release| release.size)
+        .or_else(|| pin.map(|pin| pin.size))
+    else {
+        importer.set(Activity::Idle);
+        return Err("no compatible addon release is available".into());
+    };
+    importer.set(Activity::Downloading {
         received: 0,
-        total: candidate.size,
-    })?;
+        total: size,
+    });
     let state = importer.state.clone();
     let cancel = importer.cancel.clone();
     std::thread::spawn(move || {
         let set = |activity| state.lock().unwrap().activity = Some(activity);
         let archive = dir.scratch("download-").with_extension("part");
-        let release = candidate.pin();
-        let result = download(tool, &release, &archive, &cancel, &|received, total| {
-            set(Activity::Downloading { received, total })
-        })
-        .and_then(|_| {
+        let candidate = candidate.as_ref();
+        let result = (|| {
+            let release = candidate
+                .map(|release| PinnedRelease {
+                    version: &release.version,
+                    url: &release.url,
+                    size: release.size,
+                    sha256: &release.sha256,
+                    decoder_commit: "",
+                })
+                .or(pin)
+                .ok_or("no compatible addon release is available")?;
+            let hash = download(tool, &release, &archive, &cancel, &|received, total| {
+                set(Activity::Downloading { received, total });
+            })?;
+            if !hash.eq_ignore_ascii_case(release.sha256) {
+                return Err("the downloaded package does not match the addon release".into());
+            }
             set(Activity::Installing);
+            let verified = candidate
+                .map(|release| update::descriptor_for(tool, release))
+                .transpose()?;
+            let release = verified
+                .as_ref()
+                .map(update::VerifiedUpdate::pin)
+                .unwrap_or(release);
             manager::install(&app, &dir, &archive, &release)
-        });
+        })();
         let _ = fs::remove_file(&archive);
         let mut state = state.lock().unwrap();
         state.activity = Some(match result {
             Ok(_) => {
-                state.update = None;
                 state.startup_invalid = false;
                 Activity::Idle
             }

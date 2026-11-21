@@ -6,11 +6,41 @@ const CONFIG: &str = "addons.json";
 const MAX_POLICY_BYTES: usize = 64 * 1024;
 static POLICY: Mutex<()> = Mutex::new(());
 
-#[derive(Default, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Policy {
     allow_direct_apply: bool,
+    #[serde(default = "auto_check_default")]
+    auto_check: bool,
     addons: BTreeMap<String, Preference>,
+}
+
+fn auto_check_default() -> bool {
+    true
+}
+
+impl Default for Policy {
+    fn default() -> Self {
+        Self {
+            allow_direct_apply: false,
+            auto_check: auto_check_default(),
+            addons: BTreeMap::new(),
+        }
+    }
+}
+
+pub(super) fn auto_check(app: &tauri::AppHandle) -> bool {
+    policy(app).is_ok_and(|policy| policy.auto_check)
+}
+
+#[tauri::command]
+pub(crate) async fn addon_set_auto_check(
+    app: tauri::AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || patch(&app, |policy| policy.auto_check = enabled))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -273,33 +303,79 @@ pub(super) fn install(
             Ok(())
         },
         |candidate| {
-            let _lock = POLICY.lock().unwrap();
-            let path = crate::settings::config_file(app, CONFIG)?;
-            let mut policy = read_policy(&path)?;
-            let prior = policy.addons.get(dir.1.id).copied();
-            let next = install_preference(
-                prior,
-                previous.is_some(),
-                previous_declaration.as_ref(),
+            activate(
+                app,
+                dir,
+                (previous.is_some(), previous_declaration.as_ref()),
+                release.version,
                 candidate,
-            );
-            if Some(next) == prior {
-                return dir.activate(release.version);
-            }
-            policy.addons.insert(dir.1.id.into(), next);
-            write_policy(&path, &policy)?;
-            if let Err(error) = dir.activate(release.version) {
-                if let Some(prior) = prior {
-                    policy.addons.insert(dir.1.id.into(), prior);
-                } else {
-                    policy.addons.remove(dir.1.id);
-                }
-                write_policy(&path, &policy)?;
-                return Err(error);
-            }
-            Ok(())
+            )
         },
     )
+}
+
+fn activate(
+    app: &tauri::AppHandle,
+    dir: &InstallDir,
+    previous: (bool, Option<&Manifest>),
+    version: &str,
+    candidate: &Manifest,
+) -> Result<(), String> {
+    let _lock = POLICY.lock().unwrap();
+    let path = crate::settings::config_file(app, CONFIG)?;
+    let mut policy = read_policy(&path)?;
+    let prior = policy.addons.get(dir.1.id).copied();
+    let next = install_preference(prior, previous.0, previous.1, candidate);
+    if Some(next) == prior {
+        return dir.activate(version);
+    }
+    policy.addons.insert(dir.1.id.into(), next);
+    write_policy(&path, &policy)?;
+    if let Err(error) = dir.activate(version) {
+        if let Some(prior) = prior {
+            policy.addons.insert(dir.1.id.into(), prior);
+        } else {
+            policy.addons.remove(dir.1.id);
+        }
+        write_policy(&path, &policy)?;
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn addon_rollback(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let importers = app.state::<Importers>();
+        let (job, addon) = importers.get(&id)?;
+        if !platform_supported() {
+            return Err("unsupported-os".into());
+        }
+        job.begin(Activity::Installing)?;
+        let result = (|| {
+            let dir = install_dir(&app, addon)?;
+            let (version, path) = dir.previous().ok_or("no previous addon release")?;
+            let declaration = installed(addon, &path, &version, true).map_err(manifest_problem)?;
+            shutdown(&app, addon);
+            let active = dir.active();
+            let active_declaration = active
+                .as_ref()
+                .and_then(|(version, path)| installed(addon, path, version, true).ok());
+            activate(
+                &app,
+                &dir,
+                (active.is_some(), active_declaration.as_ref()),
+                &version,
+                &declaration,
+            )?;
+            job.state.lock().unwrap().startup_invalid = false;
+            Ok(())
+        })();
+        job.set(Activity::Idle);
+        result
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn install_preference(
@@ -367,6 +443,8 @@ pub struct ManagerView {
     allow_direct_apply: bool,
     recovery: bool,
     addons: Vec<ManagedAddon>,
+    auto_check: bool,
+    registry: registry::CheckView,
 }
 
 #[derive(Serialize)]
@@ -375,6 +453,7 @@ struct ManagedAddon {
     id: &'static str,
     name: LocalizedName,
     installed: Option<String>,
+    previous: Option<String>,
     status: Status,
     expected_api: &'static str,
     found_api: Option<String>,
@@ -386,9 +465,6 @@ struct ManagedAddon {
     output_bytes: usize,
     release: Option<ReleaseView>,
     update: Option<ReleaseView>,
-    update_checked: bool,
-    update_failed: bool,
-    can_check_update: bool,
     direct_apply: bool,
     activity: &'static str,
     progress: Option<(u64, u64)>,
@@ -409,15 +485,29 @@ pub async fn addon_list(
     let policy = policy(&app);
     let recovery = policy.is_err();
     let policy = policy.unwrap_or_default();
+    let registry = registry::current(&app).ok();
+    let checks = app.state::<registry::Checks>().view(registry.as_ref());
     let mut addons = Vec::with_capacity(CATALOG.len());
     for &addon in CATALOG {
         let (job, _) = importers.get(addon.id)?;
         let dir = install_dir(&app, addon).map_err(|_| "installation-read-failed")?;
         let active = dir.active();
         let preference = policy.addons.get(addon.id).copied().unwrap_or_default();
+        let candidate = registry.as_ref().and_then(|registry| {
+            registry.release(addon, active.as_ref().map(|(version, _)| version.as_str()))
+        });
+        let update = candidate
+            .filter(|_| active.is_some())
+            .map(registry::Release::view);
+        let release = candidate.map(registry::Release::view).or_else(|| {
+            addon.pinned.map(|pin| ReleaseView {
+                version: pin.version.into(),
+                size_bytes: pin.size,
+            })
+        });
         let mut status = if !platform_supported() {
             Status::UnsupportedOs
-        } else if addon.pinned.is_some() {
+        } else if release.is_some() {
             Status::Available
         } else {
             Status::Unpublished
@@ -483,6 +573,7 @@ pub async fn addon_list(
                 en: declaration.strings.en["name"].clone(),
                 de: declaration.strings.de["name"].clone(),
             },
+            previous: dir.previous().map(|(version, _)| version),
             installed: active.map(|(version, _)| version),
             status,
             expected_api: API,
@@ -493,14 +584,8 @@ pub async fn addon_list(
             memory_bytes,
             timeout_seconds,
             output_bytes,
-            release: addon.pinned.map(|pin| ReleaseView {
-                version: pin.version.into(),
-                size_bytes: pin.size,
-            }),
-            update: state.update.as_ref().map(|release| release.view()),
-            update_checked: state.update_checked,
-            update_failed: state.update_problem.is_some(),
-            can_check_update: addon.public_key.is_some(),
+            release,
+            update,
             direct_apply: preference.direct_apply,
             activity,
             progress,
@@ -513,6 +598,8 @@ pub async fn addon_list(
     Ok(ManagerView {
         allow_direct_apply: policy.allow_direct_apply,
         recovery,
+        auto_check: !recovery && policy.auto_check,
+        registry: checks,
         addons,
     })
 }
@@ -686,6 +773,9 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join(CONFIG);
         assert!(!read_policy(&path).unwrap().allow_direct_apply);
+        assert!(read_policy(&path).unwrap().auto_check);
+        fs::write(&path, r#"{"allowDirectApply":false,"addons":{}}"#).unwrap();
+        assert!(read_policy(&path).unwrap().auto_check);
         assert_eq!(
             Preference::default(),
             Preference {
@@ -696,6 +786,7 @@ mod tests {
 
         std::thread::scope(|scope| {
             scope.spawn(|| patch_file(&path, |policy| policy.allow_direct_apply = true).unwrap());
+            scope.spawn(|| patch_file(&path, |policy| policy.auto_check = false).unwrap());
             scope.spawn(|| {
                 patch_file(&path, |policy| {
                     policy
@@ -719,6 +810,7 @@ mod tests {
         });
         let persisted = read_policy(&path).unwrap();
         assert!(persisted.allow_direct_apply);
+        assert!(!persisted.auto_check);
         assert_eq!(
             persisted.addons[catalog::GOODNOTES.id],
             Preference {
@@ -733,6 +825,7 @@ mod tests {
         .unwrap();
         let persisted = read_policy(&path).unwrap();
         assert!(persisted.allow_direct_apply);
+        assert!(!persisted.auto_check);
         assert!(persisted.addons.is_empty());
     }
 
