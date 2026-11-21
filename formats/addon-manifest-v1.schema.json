@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Goodtype addon manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifestVersion",
+    "id",
+    "version",
+    "apiVersion",
+    "target",
+    "entrypoint",
+    "transport",
+    "permissions",
+    "commands",
+    "settings",
+    "strings"
+  ],
+  "properties": {
+    "manifestVersion": {
+      "const": 1
+    },
+    "id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "version": {
+      "type": "string",
+      "maxLength": 32,
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?![\\s\\S])"
+    },
+    "apiVersion": {
+      "const": "goodtype-api 0.1"
+    },
+    "target": {
+      "const": "x86_64-pc-windows-msvc"
+    },
+    "entrypoint": {
+      "type": "string",
+      "pattern": "^(?:[^/\\\\:\\u0000-\\u001f\\u007f-\\u009f*?\"<>|]+/){0,23}[^/\\\\:\\u0000-\\u001f\\u007f-\\u009f*?\"<>|]+\\.exe(?![\\s\\S])"
+    },
+    "transport": {
+      "enum": [
+        "legacy-import-cli",
+        "stdio-jsonrpc"
+      ]
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "picked-import-file",
+          "derived-import-artwork",
+          "publish-import-batch",
+          "selected-ink",
+          "add-page-objects"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "label",
+          "surface"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/identifier"
+          },
+          "label": {
+            "$ref": "#/$defs/identifier"
+          },
+          "surface": {
+            "enum": [
+              "library-import",
+              "ink-selection"
+            ]
+          }
+        }
+      },
+      "minItems": 1,
+      "maxItems": 16
+    },
+    "settings": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "label",
+              "type",
+              "default"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/identifier"
+              },
+              "label": {
+                "$ref": "#/$defs/identifier"
+              },
+              "hint": {
+                "$ref": "#/$defs/identifier"
+              },
+              "search": {
+                "$ref": "#/$defs/identifier"
+              },
+              "type": {
+                "const": "toggle"
+              },
+              "default": {
+                "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "label",
+              "type",
+              "default",
+              "choices"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/identifier"
+              },
+              "label": {
+                "$ref": "#/$defs/identifier"
+              },
+              "hint": {
+                "$ref": "#/$defs/identifier"
+              },
+              "search": {
+                "$ref": "#/$defs/identifier"
+              },
+              "type": {
+                "const": "choice"
+              },
+              "default": {
+                "type": "string",
+                "minLength": 1
+              },
+              "choices": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "value",
+                    "label"
+                  ],
+                  "properties": {
+                    "value": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "label": {
+                      "$ref": "#/$defs/identifier"
+                    }
+                  }
+                },
+                "minItems": 2,
+                "maxItems": 8
+              }
+            }
+          }
+        ]
+      },
+      "maxItems": 16
+    },
+    "strings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "en",
+        "de"
+      ],
+      "properties": {
+        "en": {
+          "$ref": "#/$defs/locale"
+        },
+        "de": {
+          "$ref": "#/$defs/locale"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "maxLength": 48,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])"
+    },
+    "locale": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "maxProperties": 128,
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "patternProperties": {
+        "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^<>\\u0000-\\u001f\\u007f-\\u009f]*(?![\\s\\S])",
+          "not": {
+            "pattern": "\\{\\{|\\}\\}"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
