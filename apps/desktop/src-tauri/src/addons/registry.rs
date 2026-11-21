@@ -407,12 +407,39 @@ fn registry_url_allowed(initial: &str, url: &str, redirected: bool) -> bool {
 }
 
 fn fetch() -> Result<(Vec<u8>, Vec<u8>), Problem> {
-    let get = |initial, limit| {
-        update::fetch(initial, limit, |url, redirected| {
-            registry_url_allowed(initial, url, redirected)
-        })
+    // `latest/download` resolves each asset separately, and GitHub caches those redirects
+    // independently: right after a new release it served index-1's index.json with index-2's
+    // signature (observed 2026-11-21). So remember which tagged release the index came from and
+    // take the signature from that same release.
+    let tag = std::cell::RefCell::new(None);
+    let index = update::fetch(URL, MAX_INDEX, |url, redirected| {
+        let allowed = registry_url_allowed(URL, url, redirected);
+        if allowed && redirected && tag.borrow().is_none() {
+            *tag.borrow_mut() = release_tag(url);
+        }
+        allowed
+    })?;
+    let signature_url = match tag.into_inner() {
+        Some(tag) => format!("{RELEASES}/{tag}/index.json.sig"),
+        None => SIG_URL.to_owned(),
     };
-    Ok((get(URL, MAX_INDEX)?, get(SIG_URL, 64)?))
+    let signature = update::fetch(&signature_url, 64, |url, redirected| {
+        registry_url_allowed(&signature_url, url, redirected)
+    })?;
+    Ok((index, signature))
+}
+
+const RELEASES: &str = "https://github.com/Just8it/Goodtype-Addons/releases/download";
+
+/// `index-<n>` from a same-repository tagged download URL of `index.json`, else nothing.
+fn release_tag(url: &str) -> Option<String> {
+    let tag = url
+        .strip_prefix(RELEASES)?
+        .strip_prefix('/')?
+        .strip_suffix("/index.json")?;
+    let number = tag.strip_prefix("index-")?;
+    (!number.is_empty() && number.len() <= 16 && number.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| tag.to_owned())
 }
 
 fn accept(index: &Index, floor: &Floor, now: Duration) -> Result<(), Problem> {
@@ -921,6 +948,33 @@ mod tests {
             assert_eq!(serialized, format!("\"{code}\""));
             assert!(!serialized.contains("http"));
         }
+    }
+
+    #[test]
+    fn signature_comes_from_the_release_that_served_the_index() {
+        assert_eq!(
+            release_tag(&format!("{RELEASES}/index-2/index.json")).as_deref(),
+            Some("index-2")
+        );
+        for url in [
+            format!("{RELEASES}/index-2/index.json.sig"),
+            format!("{RELEASES}/v1/index.json"),
+            format!("{RELEASES}/index-/index.json"),
+            format!("{RELEASES}/index-2x/index.json"),
+            format!("{RELEASES}/index-2/../index.json"),
+            "https://github.com/Other/Repo/releases/download/index-2/index.json".to_owned(),
+            "https://release-assets.githubusercontent.com/index-2/index.json".to_owned(),
+        ] {
+            assert_eq!(release_tag(&url), None, "{url}");
+        }
+        // The tagged signature URL is itself a permitted initial URL with asset-host redirects.
+        let signature = format!("{RELEASES}/index-2/index.json.sig");
+        assert!(registry_url_allowed(&signature, &signature, false));
+        assert!(registry_url_allowed(
+            &signature,
+            "https://release-assets.githubusercontent.com/path?token=value",
+            true
+        ));
     }
 
     #[test]
