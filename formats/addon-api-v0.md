@@ -3,9 +3,10 @@
 ## Status and stability
 
 `goodtype-api 0.1` is the first-party Windows x64 beta contract. Step 1 implements
-the built-in catalog and retains the legacy importer CLI adapter. Manifest v1
-(Step 2), index format 1 (Step 2b), and session v0 (Step 3) are specifications
-awaiting implementation.
+the built-in catalog and retains the legacy importer CLI adapter. Step 2
+implements manifest v1 validation and the device-local Addons manager. Index
+format 1 (Step 2b) and session v0 (Step 3) are specifications awaiting
+implementation.
 
 During beta, the host MUST require an exact match to its current
 `goodtype-api 0.N` for declarations and handshakes. An incompatible installed
@@ -41,7 +42,7 @@ step and offer Undo in a notice naming the addon.
 
 ## Package layout and manifest v1
 
-**Specified (Step 2).** A ZIP MUST contain one catalog-named top-level directory
+**Implemented (Step 2).** A ZIP MUST contain one catalog-named top-level directory
 (`<package>-<version>-windows-x64/`) with `goodtype-addon.json` at its root,
 the approved executable and any verified runtime files. The host MUST verify
 the trusted release and archive digest before extraction. Limits are 512 MiB
@@ -114,6 +115,18 @@ Rust MUST additionally enforce byte limits, duplicate keys, key parity and
 references, ID and choice-value uniqueness, default membership, Windows path
 safety and catalog binding. Step 2 MUST ship Rust round-trip fixture tests
 against the tracked schema and tests for the additional semantic checks.
+
+For the pinned Goodnotes 0.1.1 and OneNote 0.1.0 archives, the host supplies the
+declaration and validates the separate legacy protocol and decoder contract.
+Math has no verified legacy release. A new release needs its own declaration.
+For importer packages, the legacy inventory also lists and hashes
+`goodtype-addon.json`.
+
+The Addons manager stores policy in the device's `addons.json` beside
+`settings.json`. Verified legacy installations are migrated as enabled.
+A verified update that changes the declared scope is disabled pending review
+and clears the addon's direct-apply consent. Step 2 stores the two direct-apply
+preferences. Step 3 will consume them for eligible commands.
 
 ## Permissions
 
@@ -296,3 +309,5 @@ can retain valid completed results after cancellation.
 | API | Changes | Breaking changes |
 | --- | --- | --- |
 | `goodtype-api 0.1` | Initial beta specification for manifest v1, index format 1 and draft session v0. Documents the retained CLI adapter. | Initial version. |
+
+Step 2 implemented strict manifest validation, exact legacy declarations, and the local Addons manager without changing the 0.1 wire contract.

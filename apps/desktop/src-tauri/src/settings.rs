@@ -539,7 +539,7 @@ pub struct RecentNotebook {
     pub last_page_id: Option<String>,
 }
 
-fn config_file(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
+pub(crate) fn config_file(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
     let directory = app
         .path()
         .app_config_dir()

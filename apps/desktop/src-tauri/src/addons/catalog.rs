@@ -7,6 +7,9 @@ use super::{Addon, Kind, PinnedRelease};
 /// after repeating that.
 pub static GOODNOTES: Addon = Addon {
     id: "goodnotes",
+    legacy: Some("0.1.1"),
+    en: ("Goodnotes Importer", "Import Goodnotes notebooks"),
+    de: ("Goodnotes-Import", "Goodnotes-Notizbücher importieren"),
     i18n_prefix: "addons.goodnotes",
     name: "goodtype-goodnotes-import",
     package: "goodtype-goodnotes-importer",
@@ -38,6 +41,9 @@ pub static GOODNOTES: Addon = Addon {
 /// imported OneNote sample sections (see the opt-in test below). Re-pin only after repeating that.
 pub static ONENOTE: Addon = Addon {
     id: "onenote",
+    legacy: Some("0.1.0"),
+    en: ("OneNote Importer", "Import OneNote notebooks"),
+    de: ("OneNote-Import", "OneNote-Notizbücher importieren"),
     i18n_prefix: "addons.onenote",
     name: "goodtype-onenote-import",
     package: "goodtype-onenote-importer",
@@ -65,6 +71,9 @@ pub static ONENOTE: Addon = Addon {
 
 pub static MATH: Addon = Addon {
     id: "math",
+    legacy: None,
+    en: ("Math Recognition", "Recognize math"),
+    de: ("Formelerkennung", "Formel erkennen"),
     i18n_prefix: "addons.math",
     name: "goodtype-math-recognize",
     package: "goodtype-math-recognizer",

@@ -7,7 +7,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-const LINE_LIMIT: usize = 4 * 1024 * 1024;
+pub(crate) const LINE_LIMIT: usize = 4 * 1024 * 1024;
+pub(crate) const MEMORY_BYTES: usize = 3 * 1024 * 1024 * 1024;
 const IDLE: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -118,6 +119,10 @@ impl MathProcess {
         self.ensure(app, &mut slot)
     }
     fn ensure(&self, app: &tauri::AppHandle, slot: &mut Option<Session>) -> Result<(), String> {
+        if !crate::addons::recognize::math_available(app)? {
+            slot.take();
+            return Ok(());
+        }
         if let Some(session) = slot.as_mut()
             && (idle(session.used.elapsed())
                 || session
@@ -201,8 +206,7 @@ impl Session {
             command.creation_flags(0x0800_0000);
         }
         #[cfg(windows)]
-        let job =
-            crate::addons::job::Job::new(3 * 1024 * 1024 * 1024).map_err(|e| e.to_string())?;
+        let job = crate::addons::job::Job::new(MEMORY_BYTES).map_err(|e| e.to_string())?;
         let mut child = command.spawn().map_err(|e| e.to_string())?;
         #[cfg(windows)]
         if let Err(error) = job.assign(&child) {

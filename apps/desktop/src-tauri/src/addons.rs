@@ -23,6 +23,8 @@ use crate::store::read_bounded;
 
 mod catalog;
 pub(crate) mod import;
+pub(crate) mod manager;
+mod manifest;
 pub(crate) mod recognize;
 mod update;
 
@@ -61,6 +63,9 @@ pub struct Addon {
     /// Library then says the importer is not available yet and nothing is ever requested.
     pub pinned: Option<PinnedRelease<'static>>,
     i18n_prefix: &'static str,
+    legacy: Option<&'static str>,
+    en: (&'static str, &'static str),
+    de: (&'static str, &'static str),
     kind: Kind,
 }
 
@@ -435,14 +440,29 @@ fn sha256_file(path: &Path) -> Result<String, String> {
     Ok(hex(&hasher.finalize()))
 }
 
+fn is_package_link(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const REPARSE_POINT: u32 = 0x400;
+        if metadata.file_attributes() & REPARSE_POINT != 0 {
+            return true;
+        }
+    }
+    metadata.file_type().is_symlink()
+}
+
 /// Every file under `dir`, as `/`-separated relative paths. Links are refused outright.
 fn package_files(dir: &Path) -> Result<Vec<String>, String> {
+    if is_package_link(&fs::symlink_metadata(dir).map_err(|error| error.to_string())?) {
+        return Err("the package directory is a link".into());
+    }
     let mut files = Vec::new();
     let mut pending = vec![(dir.to_path_buf(), String::new())];
     while let Some((folder, prefix)) = pending.pop() {
         for entry in fs::read_dir(&folder).map_err(|error| error.to_string())? {
             let entry = entry.map_err(|error| error.to_string())?;
-            let kind = entry.file_type().map_err(|error| error.to_string())?;
+            let metadata = entry.metadata().map_err(|error| error.to_string())?;
             let name = entry
                 .file_name()
                 .into_string()
@@ -452,9 +472,10 @@ fn package_files(dir: &Path) -> Result<Vec<String>, String> {
             } else {
                 format!("{prefix}/{name}")
             };
-            if kind.is_symlink() {
+            safe_components(&relative)?;
+            if is_package_link(&metadata) {
                 return Err(format!("the package contains a link `{relative}`"));
-            } else if kind.is_dir() {
+            } else if metadata.is_dir() {
                 pending.push((entry.path(), relative));
             } else {
                 files.push(relative);
@@ -479,6 +500,7 @@ fn is_bytecode_cache(relative: &str) -> bool {
 /// listed size and hash, nothing unlisted apart from Python bytecode caches, which are removed.
 /// Returns the manifest.
 pub fn verify_package(tool: &Addon, dir: &Path) -> Result<PackageManifest, String> {
+    let actual = package_files(dir)?;
     let manifest: PackageManifest =
         serde_json::from_slice(&read_bounded(&dir.join(PACKAGE_MANIFEST), MAX_JSON_BYTES)?)
             .map_err(|error| format!("the package manifest is malformed ({error})"))?;
@@ -502,7 +524,7 @@ pub fn verify_package(tool: &Addon, dir: &Path) -> Result<PackageManifest, Strin
             ));
         }
     }
-    for file in package_files(dir)? {
+    for file in actual {
         if file == PACKAGE_MANIFEST || listed.contains(&file.to_lowercase()) {
             continue;
         }
@@ -595,9 +617,12 @@ impl InstallDir {
     }
 
     fn version_dir(&self, version: &str) -> Result<PathBuf, String> {
-        safe_components(version)?;
-        if version.contains('/') {
+        if !manifest::release_version(version) {
             return Err("invalid importer version".into());
+        }
+        safe_components(version)?;
+        if fs::symlink_metadata(self.versions()).is_ok_and(|metadata| is_package_link(&metadata)) {
+            return Err("the addon versions directory is a link".into());
         }
         Ok(self.versions().join(version))
     }
@@ -636,11 +661,24 @@ fn unique_suffix() -> String {
 /// Installs an archive that has already been downloaded to `archive`. Verifies the pinned hash,
 /// unpacks, checks the manifest and the tool's own contract, then switches `active.json`. Any
 /// failure removes what this attempt created and leaves the previous version active.
+#[cfg(test)]
 pub fn install_archive(
     dir: &InstallDir,
     archive: &Path,
     release: &PinnedRelease,
     probe: &dyn Fn(&Path) -> Result<ToolVersion, String>,
+) -> Result<String, String> {
+    install_with_policy(dir, archive, release, probe, |_| {
+        dir.activate(release.version)
+    })
+}
+
+fn install_with_policy(
+    dir: &InstallDir,
+    archive: &Path,
+    release: &PinnedRelease,
+    probe: &dyn Fn(&Path) -> Result<ToolVersion, String>,
+    activate: impl FnOnce(&manifest::Manifest) -> Result<(), String>,
 ) -> Result<String, String> {
     if fs::metadata(archive).map_err(|e| e.to_string())?.len() != release.size {
         return Err("the package size differs from the pinned release".into());
@@ -649,6 +687,7 @@ pub fn install_archive(
     if !hash.eq_ignore_ascii_case(release.sha256) {
         return Err("the downloaded package does not match the tested release".into());
     }
+    dir.version_dir(release.version)?;
     fs::create_dir_all(dir.versions()).map_err(|error| error.to_string())?;
     let staging = dir.scratch("staging-");
     let mut retired = None;
@@ -683,6 +722,10 @@ pub fn install_archive(
             .map_err(|e| e.to_string())?;
         }
         let manifest = verify_package(dir.1, &staging)?;
+        check_contract(dir.1, &manifest, None, Some(release))?;
+        let declaration =
+            manifest::load(dir.1, &staging, release.version, &manifest, Some(release))
+                .map_err(manager::manifest_problem)?;
         let tool = probe(&staging)?;
         check_contract(dir.1, &manifest, Some(&tool), Some(release))?;
         let target = dir.version_dir(release.version)?;
@@ -694,7 +737,7 @@ pub fn install_archive(
         }
         fs::rename(&staging, &target).map_err(|error| error.to_string())?;
         installed_target = Some(target);
-        dir.activate(release.version)?;
+        activate(&declaration)?;
         Ok(release.version.to_owned())
     })();
     if result.is_err() {
@@ -1025,6 +1068,7 @@ struct State {
     update: Option<update::VerifiedUpdate>,
     update_checked: bool,
     update_problem: Option<String>,
+    startup_invalid: bool,
 }
 
 /// One importer's job. One download or import at a time per importer.
@@ -1099,6 +1143,7 @@ pub struct ImporterStatus {
     pub release: Option<ReleaseView>,
     /// Installed version, when its files still match its manifest and contract.
     pub installed: Option<String>,
+    pub disabled: bool,
     /// Why an installed copy cannot be used, if it cannot.
     pub installed_problem: Option<String>,
     pub source: Option<SourceView>,
@@ -1118,6 +1163,9 @@ pub(crate) fn install_dir(
         .map_err(|error| error.to_string())?;
     let dir = base.join(format!("{}-importer", tool.id));
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    if is_package_link(&fs::symlink_metadata(&dir).map_err(|error| error.to_string())?) {
+        return Err("the addon installation directory is a link".into());
+    }
     Ok(InstallDir(dir, tool))
 }
 
@@ -1128,8 +1176,7 @@ fn usable_installation(dir: &InstallDir) -> Result<Option<(String, PathBuf)>, St
     let Some((version, path)) = dir.active() else {
         return Ok(None);
     };
-    let manifest = verify_package(dir.1, &path)?;
-    check_contract(dir.1, &manifest, None, None)?;
+    manager::installed(dir.1, &path, &version, true).map_err(manager::manifest_problem)?;
     Ok(Some((version, path)))
 }
 
@@ -1138,10 +1185,7 @@ pub(crate) fn installed_contract(dir: &InstallDir) -> Result<Option<(String, Pat
     let Some((version, path)) = dir.active() else {
         return Ok(None);
     };
-    let manifest: PackageManifest =
-        serde_json::from_slice(&read_bounded(&path.join(PACKAGE_MANIFEST), MAX_JSON_BYTES)?)
-            .map_err(|error| format!("the installed importer's manifest is malformed ({error})"))?;
-    check_contract(dir.1, &manifest, None, None)?;
+    manager::installed(dir.1, &path, &version, false).map_err(manager::manifest_problem)?;
     Ok(Some((version, path)))
 }
 
@@ -1159,7 +1203,7 @@ pub async fn importer_status(
     tool: String,
 ) -> Result<ImporterStatus, String> {
     let (importer, tool) = importers.get(&tool)?;
-    let (activity, source, update, update_checked, update_problem) = {
+    let (activity, source, update, update_checked, update_problem, startup_invalid) = {
         let state = importer.state.lock().unwrap();
         (
             state.activity.clone(),
@@ -1167,9 +1211,15 @@ pub async fn importer_status(
             state.update.as_ref().map(|release| release.view()),
             state.update_checked,
             state.update_problem.clone(),
+            state.startup_invalid,
         )
     };
-    let (installed, installed_problem) = if platform_supported() {
+    let disabled = platform_supported()
+        && install_dir(&app, tool)?.active().is_some()
+        && !manager::enabled(&app, tool)?;
+    let (installed, installed_problem) = if startup_invalid {
+        (None, Some("addon package verification failed".into()))
+    } else if platform_supported() && !disabled {
         match installed_contract(&install_dir(&app, tool)?) {
             Ok(found) => (found.map(|(version, _)| version), None),
             Err(problem) => (None, Some(problem)),
@@ -1184,6 +1234,7 @@ pub async fn importer_status(
             size_bytes: pin.size,
         }),
         installed,
+        disabled,
         installed_problem,
         source: source.as_deref().and_then(source_view),
         activity: activity.unwrap_or(Activity::Idle),
@@ -1225,11 +1276,16 @@ pub fn importer_install(
         })
         .and_then(|_| {
             set(Activity::Installing);
-            install_archive(&dir, &archive, &release, &|path| probe_tool(tool, path))
+            manager::install(&app, &dir, &archive, &release)
         });
         let _ = fs::remove_file(&archive);
-        set(match result {
-            Ok(_) => Activity::Idle,
+        let mut state = state.lock().unwrap();
+        state.activity = Some(match result {
+            Ok(_) => {
+                state.startup_invalid = false;
+                Activity::Idle
+            }
+            Err(message) if message == CANCELLED => Activity::Idle,
             Err(message) => Activity::InstallFailed { message },
         });
     });
@@ -1250,7 +1306,7 @@ pub fn importer_check_update(
         return Err("the importer cannot check for updates right now".into());
     }
     let dir = install_dir(&app, tool)?;
-    let installed = installed_contract(&dir)?.map(|(version, _)| version);
+    let installed = dir.active().map(|(version, _)| version);
     importer.begin(Activity::Checking)?;
     let state = importer.state.clone();
     std::thread::spawn(move || {
@@ -1289,7 +1345,7 @@ pub fn importer_update(
         .update
         .clone()
         .ok_or("check for an importer update first")?;
-    if let Some((installed, _)) = installed_contract(&dir)? {
+    if let Some((installed, _)) = dir.active() {
         update::require_newer(&candidate.version, &installed)?;
     }
     importer.begin(Activity::Downloading {
@@ -1307,15 +1363,17 @@ pub fn importer_update(
         })
         .and_then(|_| {
             set(Activity::Installing);
-            install_archive(&dir, &archive, &release, &|path| probe_tool(tool, path))
+            manager::install(&app, &dir, &archive, &release)
         });
         let _ = fs::remove_file(&archive);
         let mut state = state.lock().unwrap();
         state.activity = Some(match result {
             Ok(_) => {
                 state.update = None;
+                state.startup_invalid = false;
                 Activity::Idle
             }
+            Err(message) if message == CANCELLED => Activity::Idle,
             Err(message) => Activity::InstallFailed { message },
         });
     });

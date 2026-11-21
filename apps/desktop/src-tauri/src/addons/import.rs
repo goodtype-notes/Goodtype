@@ -7,7 +7,7 @@ use crate::{library, workspace::AllowedRoots};
 
 use super::*;
 
-const IMPORT_TIMEOUT: Duration = Duration::from_secs(4 * 60 * 60);
+pub(super) const IMPORT_TIMEOUT: Duration = Duration::from_secs(4 * 60 * 60);
 const MAX_LISTED_WARNINGS: usize = 12;
 
 /// What became of one notebook from the source.
@@ -235,6 +235,11 @@ pub async fn import_pick_source(
     ui_language: Option<String>,
 ) -> Result<Option<SourceView>, String> {
     let (importer, tool) = importers.get(&tool)?;
+    if !platform_supported()
+        || install_dir(&app, tool)?.active().is_some() && !manager::enabled(&app, tool)?
+    {
+        return Err("addon is disabled or unavailable".into());
+    }
     let Kind::Import {
         filter, extensions, ..
     } = tool.kind
@@ -274,7 +279,13 @@ pub async fn import_pick_source(
         ));
     }
     let view = source_view(&path).ok_or("that file cannot be read")?;
-    importer.state.lock().unwrap().source = Some(path);
+    let mut state = importer.state.lock().unwrap();
+    if state.activity.as_ref().is_some_and(Activity::is_busy)
+        || install_dir(&app, tool)?.active().is_some() && !manager::enabled(&app, tool)?
+    {
+        return Err("addon is disabled or busy".into());
+    }
+    state.source = Some(path);
     Ok(Some(view))
 }
 
@@ -294,9 +305,6 @@ pub fn import_start(
     if importer.busy() {
         return Err("the importer is busy".into());
     }
-    let Some((_, installed)) = installed_contract(&install_dir(&app, tool)?)? else {
-        return Err("the importer is not installed".into());
-    };
     let source = importer
         .state
         .lock()
@@ -337,6 +345,30 @@ pub fn import_start(
         total: 0,
         cancelling: false,
     })?;
+    let installation = (|| {
+        let (version, path) = install_dir(&app, tool)?
+            .active()
+            .ok_or("the importer is not installed")?;
+        let mut permissions = vec![
+            manifest::Permission::PickedImportFile,
+            manifest::Permission::PublishImportBatch,
+        ];
+        if allow_derived {
+            permissions.push(manifest::Permission::DerivedImportArtwork);
+        }
+        manager::require_permissions(&app, tool, &path, &version, &permissions)?;
+        if importer.state.lock().unwrap().source.as_ref() != Some(&source) {
+            return Err("the chosen source changed".into());
+        }
+        Ok(path)
+    })();
+    let installed = match installation {
+        Ok(path) => path,
+        Err(error) => {
+            importer.set(Activity::Idle);
+            return Err(error);
+        }
+    };
     let staging = parent_dir.join(format!(".goodtype-import-{}", unique_suffix()));
     if let Err(error) = fs::create_dir(&staging) {
         importer.set(Activity::Idle);

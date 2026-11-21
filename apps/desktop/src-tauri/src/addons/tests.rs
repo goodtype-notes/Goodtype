@@ -40,16 +40,19 @@ fn package(tool: &Addon, version: &str, tamper: bool, extra: Option<(&str, &[u8]
     let executable = tool.executable();
     let exe: &[u8] = b"not really an executable";
     let runtime: &[u8] = b"print('decoder')";
+    let addon = serde_json::to_vec(&tool.declaration(version)).unwrap();
     let manifest = serde_json::json!({
         "version": version, "protocolVersion": 1, "notebookSchemaVersion": SCHEMA_VERSION,
         "target": TARGET, "decoderCommit": "abc",
         "files": [
+            {"path": manifest::FILE, "sizeBytes": addon.len(), "sha256": sha(&addon)},
             {"path": executable, "sizeBytes": exe.len(), "sha256": sha(exe)},
             {"path": "runtime/decode.py", "sizeBytes": runtime.len(), "sha256": if tamper { "00".repeat(32) } else { sha(runtime) }},
         ]
     })
     .to_string();
     let mut entries: Vec<(String, Vec<u8>)> = vec![
+        (format!("{top}/{}", manifest::FILE), addon),
         (format!("{top}/{executable}"), exe.to_vec()),
         (format!("{top}/runtime/decode.py"), runtime.to_vec()),
         (format!("{top}/{PACKAGE_MANIFEST}"), manifest.into_bytes()),
@@ -582,6 +585,15 @@ fn math_archive_uses_shared_install_and_detects_tampering() {
         )
         .unwrap();
     writer.write_all(b"test helper").unwrap();
+    writer
+        .start_file(
+            format!("{}/{}", package_folder(&MATH, VERSION), manifest::FILE),
+            SimpleFileOptions::default(),
+        )
+        .unwrap();
+    writer
+        .write_all(&serde_json::to_vec(&MATH.declaration(VERSION)).unwrap())
+        .unwrap();
     let bytes = writer.finish().unwrap().into_inner();
     let archive = home.path().join("math.zip");
     fs::write(&archive, &bytes).unwrap();
@@ -662,13 +674,7 @@ fn real_math_release_installs_and_checks() {
 fn real_release_installs_imports_and_cancels() {
     let env = |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("set {name}"));
     let archive = PathBuf::from(env("GOODNOTES_RELEASE_ZIP"));
-    let release = PinnedRelease {
-        version: "0.1.0",
-        url: "https://github.com/Just8it/Goodtype-Goodnodes-importer/releases/download/v0.1.0/goodtype-goodnotes-importer-0.1.0-windows-x64.zip",
-        size: fs::metadata(&archive).unwrap().len(),
-        sha256: Box::leak(env("GOODNOTES_RELEASE_SHA256").into_boxed_str()),
-        decoder_commit: "66028455fd7fc61b7931679915d811a25485e3ad",
-    };
+    let release = GOODNOTES.pinned.expect("a pinned Goodnotes release");
     let home = tempfile::tempdir().unwrap();
     let dir = InstallDir(home.path().join("installed"), &GOODNOTES);
     fs::create_dir_all(&dir.0).unwrap();
@@ -678,7 +684,7 @@ fn real_release_installs_imports_and_cancels() {
             &GOODNOTES, path
         ))
         .unwrap(),
-        "0.1.0"
+        release.version
     );
     println!("installed and self-checked in {:?}", started.elapsed());
     let (_, tool) = usable_installation(&dir).unwrap().unwrap();
@@ -933,4 +939,42 @@ fn catalog_exposes_only_frontend_metadata() {
             },
         ])
     );
+}
+
+#[test]
+#[ignore = "requires the two pinned Windows release ZIPs in GOODTYPE_PINNED_ADDON_FIXTURES"]
+fn real_pinned_importers_upgrade_to_manifest_packages() {
+    let fixtures = PathBuf::from(std::env::var_os("GOODTYPE_PINNED_ADDON_FIXTURES").unwrap());
+    let home = tempfile::tempdir().unwrap();
+    for addon in TOOLS {
+        let release = addon.pinned.unwrap();
+        let legacy_archive =
+            fixtures.join(format!("{}.zip", package_folder(addon, release.version)));
+        let dir = InstallDir(home.path().join(addon.id), addon);
+        install_archive(&dir, &legacy_archive, &release, &|path| {
+            probe_tool(addon, path)
+        })
+        .unwrap();
+
+        let (installed, path) = usable_installation(&dir).unwrap().unwrap();
+        assert_eq!(installed, release.version);
+        assert!(!path.join(manifest::FILE).exists());
+
+        let next_bytes = package(addon, VERSION, false, None);
+        let next_archive = home.path().join(format!("{}-next.zip", addon.id));
+        fs::write(&next_archive, &next_bytes).unwrap();
+        let next = pin(addon, &next_bytes);
+        assert!(
+            install_archive(&dir, &next_archive, &next, &|_| Err("probe failed".into())).is_err()
+        );
+        assert_eq!(
+            usable_installation(&dir).unwrap().unwrap().0,
+            release.version
+        );
+
+        install_archive(&dir, &next_archive, &next, &|_| good_probe(addon)).unwrap();
+        let (installed, path) = usable_installation(&dir).unwrap().unwrap();
+        assert_eq!(installed, VERSION);
+        assert!(path.join(manifest::FILE).is_file());
+    }
 }
