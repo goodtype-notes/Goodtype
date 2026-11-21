@@ -667,7 +667,7 @@ pub fn install_archive(
     let mut installed_target = None;
     let result = (|| {
         extract_package(archive, &package_folder(dir.1, release.version), &staging)?;
-        // Math ships no importer manifest. Record every file from the pinned, verified ZIP locally.
+        // Recognition addons ship no importer manifest. Record every file from the pinned, verified ZIP locally.
         if !dir.1.imports_notebooks() {
             let files = package_files(&staging)?
                 .into_iter()

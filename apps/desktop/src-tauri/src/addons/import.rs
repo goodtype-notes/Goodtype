@@ -189,7 +189,7 @@ pub fn publish(
         .collect()
 }
 
-/// `Goodnotes Import 2026-10-21`, or the first free ` (2)`, ` (3)`… beside it.
+/// `<batch> 2026-10-21`, or the first free ` (2)`, ` (3)`… beside it.
 pub(super) fn batch_name(tool: &Addon, parent: &Path, today: &str) -> Result<String, String> {
     let Kind::Import { batch, .. } = tool.kind else {
         return Err("this tool does not import notebooks".into());
