@@ -8,16 +8,14 @@
   import { t, notice, renderMessage, type UiText } from "../i18n";
   import { errorDetails } from "../ipc/errors";
   import {
-    cancelMathRecognizerDownload,
-    installMathRecognizer,
-    mathRecognizerStatus,
     prepareMathRecognition,
     recognizeInkMath,
     recognizeInkText,
     removeMathRecognizer,
     type InkPolylines,
   } from "../ipc/recognition";
-  import { megabytes, type ImporterStatus } from "../ipc/importer";
+  import { recognitionAddon, type RecognitionAddon } from "../ipc/addons";
+  import { cancelImporter, importerStatus, installImporter, megabytes, type ImporterStatus } from "../ipc/importer";
   import type { Bounds } from "../ink/selection";
   import { editDistance, transcriptionSource, type TranscriptionKind } from "./transcription";
 
@@ -65,11 +63,16 @@
     message = { text: notice("transcription.failed", { details: errorDetails(error) }), problem: true };
   }
 
+  let recognizerAddon = $state<RecognitionAddon | null>(null);
+
   /** Re-read the add-on, polling only while a download or install is running. */
   async function refresh() {
     clearTimeout(pollTimer);
     try {
-      const found = await mathRecognizerStatus();
+      const entry = await recognitionAddon();
+      if (disposed) return;
+      recognizerAddon = entry;
+      const found = await importerStatus(entry.id);
       if (disposed) return;
       addon = found;
       if (found.installed && !warmed) {
@@ -93,10 +96,11 @@
   });
 
   async function download() {
+    if (!recognizerAddon) return;
     addonBusy = true;
     message = null;
     try {
-      await installMathRecognizer();
+      await installImporter(recognizerAddon.id);
     } catch (error) {
       fail(error);
     } finally {
@@ -106,7 +110,8 @@
   }
 
   async function cancelDownload() {
-    try { await cancelMathRecognizerDownload(); } catch (error) { fail(error); }
+    if (!recognizerAddon) return;
+    try { await cancelImporter(recognizerAddon.id); } catch (error) { fail(error); }
     void refresh();
   }
 
@@ -207,11 +212,13 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6.5h14M12 6.5V18M9 18h6"></path></svg>
           <span>{$t("transcription.kindText")}</span>
         </button>
-        <button type="button" class:current={kind === "math"} aria-pressed={kind === "math"}
-          disabled={busy} onclick={() => void recognize("math")}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M9.5 4.5l3 3 3-3M9.5 16.5l3 3 3-3"></path></svg>
-          <span>{$t("transcription.kindMath")}</span>
-        </button>
+        {#if recognizerAddon}
+          <button type="button" class:current={kind === "math"} aria-pressed={kind === "math"}
+            disabled={busy} onclick={() => void recognize("math")}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M9.5 4.5l3 3 3-3M9.5 16.5l3 3 3-3"></path></svg>
+            <span>{$t(`${recognizerAddon.i18nPrefix}.label`)}</span>
+          </button>
+        {/if}
       </div>
       {#if recognizers.length > 1 && kind !== "math"}
         <label class="language">
@@ -233,7 +240,7 @@
       <p class="message" class:problem={message.problem} role={message.problem ? "alert" : "status"}>{renderMessage(message.text, $t)}</p>
     {/if}
 
-    {#if offering}
+    {#if offering && recognizerAddon}
       <section class="offer" aria-live="polite">
         {#if addon?.activity.kind === "downloading"}
           <p class="lead">{$t("transcription.downloadingAddon")}</p>
@@ -249,7 +256,7 @@
           <p class="lead">{$t("transcription.installingAddon")}</p>
           <div class="progress indeterminate" role="progressbar" aria-label={$t("transcription.installation")}><span></span></div>
         {:else}
-          <p class="lead">{$t("transcription.addonLead")}</p>
+          <p class="lead">{$t(`${recognizerAddon.i18nPrefix}.description`)}</p>
           <dl class="facts">
             <dt>{$t("transcription.factSource")}</dt>
             <dd>{addon?.release ? $t("transcription.factSourceRelease", { size: megabytes(addon.release.sizeBytes) }) : $t("transcription.factSourceNone")}</dd>

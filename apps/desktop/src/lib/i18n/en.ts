@@ -1,4 +1,28 @@
 export const en = {
+  addons: {
+    goodnotes: {
+      label: "Goodnotes",
+      release: "Goodtype Goodnotes Importer",
+      description: "Turn your Goodnotes notebooks into ordinary Goodtype notebooks.",
+      fileHelp: "A single Goodnotes document (.goodnotes) or backup (.zip). The source file is not changed.",
+      destinationHelp: "Each notebook stays separate and backup folders are preserved. Every imported notebook includes its original file.",
+      limits: "Text boxes, sticky notes, audio and partial erasures are not supported.",
+      batch: "Goodnotes Import",
+    },
+    onenote: {
+      label: "OneNote",
+      release: "Goodtype OneNote Importer",
+      description: "Turn your OneNote notebooks and sections into ordinary Goodtype notebooks.",
+      fileHelp: "A section (.one) or notebook package (.onepkg) from File → Export in OneNote, a notebook's Open Notebook.onetoc2, or a OneNote for the web export (.zip). The source is not changed.",
+      destinationHelp: "Each section becomes a notebook; notebooks and section groups become folders. Tall pages are split at clear gaps. Every imported notebook includes its original section.",
+      limits: "Audio and video playback, links between OneNote pages and most note tags are not carried over.",
+      batch: "OneNote Import",
+    },
+    math: {
+      label: "Math",
+      description: "Math recognition is an optional add-on. Text recognition works without it.",
+    },
+  },
   newPage: {
     update: "Update proposal",
     mixedMaterial: "Explicitly attached references, selected cells and selected saved outputs",
@@ -536,16 +560,6 @@ export const en = {
     "currentPreset": ". Now: {{name}}"
   },
   "library": {
-    "turnYourGoodnotesNotebooksIntoOrdinaryGoodtype": "Turn your Goodnotes notebooks into ordinary Goodtype notebooks.",
-    "aSingleGoodnotesDocumentGoodnotesOrBackup": "A single Goodnotes document (.goodnotes) or backup (.zip). The source file is not changed.",
-    "eachNotebookStaysSeparateAndBackupFolders": "Each notebook stays separate and backup folders are preserved. Every imported notebook includes its original file.",
-    "textBoxesStickyNotesAudioAndPartial": "Text boxes, sticky notes, audio and partial erasures are not supported.",
-    "goodnotesImport": "Goodnotes Import",
-    "turnYourOneNoteNotebooksAndSectionsInto": "Turn your OneNote notebooks and sections into ordinary Goodtype notebooks.",
-    "aSectionOneOrNotebookPackageOnepkg": "A section (.one) or notebook package (.onepkg) from File → Export in OneNote, a notebook's Open Notebook.onetoc2, or a OneNote for the web export (.zip). The source is not changed.",
-    "eachSectionBecomesANotebookNotebooksAnd": "Each section becomes a notebook; notebooks and section groups become folders. Tall pages are split at clear gaps. Every imported notebook includes its original section.",
-    "audioAndVideoPlaybackLinksBetweenOneNote": "Audio and video playback, links between OneNote pages and most note tags are not carried over.",
-    "onenoteImport": "OneNote Import",
     "imported": "Imported",
     "alreadyImported": "Already imported",
     "needsVectorArtwork": "Needs vector artwork",
@@ -1342,7 +1356,6 @@ export const en = {
     "original": "Selected handwriting",
     "recognizeAs": "Recognize as",
     "kindText": "Text",
-    "kindMath": "Math",
     "language": "Handwriting language",
     "systemDefault": "Windows default",
     "recognizing": "Recognizing…",
@@ -1353,7 +1366,6 @@ export const en = {
     "mathHint": "Inserted as display math between $ … $. Your handwriting stays on the page.",
     "keepsInk": "Your handwriting stays on the page.",
     "rawLatex": "Recognized LaTeX",
-    "addonLead": "Math recognition is an optional add-on. Text recognition works without it.",
     "factSource": "Source",
     "factSourceRelease": "GitHub release, {{size}}",
     "factSourceNone": "No verified release yet",

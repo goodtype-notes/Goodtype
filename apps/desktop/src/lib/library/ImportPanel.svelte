@@ -2,9 +2,9 @@
   import { t } from "../i18n";
   import { onDestroy, onMount, tick } from "svelte";
   import Dialog from "../workspace/Dialog.svelte";
+  import type { ImportAddon } from "../ipc/addons";
   import { errorDetails } from "../ipc/errors";
   import {
-    IMPORTERS,
     allImporterStatus,
     cancelImporter,
     checkImporterUpdate,
@@ -22,7 +22,7 @@
   } from "../ipc/importer";
 
   /**
-   * Import from Goodnotes or OneNote, in the same panel as a new notebook. The two sources are
+   * Import notebooks in the same panel as a new notebook. The sources are
    * tabs on the title row; each importer keeps its own download, chosen file and job in Rust, so
    * switching tabs never disturbs the other. A conversion can run for minutes, so closing the
    * panel never stops it: the Library shows an "Import running" button that brings the panel
@@ -30,6 +30,7 @@
    */
   let {
     tool = $bindable(),
+    sources,
     folder,
     folderName,
     onClose,
@@ -38,6 +39,7 @@
   }: {
     /** The source on show; the Library remembers it for the next time the panel opens. */
     tool: ImporterId;
+    sources: ImportAddon[];
     /** The Library folder the import goes into (relative; empty is the Library root). */
     folder: string;
     folderName: string;
@@ -46,44 +48,18 @@
     onImported: () => void;
   } = $props();
 
-  /** What differs between the sources: names, file types, and what each cannot carry over. */
-  const SOURCES: Record<
-    ImporterId,
-    {
-      name: string;
-      lead: string;
-      release: string;
-      fileHelp: string;
-      destinationHelp: string;
-      /** Goodnotes content Goodtype cannot edit natively may come over as vector artwork. */
-      artwork: boolean;
-      limits: string;
-      batch: string;
-    }
-  > = $derived({
-    goodnotes: {
-      name: "Goodnotes",
-      lead: $t("library.turnYourGoodnotesNotebooksIntoOrdinaryGoodtype"),
-      release: "Goodtype Goodnotes Importer",
-      fileHelp: $t("library.aSingleGoodnotesDocumentGoodnotesOrBackup"),
-      destinationHelp:
-        $t("library.eachNotebookStaysSeparateAndBackupFolders"),
-      artwork: true,
-      limits: $t("library.textBoxesStickyNotesAudioAndPartial"),
-      batch: $t("library.goodnotesImport"),
-    },
-    onenote: {
-      name: "OneNote",
-      lead: $t("library.turnYourOneNoteNotebooksAndSectionsInto"),
-      release: "Goodtype OneNote Importer",
-      fileHelp:
-        $t("library.aSectionOneOrNotebookPackageOnepkg"),
-      destinationHelp:
-        $t("library.eachSectionBecomesANotebookNotebooksAnd"),
-      artwork: false,
-      limits: $t("library.audioAndVideoPlaybackLinksBetweenOneNote"),
-      batch: $t("library.onenoteImport"),
-    },
+  const sourceIds = $derived(sources.map(({ id }) => id));
+  const selectedSource = $derived(sources.find(({ id }) => id === tool) ?? sources[0]);
+  const prefix = $derived(selectedSource.i18nPrefix);
+  const source = $derived({
+    name: $t(`${prefix}.label`),
+    lead: $t(`${prefix}.description`),
+    release: $t(`${prefix}.release`),
+    fileHelp: $t(`${prefix}.fileHelp`),
+    destinationHelp: $t(`${prefix}.destinationHelp`),
+    artwork: selectedSource.artwork,
+    limits: $t(`${prefix}.limits`),
+    batch: $t(`${prefix}.batch`),
   });
 
   let statuses = $state<Record<ImporterId, ImporterStatus> | null>(null);
@@ -94,7 +70,6 @@
   /** Each source's finished result is announced to the Library once. */
   const announced = new Set<ImporterId>();
 
-  const source = $derived(SOURCES[tool]);
   const status = $derived(statuses?.[tool] ?? null);
   const activity = $derived(status?.activity ?? { kind: "idle" as const });
   const busy = $derived(importerBusy(activity));
@@ -108,13 +83,13 @@
     } catch (error) {
       failure = errorDetails(error);
     }
-    const running = statuses ? IMPORTERS.some((id) => importerBusy(statuses![id].activity)) : false;
+    const running = statuses ? sourceIds.some((id) => importerBusy(statuses![id].activity)) : false;
     if (running && !timer) timer = setInterval(() => void refresh(), 400);
     if (!running && timer) {
       clearInterval(timer);
       timer = undefined;
     }
-    for (const id of IMPORTERS) {
+    for (const id of sourceIds) {
       const kind = statuses?.[id].activity.kind;
       if (kind === "finished" && !announced.has(id)) {
         announced.add(id);
@@ -175,11 +150,11 @@
     const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
     const target =
       event.key === "Home"
-        ? IMPORTERS[0]
+        ? sourceIds[0]
         : event.key === "End"
-          ? IMPORTERS[IMPORTERS.length - 1]
+          ? sourceIds[sourceIds.length - 1]
           : step
-            ? IMPORTERS[(IMPORTERS.indexOf(tool) + step + IMPORTERS.length) % IMPORTERS.length]
+            ? sourceIds[(sourceIds.indexOf(tool) + step + sourceIds.length) % sourceIds.length]
             : null;
     if (!target) return;
     event.preventDefault();
@@ -240,7 +215,7 @@
   {#snippet heading()}
       <!-- The sources are the title: choosing where notebooks come from is the panel's first step. -->
       <div class="sources" role="tablist" aria-label={$t("library.importFrom")}>
-        {#each IMPORTERS as id (id)}
+        {#each sources as { id, i18nPrefix } (id)}
           {@const running = statuses ? importerBusy(statuses[id].activity) : false}
           <button
             type="button"
@@ -254,7 +229,7 @@
             onclick={() => choose(id)}
             onkeydown={tabKey}
           >
-            {SOURCES[id].name}
+            {$t(`${i18nPrefix}.label`)}
             {#if running && id !== tool}<span class="running" title={$t("library.importRunning2")}><span class="sr">{$t("library.importRunning")}</span></span>{/if}
           </button>
         {/each}

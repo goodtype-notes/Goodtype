@@ -1,6 +1,30 @@
 import type { Catalog } from "./en";
 
 export const de = {
+  addons: {
+    goodnotes: {
+      label: "Goodnotes",
+      release: "Goodtype Goodnotes Importer",
+      description: "Wandle deine Goodnotes-Notizbücher in gewöhnliche Goodtype-Notizbücher um.",
+      fileHelp: "Ein einzelnes Goodnotes-Dokument (.goodnotes) oder Backup (.zip). Die Quelldatei bleibt unverändert.",
+      destinationHelp: "Jedes Notizbuch bleibt eigenständig und die Ordnerstruktur des Backups bleibt erhalten. Jedes importierte Notizbuch enthält seine Originaldatei.",
+      limits: "Textfelder, Haftnotizen, Audio und teilweise Radierungen werden nicht unterstützt.",
+      batch: "Goodnotes-Import",
+    },
+    onenote: {
+      label: "OneNote",
+      release: "Goodtype OneNote Importer",
+      description: "Wandle deine OneNote-Notizbücher und Abschnitte in gewöhnliche Goodtype-Notizbücher um.",
+      fileHelp: "Ein Abschnitt (.one) oder Notizbuchpaket (.onepkg) aus Datei → Exportieren in OneNote, die Datei Open Notebook.onetoc2 eines Notizbuchs oder ein Export aus OneNote im Web (.zip). Die Quelle bleibt unverändert.",
+      destinationHelp: "Jeder Abschnitt wird zu einem Notizbuch; Notizbücher und Abschnittsgruppen werden zu Ordnern. Hohe Seiten werden an deutlichen Lücken geteilt. Jedes importierte Notizbuch enthält seinen Originalabschnitt.",
+      limits: "Audio- und Videowiedergabe, Verknüpfungen zwischen OneNote-Seiten und die meisten Notizkategorien werden nicht übernommen.",
+      batch: "OneNote-Import",
+    },
+    math: {
+      label: "Formel",
+      description: "Die Formelerkennung ist ein optionales Add-on. Die Texterkennung funktioniert auch ohne.",
+    },
+  },
   newPage: {
     update: "Vorschlag aktualisieren",
     mixedMaterial: "Explizit angehängte Quellen, ausgewählte Zellen und ausgewählte gespeicherte Ausgaben",
@@ -537,16 +561,6 @@ export const de = {
     "currentPreset": ". Aktuell: {{name}}"
   },
   "library": {
-    "turnYourGoodnotesNotebooksIntoOrdinaryGoodtype": "Wandle deine Goodnotes-Notizbücher in gewöhnliche Goodtype-Notizbücher um.",
-    "aSingleGoodnotesDocumentGoodnotesOrBackup": "Ein einzelnes Goodnotes-Dokument (.goodnotes) oder Backup (.zip). Die Quelldatei bleibt unverändert.",
-    "eachNotebookStaysSeparateAndBackupFolders": "Jedes Notizbuch bleibt eigenständig und die Ordnerstruktur des Backups bleibt erhalten. Jedes importierte Notizbuch enthält seine Originaldatei.",
-    "textBoxesStickyNotesAudioAndPartial": "Textfelder, Haftnotizen, Audio und teilweise Radierungen werden nicht unterstützt.",
-    "goodnotesImport": "Goodnotes-Import",
-    "turnYourOneNoteNotebooksAndSectionsInto": "Wandle deine OneNote-Notizbücher und Abschnitte in gewöhnliche Goodtype-Notizbücher um.",
-    "aSectionOneOrNotebookPackageOnepkg": "Ein Abschnitt (.one) oder Notizbuchpaket (.onepkg) aus Datei → Exportieren in OneNote, die Datei Open Notebook.onetoc2 eines Notizbuchs oder ein Export aus OneNote im Web (.zip). Die Quelle bleibt unverändert.",
-    "eachSectionBecomesANotebookNotebooksAnd": "Jeder Abschnitt wird zu einem Notizbuch; Notizbücher und Abschnittsgruppen werden zu Ordnern. Hohe Seiten werden an deutlichen Lücken geteilt. Jedes importierte Notizbuch enthält seinen Originalabschnitt.",
-    "audioAndVideoPlaybackLinksBetweenOneNote": "Audio- und Videowiedergabe, Verknüpfungen zwischen OneNote-Seiten und die meisten Notizkategorien werden nicht übernommen.",
-    "onenoteImport": "OneNote-Import",
     "imported": "Importiert",
     "alreadyImported": "Bereits importiert",
     "needsVectorArtwork": "Benötigt Vektorgrafiken",
@@ -1343,7 +1357,6 @@ export const de = {
     "original": "Ausgewählte Handschrift",
     "recognizeAs": "Erkennen als",
     "kindText": "Text",
-    "kindMath": "Formel",
     "language": "Sprache der Handschrift",
     "systemDefault": "Windows-Standard",
     "recognizing": "Wird erkannt …",
@@ -1354,7 +1367,6 @@ export const de = {
     "mathHint": "Wird als abgesetzte Formel zwischen $ … $ eingefügt. Deine Handschrift bleibt auf der Seite.",
     "keepsInk": "Deine Handschrift bleibt auf der Seite.",
     "rawLatex": "Erkanntes LaTeX",
-    "addonLead": "Die Formelerkennung ist ein optionales Add-on. Die Texterkennung funktioniert auch ohne.",
     "factSource": "Quelle",
     "factSourceRelease": "GitHub-Release, {{size}}",
     "factSourceNone": "Noch keine geprüfte Version",

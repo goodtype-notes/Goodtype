@@ -2,6 +2,7 @@ import { get } from "svelte/store";
 import { locale } from "../i18n";
 import { translate, formatNumber } from "../i18n";
 import { invoke } from "@tauri-apps/api/core";
+import { importAddons } from "./addons";
 
 // The optional Goodnotes and OneNote importers (ADR 0029, 0032). Rust owns the download, the
 // installation, the source path and the process; this side only asks and shows.
@@ -53,8 +54,7 @@ export type ImporterStatus = {
 };
 
 /** The optional importers. Each keeps its own installation, chosen file and job in Rust. */
-export type ImporterId = "goodnotes" | "onenote";
-export const IMPORTERS: ImporterId[] = ["goodnotes", "onenote"];
+export type ImporterId = string;
 
 export const importerStatus = (tool: ImporterId) => invoke<ImporterStatus>("importer_status", { tool });
 
@@ -84,8 +84,8 @@ export const startImport = (
 
 /** Every importer's status, for the Library toolbar and for choosing which tab to open. */
 export async function allImporterStatus(): Promise<Record<ImporterId, ImporterStatus>> {
-  const [goodnotes, onenote] = await Promise.all(IMPORTERS.map(importerStatus));
-  return { goodnotes, onenote };
+  const sources = await importAddons();
+  return Object.fromEntries(await Promise.all(sources.map(async ({ id }) => [id, await importerStatus(id)] as const)));
 }
 
 /** True while a download, install or import is running. */
