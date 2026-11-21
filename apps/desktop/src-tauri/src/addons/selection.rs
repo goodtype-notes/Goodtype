@@ -427,10 +427,7 @@ pub(crate) fn invoke(
         *running = Some((request_id, Arc::clone(&cancellation)));
     }
     let result = (|| {
-        let context = format!(
-            "{:?}:{}:{:?}",
-            capture.root, capture.base.page_id, capture.ink_hash
-        );
+        let context = warm_context("notebook", &capture.root);
         let cancelled = || {
             cancellation.load(Ordering::SeqCst)
                 || !authorization(app, job, addon).is_ok_and(|current| current == original)
@@ -508,6 +505,87 @@ pub(crate) fn invoke(
     })();
     proposals.running.lock().unwrap().take();
     result
+}
+
+/// A warm worker serves one notebook and one kind of grant. The fingerprint in the runtime adds
+/// the verified version and inventory; a disable, remove or update ends the worker outright.
+fn warm_context(grant: &str, root: &Path) -> String {
+    let root = fs::canonicalize(root).unwrap_or_else(|_| root.into());
+    format!("{grant}:{}", root.display())
+}
+
+pub(crate) fn is_session_math(app: &tauri::AppHandle) -> bool {
+    let addon = &super::catalog::MATH;
+    app.state::<Importers>()
+        .get(addon.id)
+        .ok()
+        .and_then(|(job, _)| authorization(app, job, addon).ok())
+        .and_then(|release| manager::installed(addon, &release.path, &release.version, false).ok())
+        .is_some_and(|manifest| manifest.uses_session())
+}
+
+/// Read-only recognition text from a session math install: the transcription panel reviews it
+/// and the AI bridge returns it, so the batch's mutation candidate is discarded here. `None`
+/// means the active install is not a session addon and the legacy path applies.
+pub(crate) fn session_math(
+    app: &tauri::AppHandle,
+    selection: &crate::recognition::math_process::MathSelection,
+    page: &PageGeometry,
+    grant: &str,
+    root: &Path,
+) -> Result<Option<Result<String, String>>, String> {
+    let addon = &super::catalog::MATH;
+    let importers = app.state::<Importers>();
+    let (job, _) = importers.get(addon.id)?;
+    let Ok(original) = authorization(app, job, addon) else {
+        return Ok(None);
+    };
+    let Ok(manifest) = manager::installed(addon, &original.path, &original.version, false) else {
+        return Ok(None);
+    };
+    if !manifest.uses_session() {
+        return Ok(None);
+    }
+    if !(page.width_pt.is_finite() && page.height_pt.is_finite())
+        || page.width_pt <= 0.0
+        || page.height_pt <= 0.0
+    {
+        return Err("addon-invalid-selection".into());
+    }
+    let scope = scope(page, selection);
+    if serde_json::to_vec(&scope).map_err(|e| e.to_string())?.len() > session::MAX_SCOPE {
+        return Err("addon-invalid-selection".into());
+    }
+    let context = warm_context(grant, root);
+    let cancelled = || !authorization(app, job, addon).is_ok_and(|current| current == original);
+    let reply = app
+        .state::<session::Runtime>()
+        .run(
+            app,
+            addon,
+            "recognize-math",
+            scope,
+            Some(&context),
+            cancelled,
+        )
+        .map_err(|failure| failure.code())?;
+    Ok(Some(match reply {
+        Ok(reply) => {
+            let operations = operations(reply, page)?;
+            let [Operation::AddTypstBlock { source, .. }] = operations.as_slice() else {
+                return Err("addon-invalid-response".into());
+            };
+            let trimmed = source.trim();
+            Ok(trimmed
+                .strip_prefix('$')
+                .and_then(|inner| inner.strip_suffix('$'))
+                .unwrap_or(trimmed)
+                .trim()
+                .to_owned())
+        }
+        Err(error) if error.code == -32003 => Err(unsupported_latex(error)?),
+        Err(error) => return Err(command_problem(error.code).into()),
+    }))
 }
 
 pub(super) fn unsupported_latex(error: session::CommandError) -> Result<String, String> {

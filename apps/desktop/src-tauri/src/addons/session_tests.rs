@@ -37,6 +37,8 @@ impl Fake {
     }
 }
 
+type Frame = Box<dyn Fn(&Value) -> String + Send>;
+
 fn spawn(script: impl FnOnce(Fake) + Send + 'static) -> Result<Session, Failure> {
     spawn_with(script, || false)
 }
@@ -123,7 +125,7 @@ fn handshake_mismatch_needs_update() {
 
 #[test]
 fn invalid_frames_invalidate_the_session() {
-    let frames: Vec<Box<dyn Fn(&Value) -> String + Send>> = vec![
+    let frames: Vec<Frame> = vec![
         // Oversized.
         Box::new(|_| " ".repeat(MAX_FRAME + 1)),
         // Duplicate key.
@@ -400,4 +402,71 @@ fn unsolicited_output_and_the_request_cap_retire_a_warm_worker() {
     capped.next_id = 1;
     capped.used = Instant::now() - Duration::from_secs(601);
     assert!(!capped.healthy());
+}
+
+/// Runs the real local math package: `GOODTYPE_MATH_ZIP=<zip> cargo test -- --ignored
+/// native_math_session`. Only release-signature verification is bypassed; the inventory,
+/// manifest and handshake are the production checks.
+#[test]
+#[ignore = "needs a local Goodtype math addon package"]
+fn native_math_session_recognizes_a_selection() {
+    let zip = std::env::var("GOODTYPE_MATH_ZIP").unwrap_or_else(|_| {
+        r"C:\Users\jugri\Documents\Programieren\Goodtype\Goodtype-Math-Recognizer\target\package\goodtype-math-recognizer-0.1.0-local.20261121121521-windows-x64.zip".into()
+    });
+    let top = Path::new(&zip)
+        .file_stem()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let home = tempfile::tempdir().unwrap();
+    let dir = home.path().join("math");
+    super::super::extract_package(&mut std::fs::File::open(&zip).unwrap(), &top, &dir).unwrap();
+    let math = &super::super::catalog::MATH;
+    let inventory = super::super::verify_package(math, &dir).unwrap();
+    // A local build's inventory carries a prerelease version ("0.1.0-local.<stamp>"), which a
+    // release install refuses; the manifest itself declares the base version.
+    let version = inventory.version.split('-').next().unwrap().to_owned();
+    let bytes = std::fs::read(dir.join(super::super::manifest::FILE)).unwrap();
+    let manifest = super::super::manifest::parse(&bytes, math, &version).unwrap();
+    assert!(manifest.supports_selection("recognize-math"));
+
+    let started = Instant::now();
+    let mut session =
+        Session::start(&dir.join(math.executable()), math.id, &version, || false).unwrap();
+    let handshake = started.elapsed();
+    // A handwritten "x": two crossing diagonals.
+    let scope = json!({"command":"recognize-math","scope":{"kind":"ink-selection",
+        "page":{"widthPt":595.28,"heightPt":841.89},
+        "strokes":[
+            {"id":"s1","widthPt":2.0,"points":(0..20).map(|i| [100.0 + i as f64, 200.0 + i as f64]).collect::<Vec<_>>()},
+            {"id":"s2","widthPt":2.0,"points":(0..20).map(|i| [119.0 - i as f64, 200.0 + i as f64]).collect::<Vec<_>>()}
+        ]},"settings":{}});
+    let cold = Instant::now();
+    let reply = session.invoke(scope.clone(), || false).unwrap();
+    let cold = cold.elapsed();
+    let warm = Instant::now();
+    let again = session.invoke(scope, || false).unwrap();
+    let warm = warm.elapsed();
+    let geometry = goodtype_core::PageGeometry {
+        width_pt: 595.28,
+        height_pt: 841.89,
+    };
+    for reply in [reply, again] {
+        match reply {
+            Ok(batch) => {
+                let ops = super::super::selection::operations(batch.clone(), &geometry).unwrap();
+                eprintln!("batch {batch}");
+                assert_eq!(ops.len(), 1);
+            }
+            Err(error) => {
+                assert_eq!(error.code, -32003);
+                eprintln!(
+                    "unsupported {:?}",
+                    super::super::selection::unsupported_latex(error).unwrap()
+                );
+            }
+        }
+    }
+    assert!(session.healthy());
+    eprintln!("handshake {handshake:?}, cold invoke {cold:?}, warm invoke {warm:?}");
 }

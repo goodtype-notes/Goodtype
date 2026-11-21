@@ -891,9 +891,14 @@ impl Bridge {
                 ),
                 Some("math") => text_result(
                     serde_json::to_value(
-                        crate::recognition::recognize_ink_math(
+                        crate::recognition::recognize_math(
                             app.ok_or("no_window")?.clone(),
                             serde_json::from_value(selection).map_err(|e| e.to_string())?,
+                            crate::recognition::MathContext {
+                                root: share.root.clone(),
+                                page: b.page.geometry.clone(),
+                            },
+                            "assistant",
                         )
                         .await?,
                     )

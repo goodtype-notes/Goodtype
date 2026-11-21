@@ -86,7 +86,7 @@ fn stage(
     id
 }
 
-fn granted<'a>(_: &'a Pending) -> Result<Option<()>, StorageError> {
+fn granted(_: &Pending) -> Result<Option<()>, StorageError> {
     Ok(Some(()))
 }
 

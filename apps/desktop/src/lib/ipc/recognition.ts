@@ -23,6 +23,8 @@ export const prepareMathRecognition = () => invoke<void>("prepare_math_recogniti
 export function recognizeInkText(strokes: InkPolylines, recognizer: string | null): Promise<{ text: string }> {
   return invoke("recognize_ink_text", { selection: { strokes: strokes.map(s => s.points) }, recognizer });
 }
-export function recognizeInkMath(strokes: InkPolylines): Promise<MathRecognition> {
-  return invoke("recognize_ink_math", { selection: { strokes } });
+/** The notebook and page bound a warm recognizer; neither is sent to the addon. */
+export type MathContext = { root: string; page: { widthPt: number; heightPt: number } };
+export function recognizeInkMath(strokes: InkPolylines, context: MathContext): Promise<MathRecognition> {
+  return invoke("recognize_ink_math", { selection: { strokes }, context });
 }

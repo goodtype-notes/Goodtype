@@ -13,6 +13,7 @@
     recognizeInkText,
     removeMathRecognizer,
     type InkPolylines,
+    type MathContext,
   } from "../ipc/recognition";
   import AddonApproval from "../workspace/AddonApproval.svelte";
   import AddonPermissions from "../workspace/AddonPermissions.svelte";
@@ -29,13 +30,14 @@
   type Props = {
     polylines: InkPolylines;
     bounds: Bounds;
+    context: MathContext;
     recognizers: string[];
     math: ImporterStatus | null;
     mathAddon: RecognitionAddon | null;
     onInsert: (source: string, label: UiText) => void;
     onClose: () => void;
   };
-  let { polylines, bounds, recognizers, math, mathAddon, onInsert, onClose }: Props = $props();
+  let { polylines, bounds, context, recognizers, math, mathAddon, onInsert, onClose }: Props = $props();
 
   let addon = $state<ImporterStatus | null>(null);
   let addonBusy = $state(false);
@@ -163,11 +165,16 @@
         const result = await recognizeInkText(polylines, recognizer || null);
         if (id === request) await show(result.text, null);
       } else {
-        const result = await recognizeInkMath(polylines);
+        const result = await recognizeInkMath(polylines, context);
         if (id !== request) return;
         if (result.typst === null) {
           rawLatex = result.latex;
-          await show("", { text: notice("transcription.unsupported", { detail: result.unsupported ?? "" }), problem: true });
+          await show("", {
+            text: result.unsupported
+              ? notice("transcription.unsupported", { detail: result.unsupported })
+              : notice("transcription.unsupportedLatex"),
+            problem: true,
+          });
         } else {
           await show(result.typst, null);
         }
