@@ -229,6 +229,8 @@ pub(super) struct Session {
     diagnostics: Arc<Mutex<Vec<u8>>>,
     capabilities: HashSet<String>,
     next_id: u64,
+    /// Set by any failed call: a session never serves another request after an error.
+    failed: bool,
     pub used: Instant,
 }
 
@@ -242,7 +244,7 @@ pub(super) struct Launched {
     // Declared first so the job is shut down before the scratch directory is removed.
     child: Arc<crate::sandbox::SandboxedChild>,
     exceeded: Arc<AtomicBool>,
-    _scratch: tempfile::TempDir,
+    scratch: Option<tempfile::TempDir>,
 }
 
 impl Drop for Launched {
@@ -250,6 +252,9 @@ impl Drop for Launched {
         // The scratch watcher may briefly hold the child; stop the job before removing scratch.
         if let Err(error) = self.child.kill() {
             eprintln!("Addon session shutdown failed: {error}");
+        }
+        if let Some(Err(error)) = self.scratch.take().map(tempfile::TempDir::close) {
+            eprintln!("Addon scratch cleanup failed: {error}");
         }
     }
 }
@@ -318,7 +323,7 @@ fn launch(
         Launched {
             child,
             exceeded,
-            _scratch: scratch,
+            scratch: Some(scratch),
         },
         pipes,
     ))
@@ -509,6 +514,7 @@ impl Session {
             diagnostics,
             capabilities: HashSet::new(),
             next_id: 0,
+            failed: false,
             used: Instant::now(),
         };
         let reply = session
@@ -528,7 +534,8 @@ impl Session {
 
     pub(super) fn healthy(&mut self) -> bool {
         // Any output between requests is unsolicited, including a repeated terminal reply.
-        matches!(self.output.try_recv(), Err(mpsc::TryRecvError::Empty))
+        !self.failed
+            && matches!(self.output.try_recv(), Err(mpsc::TryRecvError::Empty))
             && self.running()
             && self.next_id < MAX_REQUESTS
             && self.used.elapsed() < Duration::from_secs(600)
@@ -568,6 +575,7 @@ impl Session {
         cancelled: impl Fn() -> bool,
     ) -> Result<Result<Value, CommandError>, Failure> {
         let result = self.exchange(method, params, timeout, cancelled);
+        self.failed |= result.is_err();
         if result.is_err() && self.exceeded() {
             return Err(Failure::StorageExceeded);
         }
