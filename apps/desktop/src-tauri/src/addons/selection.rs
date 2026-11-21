@@ -9,6 +9,8 @@ use serde_json::{Value, json};
 
 const MAX_SOURCE: usize = 64 * 1024;
 const MAX_PENDING: usize = 20;
+/// Total budget for compiling a returned batch after the addon replied.
+const COMPILE_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -95,6 +97,13 @@ fn authorized(
         path,
         epoch: state.authorization_epoch,
     })
+}
+
+/// In memory only, so a run can poll it every 20 ms: disable, remove, update and rollback reserve
+/// the job and bump the epoch. Policy and install are read from disk at invocation and commit.
+fn revoked(job: &Importer, original: &Authorization) -> bool {
+    let state = job.state.lock().unwrap();
+    state.busy() || state.authorization_epoch != original.epoch
 }
 
 pub(crate) struct Capture {
@@ -273,16 +282,25 @@ pub(super) fn operations(reply: Value, geometry: &PageGeometry) -> Result<Vec<Op
     Ok(body.batch.operations)
 }
 
-/// Validates and compiles a whole batch; one invalid operation rejects all of it.
+/// Validates and compiles a whole batch; one invalid operation rejects all of it. Up to 32
+/// compiles share one deadline, and a cancel or revocation is honored between them.
 pub(super) fn items(
     reply: Value,
     capture: &Capture,
     id: &str,
+    cancelled: impl Fn() -> bool,
 ) -> Result<Vec<ProposalItem>, String> {
+    let deadline = std::time::Instant::now() + COMPILE_BUDGET;
     operations(reply, &capture.geometry)?
         .into_iter()
         .enumerate()
         .map(|(index, op)| {
+            if cancelled() {
+                return Err("addon-cancelled".into());
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err("addon-timeout".into());
+            }
             compile(
                 &capture.root,
                 &capture.geometry,
@@ -396,12 +414,13 @@ pub(crate) struct Proposals {
     running: Mutex<Option<(String, Arc<AtomicBool>)>>,
 }
 
+/// `cancellation` comes from [`Proposals::begin`], registered before the capture.
 pub(crate) fn invoke(
     app: &tauri::AppHandle,
     addon_id: &str,
     command: &str,
     capture: Capture,
-    request_id: String,
+    cancellation: Arc<AtomicBool>,
     review_first: bool,
 ) -> Result<(Review, bool), String> {
     let importers = app.state::<Importers>();
@@ -418,20 +437,9 @@ pub(crate) fn invoke(
     };
     let direct = !review_first && manager::direct_apply(app, addon.id);
     let proposals = app.state::<Proposals>();
-    let cancellation = Arc::new(AtomicBool::new(false));
     {
-        let mut running = proposals.running.lock().unwrap();
-        if running.is_some() || request_id.len() > 80 {
-            return Err("addon-unavailable".into());
-        }
-        *running = Some((request_id, Arc::clone(&cancellation)));
-    }
-    let result = (|| {
         let context = warm_context("notebook", &capture.root);
-        let cancelled = || {
-            cancellation.load(Ordering::SeqCst)
-                || !authorization(app, job, addon).is_ok_and(|current| current == original)
-        };
+        let cancelled = || cancellation.load(Ordering::SeqCst) || revoked(job, &original);
         let reply = app
             .state::<session::Runtime>()
             .run(
@@ -445,7 +453,7 @@ pub(crate) fn invoke(
             .map_err(|failure| failure.code())?;
         let id = crate::helper::random_hex(16)?;
         let (items, latex, correction) = match reply {
-            Ok(reply) => (items(reply, &capture, &id)?, None, None),
+            Ok(reply) => (items(reply, &capture, &id, cancelled)?, None, None),
             Err(error) if error.code == -32003 && addon.id == "math" => {
                 let latex = unsupported_latex(error)?;
                 let x_pt = capture.anchor["x"]
@@ -502,9 +510,7 @@ pub(crate) fn invoke(
             },
         );
         Ok((review, direct))
-    })();
-    proposals.running.lock().unwrap().take();
-    result
+    }
 }
 
 /// A warm worker serves one notebook and one kind of grant. The fingerprint in the runtime adds
@@ -514,14 +520,28 @@ fn warm_context(grant: &str, root: &Path) -> String {
     format!("{grant}:{}", root.display())
 }
 
+/// The active install's own manifest decides the transport, never whether it is authorized: a
+/// session install that is disabled, revoked or failed its handshake must not fall through to
+/// the unconfined legacy `--serve` process.
 pub(crate) fn is_session_math(app: &tauri::AppHandle) -> bool {
     let addon = &super::catalog::MATH;
-    app.state::<Importers>()
-        .get(addon.id)
+    install_dir(app, addon)
         .ok()
-        .and_then(|(job, _)| authorization(app, job, addon).ok())
-        .and_then(|release| manager::installed(addon, &release.path, &release.version, false).ok())
+        .and_then(|dir| dir.active())
+        .and_then(|(version, path)| manager::installed(addon, &path, &version, false).ok())
         .is_some_and(|manifest| manifest.uses_session())
+}
+
+/// `None` keeps the legacy route; a session transport yields its authorization or its refusal.
+pub(super) fn session_route(
+    session: bool,
+    authorize: impl FnOnce() -> Result<Authorization, String>,
+) -> Result<Option<Authorization>, String> {
+    if session {
+        authorize().map(Some)
+    } else {
+        Ok(None)
+    }
 }
 
 /// Read-only recognition text from a session math install: the transcription panel reviews it
@@ -537,15 +557,10 @@ pub(crate) fn session_math(
     let addon = &super::catalog::MATH;
     let importers = app.state::<Importers>();
     let (job, _) = importers.get(addon.id)?;
-    let Ok(original) = authorization(app, job, addon) else {
+    let Some(original) = session_route(is_session_math(app), || authorization(app, job, addon))?
+    else {
         return Ok(None);
     };
-    let Ok(manifest) = manager::installed(addon, &original.path, &original.version, false) else {
-        return Ok(None);
-    };
-    if !manifest.uses_session() {
-        return Ok(None);
-    }
     if !(page.width_pt.is_finite() && page.height_pt.is_finite())
         || page.width_pt <= 0.0
         || page.height_pt <= 0.0
@@ -557,7 +572,7 @@ pub(crate) fn session_math(
         return Err("addon-invalid-selection".into());
     }
     let context = warm_context(grant, root);
-    let cancelled = || !authorization(app, job, addon).is_ok_and(|current| current == original);
+    let cancelled = || revoked(job, &original);
     let reply = app
         .state::<session::Runtime>()
         .run(
@@ -609,13 +624,56 @@ pub(super) fn command_problem(code: i32) -> &'static str {
     }
 }
 
+impl Proposals {
+    /// Registers the run before its capture, so a cancel that arrives during capture or
+    /// verification is latched. Pair with [`Proposals::finish`].
+    pub(crate) fn begin(&self, request_id: &str) -> Result<Arc<AtomicBool>, String> {
+        let mut running = self.running.lock().unwrap();
+        if running.is_some() || request_id.is_empty() || request_id.len() > 80 {
+            return Err("addon-unavailable".into());
+        }
+        let flag = Arc::new(AtomicBool::new(false));
+        *running = Some((request_id.into(), Arc::clone(&flag)));
+        Ok(flag)
+    }
+
+    pub(super) fn cancel(&self, request_id: &str) {
+        if let Some((id, flag)) = self.running.lock().unwrap().as_ref()
+            && id == request_id
+        {
+            flag.store(true, Ordering::SeqCst);
+        }
+    }
+
+    pub(crate) fn finish(&self, request_id: &str) {
+        let mut running = self.running.lock().unwrap();
+        if running.as_ref().is_some_and(|(id, _)| id == request_id) {
+            running.take();
+        }
+    }
+
+    /// A disable, removal, update or rollback (an epoch bump) can never commit these again.
+    pub(super) fn forget_addon(&self, addon_id: &str) {
+        self.pending
+            .lock()
+            .unwrap()
+            .retain(|_, p| p.addon.id != addon_id);
+    }
+
+    /// Closing a notebook drops its proposals; reopening requires a new invocation.
+    pub(crate) fn forget_root(&self, root: &Path) {
+        let canonical = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.into());
+        let root = canonical(root);
+        self.pending
+            .lock()
+            .unwrap()
+            .retain(|_, p| canonical(&p.capture.root) != root);
+    }
+}
+
 #[tauri::command]
 pub(crate) fn addon_cancel(proposals: tauri::State<'_, Proposals>, request_id: String) {
-    if let Some((id, flag)) = proposals.running.lock().unwrap().as_ref()
-        && *id == request_id
-    {
-        flag.store(true, Ordering::SeqCst);
-    }
+    proposals.cancel(&request_id);
 }
 
 #[tauri::command]

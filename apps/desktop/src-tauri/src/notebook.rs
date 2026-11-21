@@ -674,15 +674,35 @@ pub async fn invoke_addon_selection(
         request_id,
         review_first,
     } = selection;
-    let capture = on_page(&roots, &histories, root, page_id, move |root, page, _| {
-        addons::capture(root, page, stroke_ids)
-    })
-    .await?;
-    let (review, direct) = tauri::async_runtime::spawn_blocking(move || {
-        addons::invoke(&app, &addon_id, &command, capture, request_id, review_first)
-    })
-    .await
-    .map_err(NotebookError::other)??;
+    use tauri::Manager;
+    // Registered before the capture so a cancel during capture or verification is not lost.
+    let cancellation = app
+        .state::<addons::Proposals>()
+        .begin(&request_id)
+        .map_err(NotebookError::other)?;
+    let run_app = app.clone();
+    let result = async {
+        let capture = on_page(&roots, &histories, root, page_id, move |root, page, _| {
+            addons::capture(root, page, stroke_ids)
+        })
+        .await?;
+        tauri::async_runtime::spawn_blocking(move || {
+            addons::invoke(
+                &run_app,
+                &addon_id,
+                &command,
+                capture,
+                cancellation,
+                review_first,
+            )
+        })
+        .await
+        .map_err(NotebookError::other)?
+        .map_err(NotebookError::from)
+    }
+    .await;
+    app.state::<addons::Proposals>().finish(&request_id);
+    let (review, direct) = result?;
     Ok(AddonInvocation { review, direct })
 }
 

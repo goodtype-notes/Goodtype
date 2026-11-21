@@ -19,6 +19,13 @@ pub(crate) fn with_math_installation<T>(
     let installation = if platform_supported() && state.is_some() && manager::enabled(app, &MATH)? {
         if let Some((version, path)) = install_dir(app, &MATH)?.active() {
             manager::require_permissions(app, &MATH, &path, &version, MATH.permissions())?;
+            // A session install runs only in its AppContainer; it never gets `--serve` here.
+            if manager::installed(&MATH, &path, &version, false)
+                .map_err(manager::manifest_problem)?
+                .uses_session()
+            {
+                return Err("addon-unavailable".into());
+            }
             let digest = installation_digest(&path)?;
             Some((path.join(MATH.executable()), digest))
         } else {

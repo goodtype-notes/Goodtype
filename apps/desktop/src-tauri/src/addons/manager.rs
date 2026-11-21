@@ -571,22 +571,26 @@ pub async fn addon_list(
             Activity::Finished { .. } => ("finished", None),
             Activity::ImportFailed { .. } => ("importFailed", None),
         };
-        // Legacy importers stay on the Job Object path this beta; sessions run sandboxed.
-        let (formats, memory_bytes, timeout_seconds, output_bytes, isolation) = match addon.kind {
+        let (formats, memory_bytes, timeout_seconds, output_bytes) = match addon.kind {
             Kind::Import { extensions, .. } => (
                 extensions,
                 JOB_MEMORY_BYTES,
                 import::IMPORT_TIMEOUT.as_secs(),
                 MAX_JSON_BYTES,
-                "job",
             ),
             Kind::Recognize { .. } => (
                 &[][..],
                 crate::recognition::math_process::MEMORY_BYTES,
                 30,
                 crate::recognition::math_process::LINE_LIMIT,
-                "sandbox",
             ),
+        };
+        // The installed manifest's transport decides: legacy CLIs stay on the Job Object path
+        // this beta, sessions run in the AppContainer.
+        let isolation = if declaration.uses_session() {
+            "sandbox"
+        } else {
+            "job"
         };
         addons.push(ManagedAddon {
             id: addon.id,
@@ -642,6 +646,8 @@ fn shutdown(app: &tauri::AppHandle, addon: &Addon) {
         state.authorization_epoch += 1;
         state.incompatible_session = None;
     }
+    app.state::<super::selection::Proposals>()
+        .forget_addon(addon.id);
     if matches!(addon.kind, Kind::Recognize { .. }) {
         app.state::<super::session::Runtime>().shutdown();
         app.state::<crate::recognition::math_process::MathProcess>()

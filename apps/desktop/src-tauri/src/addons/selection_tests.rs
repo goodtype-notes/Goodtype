@@ -171,11 +171,12 @@ fn batch_validation_rejects_the_whole_batch() {
         items(
             batch(json!([block("$ x^2 $"), block("#let")])),
             &capture,
-            "a"
+            "a",
+            || false
         )
         .is_err()
     );
-    let compiled = items(batch(json!([block("$ x^2 $")])), &capture, "a").unwrap();
+    let compiled = items(batch(json!([block("$ x^2 $")])), &capture, "a", || false).unwrap();
     assert_eq!(compiled.len(), 1);
     assert!(compiled[0].svg.contains("<svg"));
 }
@@ -185,7 +186,7 @@ fn reviewed_insert_is_one_undo_step_without_ai() {
     let mut book = book();
     let proposals = Proposals::default();
     let capture = captured(&book);
-    let items = items(batch(json!([block("$ x^2 $")])), &capture, "a").unwrap();
+    let items = items(batch(json!([block("$ x^2 $")])), &capture, "a", || false).unwrap();
     let before = storage::open_page(&book.root, PAGE).unwrap();
     let id = stage(&proposals, capture, items, None);
 
@@ -248,7 +249,7 @@ fn stale_revision_and_revoked_addon_are_refused() {
     let mut book = book();
     let proposals = Proposals::default();
     let capture = captured(&book);
-    let items = items(batch(json!([block("$ x $")])), &capture, "a").unwrap();
+    let items = items(batch(json!([block("$ x $")])), &capture, "a", || false).unwrap();
     let id = stage(&proposals, capture, items, None);
 
     // Disabling, removing or updating the addon during the run revokes the proposal.
@@ -348,4 +349,69 @@ fn unsupported_reply_needs_bounded_latex_only() {
     assert_eq!(command_problem(-32002), "addon-cancelled");
     assert_eq!(command_problem(-32001), "addon-command-failed");
     assert_eq!(command_problem(-32603), "addon-command-failed");
+}
+
+#[test]
+fn session_math_never_falls_back_to_the_legacy_process() {
+    let math = &super::super::catalog::MATH;
+    let bytes = serde_json::to_vec(&math.declaration("0.1.0")).unwrap();
+    let manifest = super::super::manifest::parse(&bytes, math, "0.1.0").unwrap();
+    assert!(manifest.uses_session());
+    // A session install whose handshake failed reports that, instead of Ok(None) (legacy route).
+    let refused = session_route(manifest.uses_session(), || Err("addon-needs-update".into()));
+    assert_eq!(refused.err().as_deref(), Some("addon-needs-update"));
+    let disabled = session_route(true, || Err("addon-unavailable".into()));
+    assert_eq!(disabled.err().as_deref(), Some("addon-unavailable"));
+    // Only a legacy manifest keeps the legacy route, and it never asks for a session grant.
+    let legacy = session_route(false, || panic!("a legacy install needs no session grant"));
+    assert!(matches!(legacy, Ok(None)));
+}
+
+#[test]
+fn epoch_bumps_and_notebook_close_drop_pending_proposals() {
+    let (book, other) = (book(), book());
+    let proposals = Proposals::default();
+    let first = stage(&proposals, captured(&book), vec![], None);
+    let second = stage(&proposals, captured(&other), vec![], None);
+    proposals.forget_root(&book.root);
+    let pending = proposals.pending.lock().unwrap();
+    assert!(!pending.contains_key(&first) && pending.contains_key(&second));
+    drop(pending);
+    proposals.forget_addon("goodnotes");
+    assert!(proposals.pending.lock().unwrap().contains_key(&second));
+    proposals.forget_addon("math");
+    assert!(proposals.pending.lock().unwrap().is_empty());
+    // The pending limit is free again for the next run.
+    for _ in 0..MAX_PENDING {
+        stage(&proposals, captured(&other), vec![], None);
+    }
+    proposals.forget_addon("math");
+    assert!(proposals.pending.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_cancel_during_capture_is_latched_before_the_run() {
+    let proposals = Proposals::default();
+    let flag = proposals.begin("r1").unwrap();
+    assert!(proposals.begin("r2").is_err(), "one run at a time");
+    proposals.cancel("other");
+    assert!(!flag.load(Ordering::SeqCst));
+    proposals.cancel("r1");
+    assert!(flag.load(Ordering::SeqCst));
+    proposals.finish("other");
+    assert!(proposals.begin("r2").is_err());
+    proposals.finish("r1");
+    assert!(proposals.begin("r2").is_ok());
+    assert!(Proposals::default().begin(&"x".repeat(81)).is_err());
+}
+
+#[test]
+fn post_run_compiles_honor_cancel() {
+    let book = book();
+    let capture = captured(&book);
+    let reply = batch(json!([block("$ x $"), block("$ y $")]));
+    assert_eq!(
+        items(reply, &capture, "a", || true).err().as_deref(),
+        Some("addon-cancelled")
+    );
 }

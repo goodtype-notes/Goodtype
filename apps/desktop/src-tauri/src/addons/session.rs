@@ -488,9 +488,12 @@ impl Runtime {
         let state = app.state::<super::Importers>();
         let (job, _) = state.get(addon.id).map_err(|_| Failure::Unavailable)?;
         let mut slot = self.0.try_lock().map_err(|_| Failure::Unavailable)?;
-        // Lifecycle commands make the job busy before changing the active release or policy.
-        let cancelled =
-            || cancelled() || job.busy() || !super::manager::enabled(app, addon).unwrap_or(false);
+        // Polled every 20 ms, so in memory only: lifecycle commands reserve the job before
+        // changing the active release or policy. Disk is checked here, once, and at commit.
+        let cancelled = || cancelled() || job.busy();
+        if !super::manager::enabled(app, addon).unwrap_or(false) {
+            return Err(Failure::Unavailable);
+        }
         let (version, path) = super::install_dir(app, addon)
             .map_err(|_| Failure::Unavailable)?
             .active()
