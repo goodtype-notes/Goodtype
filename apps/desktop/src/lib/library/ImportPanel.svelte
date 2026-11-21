@@ -48,7 +48,9 @@
     onImported: () => void;
   } = $props();
 
-  const sourceIds = $derived(sources.map(({ id }) => id));
+  let statuses = $state<Record<ImporterId, ImporterStatus> | null>(null);
+  const availableSources = $derived(sources.filter(({ id }) => !statuses?.[id]?.disabled));
+  const sourceIds = $derived(availableSources.map(({ id }) => id));
   const selectedSource = $derived(sources.find(({ id }) => id === tool) ?? sources[0]);
   const prefix = $derived(selectedSource.i18nPrefix);
   const source = $derived({
@@ -62,7 +64,6 @@
     batch: $t(`${prefix}.batch`),
   });
 
-  let statuses = $state<Record<ImporterId, ImporterStatus> | null>(null);
   let failure = $state<string | null>(null);
   let allowArtwork = $state(false);
   let tabs = $state<Partial<Record<ImporterId, HTMLButtonElement>>>({});
@@ -79,6 +80,16 @@
   async function refresh() {
     try {
       statuses = await allImporterStatus();
+      if (statuses[tool]?.disabled) {
+        const first = sourceIds[0];
+        if (!first) {
+          onClose();
+          return;
+        }
+        tool = first;
+        allowArtwork = false;
+        void tick().then(() => tabs[first]?.focus());
+      }
       failure = null;
     } catch (error) {
       failure = errorDetails(error);
@@ -215,7 +226,7 @@
   {#snippet heading()}
       <!-- The sources are the title: choosing where notebooks come from is the panel's first step. -->
       <div class="sources" role="tablist" aria-label={$t("library.importFrom")}>
-        {#each sources as { id, i18nPrefix } (id)}
+        {#each availableSources as { id, i18nPrefix } (id)}
           {@const running = statuses ? importerBusy(statuses[id].activity) : false}
           <button
             type="button"

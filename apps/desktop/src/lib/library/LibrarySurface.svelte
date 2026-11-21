@@ -158,14 +158,16 @@
       failure = message(error);
       return;
     }
-    const first = importSources[0];
-    if (!first) return;
-    importTool ||= first.id;
     try {
-      importTool = sourceWithJob(await allImporterStatus()) ?? importTool;
+      const statuses = await allImporterStatus();
+      importSources = importSources.filter(({ id }) => !statuses[id]?.disabled);
+      importTool = sourceWithJob(statuses) ?? importTool;
     } catch {
       // The panel reports a status it cannot read itself.
     }
+    const first = importSources[0];
+    if (!first) return;
+    if (!importSources.some(({ id }) => id === importTool)) importTool = first.id;
     importJob = null;
     importing = true;
   }
@@ -238,7 +240,7 @@
           .then(async (statuses) => {
             const source = sourceWithJob(statuses);
             if (source) {
-              importSources = await importAddons();
+              importSources = (await importAddons()).filter(({ id }) => !statuses[id]?.disabled);
               importTool = source;
               importing = true;
             }

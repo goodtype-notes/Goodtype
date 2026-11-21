@@ -45,6 +45,7 @@ export type ImporterStatus = {
   /** The tested release this Goodtype version would download; null while none is published. */
   release: { version: string; sizeBytes: number } | null;
   installed: string | null;
+  disabled: boolean;
   installedProblem: string | null;
   source: { name: string; sizeBytes: number } | null;
   activity: ImporterActivity;

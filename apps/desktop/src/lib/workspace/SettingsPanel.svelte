@@ -1,9 +1,11 @@
 <script lang="ts">
+  import AddonManagerSheet from "./AddonManager.svelte";
+  import { listAddons, setAddonDirectApply, type AddonManager } from "../ipc/addons";
   import CodexSettings from "../helper/CodexSettings.svelte";
   import HelperSetup from "../helper/HelperSetup.svelte";
   import { onMount, tick, untrack } from "svelte";
   import { typstFontFamilies } from "../ipc/typst";
-  import { t } from "../i18n";
+  import { locale, t } from "../i18n";
   import type { AppSettings } from "../settings";
   import {
     settingGroups,
@@ -52,7 +54,43 @@
     if (!("__TAURI_INTERNALS__" in window)) return;
     void typstFontFamilies().then(value => { fonts = value; }).catch(() => { fontLoadFailed = true; });
   });
-  const groups = $derived(settingGroups($t, [...new Set([...fonts, settings.inlineTextFont, selectedBlockFont].filter((font): font is string => Boolean(font)))], settings.aiHelper.enabled));
+  let addonManager = $state.raw<AddonManager>();
+  const groups = $derived(settingGroups($t, [...new Set([...fonts, settings.inlineTextFont, selectedBlockFont].filter((font): font is string => Boolean(font)))], settings.aiHelper.enabled, addonManager, $locale));
+  let addonId = $state<string>();
+  let addonError = $state<"loadFailed" | "policyFailed" | null>(null);
+  let policyPending = $state(false);
+  const managedAddon = $derived(addonManager?.addons.find(addon => addon.id === addonId));
+
+  async function refreshAddons() {
+    addonManager = await listAddons();
+    if (addonError === "loadFailed") addonError = null;
+  }
+
+  $effect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    void refreshAddons().catch(() => addonError = "loadFailed");
+  });
+
+  $effect(() => {
+    if (!addonId) return;
+    const timer = setInterval(() => void refreshAddons().catch(() => addonError = "loadFailed"), 700);
+    return () => clearInterval(timer);
+  });
+
+  async function toggleAddonPolicy() {
+    if (!addonManager || policyPending) return;
+    policyPending = true;
+    addonError = null;
+    try {
+      await setAddonDirectApply(null, !addonManager.allowDirectApply);
+      await refreshAddons();
+    } catch {
+      addonError = "policyFailed";
+    } finally {
+      policyPending = false;
+    }
+  }
+
   let groupId = $state(untrack(() => initialGroup));
   $effect(() => { if (!groups.some(group => group.id === groupId)) groupId = "appearance"; });
   let query = $state("");
@@ -132,6 +170,15 @@
       disabled={item.control.locked?.(settings) ?? false}
       onclick={() => apply(item, !on)}
     ><span></span></button>
+  {:else if item.control.kind === "addonPolicy"}
+    <button type="button" role="switch" aria-checked={addonManager?.allowDirectApply ?? false}
+      aria-label={item.label} class="toggle" class:on={addonManager?.allowDirectApply}
+      disabled={!addonManager || policyPending} onclick={() => void toggleAddonPolicy()}><span></span></button>
+    {#if addonError}<p role="alert" class="hint">{$t(`addons.manager.${addonError}`)}</p>{/if}
+  {:else if item.control.kind === "addon"}
+    {@const id = item.control.addonId}
+    <button type="button" class="run" aria-label={$t("addons.manager.manageName", { name: item.label })}
+      onclick={() => addonId = id}>{item.control.buttonLabel}</button>
   {:else if item.control.kind === "action"}
     {@const control = item.control}
     <button type="button" class="run" onclick={() => control.run(actions)}>{control.buttonLabel}</button>
@@ -177,7 +224,7 @@
 {/snippet}
 
 {#snippet setting(item: SettingItem, where?: string)}
-  <div class="setting" class:stacked={item.control.kind !== "toggle"}>
+  <div class="setting" class:stacked={item.control.kind !== "toggle" && item.control.kind !== "addonPolicy"}>
     <div class="words">
       <span class="name">{item.label}</span>
       {#if where}<span class="where">{where}</span>{/if}
@@ -277,6 +324,10 @@
     </div>
   </div>
 </div>
+
+{#if managedAddon}
+  <AddonManagerSheet addon={managedAddon} refresh={refreshAddons} onClose={() => addonId = undefined} />
+{/if}
 
 <style>
   .select-shell { position: relative; display: inline-flex; width: min(360px, 100%); }

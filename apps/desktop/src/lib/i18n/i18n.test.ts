@@ -11,6 +11,8 @@ import { typstSnippets } from "../editor/snippets";
 import { paletteTools } from "../notebook/palette";
 import { DEFAULT_SETTINGS } from "../settings";
 import SettingsPanel from "../workspace/SettingsPanel.svelte";
+import AddonManagerSheet from "../workspace/AddonManager.svelte";
+import type { ManagedAddon } from "../ipc/addons";
 import ConflictDialog from "../workspace/ConflictDialog.svelte";
 import { presetPresentation, type PresetSummary } from "../page/presets";
 
@@ -95,6 +97,31 @@ describe("bundled English and German interface", () => {
     expect(searchSettings("Handballen", groups).map(hit => hit.item.id)).toContain("drawWithFinger");
     const smoothing = groups.flatMap(group => group.items).find(item => item.id === "smoothing")!;
     if (smoothing.control.kind === "slider") expect(smoothing.control.format(0.2)).toBe("0,20");
+  });
+
+  it("finds addon settings by name in both languages and renders accessible management actions", () => {
+    const addon: ManagedAddon = {
+      id: "onenote", name: { en: "OneNote Importer", de: "OneNote-Import" },
+      installed: "0.1.0", status: "disabled", expectedApi: "goodtype-api 0.1", foundApi: null,
+      permissions: ["picked-import-file"], catalogPermissions: ["picked-import-file"],
+      formats: ["one"], memoryBytes: 1024, timeoutSeconds: 30, outputBytes: 1024,
+      release: null, update: null, updateChecked: false, updateFailed: false,
+      canCheckUpdate: true, directApply: false, activity: "idle", progress: null,
+    };
+    const manager = { allowDirectApply: false, addons: [addon] };
+    for (const language of ["en", "de"] as const) {
+      setLanguage(language);
+      const groups = settingGroups(get(t), [], false, manager, language);
+      const hits = searchSettings(addon.name[language], groups);
+      expect(hits.map(hit => hit.item.id)).toContain("addons:onenote");
+      expect(hits.find(hit => hit.item.id === "addons:onenote")?.item.label).toBe(addon.name[language]);
+      expect(searchSettings(translate("addons.manager.global"), groups).map(hit => hit.item.id)).toContain("addons:direct-apply");
+      const html = render(AddonManagerSheet, { props: { addon, refresh: async () => {}, onClose() {} } }).body;
+      expect(html).toContain('role="dialog"');
+      expect(html).toContain('type="checkbox"');
+      expect(html).toContain(translate("addons.manager.enable"));
+      expect(html).toContain(translate("addons.manager.permission.picked-import-file"));
+    }
   });
 
   it("renders German semantic controls and escapes user-provided details", () => {

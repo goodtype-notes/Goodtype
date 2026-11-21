@@ -1,4 +1,5 @@
 import type { AppSettings, HelperPermission } from "../settings";
+import type { AddonManager } from "../ipc/addons";
 import { LANGUAGES, translate, formatNumber, type Translator } from "../i18n";
 import { paletteTools, type PaletteCommand } from "../notebook/palette";
 
@@ -27,6 +28,8 @@ import { paletteTools, type PaletteCommand } from "../notebook/palette";
 export type SettingActions = { openMetrics: () => void; changePython: () => void };
 
 export type SettingControl =
+  | { kind: "addon"; addonId: string; buttonLabel: string }
+  | { kind: "addonPolicy" }
   | {
       kind: "toggle";
       read: (settings: AppSettings) => boolean;
@@ -74,7 +77,7 @@ export type SettingGroup = {
   items: SettingItem[];
 };
 
-export function settingGroups(t: Translator = translate, fonts: string[] = [], aiEnabled = false): SettingGroup[] { const groups: SettingGroup[] = [
+export function settingGroups(t: Translator = translate, fonts: string[] = [], aiEnabled = false, addons?: AddonManager, language = "en"): SettingGroup[] { const groups: SettingGroup[] = [
   {
     id: "appearance",
     title: t("workspace.appearance"),
@@ -383,6 +386,26 @@ export function settingGroups(t: Translator = translate, fonts: string[] = [], a
     ],
   },
 ];
+  groups.push({
+    id: "addons",
+    title: t("addons.manager.title"),
+    icon: "M4 4h7v5h2V4h7v7h-5v2h5v7h-7v-5h-2v5H4v-7h5v-2H4z",
+    items: [
+      {
+        id: "addons:direct-apply",
+        label: t("addons.manager.global"),
+        hint: t("addons.manager.globalHint"),
+        keywords: t("addons.manager.search").split(" "),
+        control: { kind: "addonPolicy" },
+      },
+      ...(addons?.addons ?? []).map((addon): SettingItem => ({
+        id: `addons:${addon.id}`,
+        label: language === "de" ? addon.name.de : addon.name.en,
+        keywords: [addon.id, addon.name.en, addon.name.de, ...t("addons.manager.search").split(" ")],
+        control: { kind: "addon", addonId: addon.id, buttonLabel: t("addons.manager.manage") },
+      })),
+    ],
+  });
   if (aiEnabled) return groups;
   const enable = groups.find(group => group.id === "aiHelper")!.items[0];
   return groups.filter(group => group.id !== "aiHelper").map(group => group.id === "appearance" ? { ...group, items: [...group.items, enable] } : group);

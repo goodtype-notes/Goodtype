@@ -215,7 +215,7 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6.5h14M12 6.5V18M9 18h6"></path></svg>
           <span>{$t("transcription.kindText")}</span>
         </button>
-        {#if recognizerAddon}
+        {#if recognizerAddon && !(addon ?? math)?.disabled}
           <button type="button" class:current={kind === "math"} aria-pressed={kind === "math"}
             disabled={busy} onclick={() => void recognize("math")}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M9.5 4.5l3 3 3-3M9.5 16.5l3 3 3-3"></path></svg>
@@ -243,7 +243,7 @@
       <p class="message" class:problem={message.problem} role={message.problem ? "alert" : "status"}>{renderMessage(message.text, $t)}</p>
     {/if}
 
-    {#if offering && recognizerAddon}
+    {#if offering && recognizerAddon && !(addon ?? math)?.disabled}
       <section class="offer" aria-live="polite">
         {#if addon?.activity.kind === "downloading"}
           <p class="lead">{$t("transcription.downloadingAddon")}</p>
