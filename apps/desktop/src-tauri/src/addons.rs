@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -1076,6 +1076,13 @@ struct State {
     update_checked: bool,
     update_problem: Option<String>,
     startup_invalid: bool,
+    stopping_import: bool,
+}
+
+impl State {
+    fn busy(&self) -> bool {
+        self.stopping_import || self.activity.as_ref().is_some_and(Activity::is_busy)
+    }
 }
 
 /// One importer's job. One download or import at a time per importer.
@@ -1083,29 +1090,49 @@ struct State {
 pub struct Importer {
     state: Arc<Mutex<State>>,
     cancel: Arc<AtomicBool>,
+    import_finished: Arc<Condvar>,
 }
 
 impl Importer {
     fn set(&self, activity: Activity) {
         self.state.lock().unwrap().activity = Some(activity);
+        self.import_finished.notify_all();
     }
 
     fn busy(&self) -> bool {
-        self.state
-            .lock()
-            .unwrap()
-            .activity
-            .as_ref()
-            .is_some_and(Activity::is_busy)
+        self.state.lock().unwrap().busy()
     }
 
     fn begin(&self, activity: Activity) -> Result<(), String> {
         let mut state = self.state.lock().unwrap();
-        if state.activity.as_ref().is_some_and(Activity::is_busy) {
+        if state.busy() {
             return Err("the importer is busy".into());
         }
         self.cancel.store(false, Ordering::SeqCst);
         state.activity = Some(activity);
+        Ok(())
+    }
+
+    fn stop_import_and_reserve(&self) -> Result<(), String> {
+        let mut state = self.state.lock().unwrap();
+        if state.stopping_import {
+            return Err("addon is busy".into());
+        }
+        if let Some(Activity::Importing { cancelling, .. }) = state.activity.as_mut() {
+            *cancelling = true;
+            state.stopping_import = true;
+            self.cancel.store(true, Ordering::SeqCst);
+            state = self
+                .import_finished
+                .wait_while(state, |state| {
+                    matches!(state.activity, Some(Activity::Importing { .. }))
+                })
+                .unwrap();
+            state.stopping_import = false;
+        } else if state.busy() {
+            return Err("addon is busy".into());
+        }
+        state.activity = Some(Activity::Installing);
         Ok(())
     }
 }
@@ -1151,6 +1178,7 @@ pub struct ImporterStatus {
     /// Installed version, when its files still match its manifest and contract.
     pub installed: Option<String>,
     pub disabled: bool,
+    pub catalog_permissions: &'static [manifest::Permission],
     /// Why an installed copy cannot be used, if it cannot.
     pub installed_problem: Option<String>,
     pub source: Option<SourceView>,
@@ -1242,6 +1270,7 @@ pub async fn importer_status(
         }),
         installed,
         disabled,
+        catalog_permissions: tool.permissions(),
         installed_problem,
         source: source.as_deref().and_then(source_view),
         activity: activity.unwrap_or(Activity::Idle),

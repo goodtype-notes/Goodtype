@@ -165,6 +165,10 @@ impl MathProcess {
         if reply.is_err() {
             slot.take();
         }
+        if !crate::addons::recognize::math_available(app)? {
+            slot.take();
+            return Err("math recognizer was disabled or removed".into());
+        }
         reply?
     }
 }

@@ -280,8 +280,7 @@ pub async fn import_pick_source(
     }
     let view = source_view(&path).ok_or("that file cannot be read")?;
     let mut state = importer.state.lock().unwrap();
-    if state.activity.as_ref().is_some_and(Activity::is_busy)
-        || install_dir(&app, tool)?.active().is_some() && !manager::enabled(&app, tool)?
+    if state.busy() || install_dir(&app, tool)?.active().is_some() && !manager::enabled(&app, tool)?
     {
         return Err("addon is disabled or busy".into());
     }
@@ -370,6 +369,7 @@ pub fn import_start(
     }
     let state = importer.state.clone();
     let cancel = importer.cancel.clone();
+    let import_finished = importer.import_finished.clone();
     std::thread::spawn(move || {
         let result = run_import(
             tool,
@@ -386,6 +386,7 @@ pub fn import_start(
             Ok(result) => Activity::Finished { result },
             Err(message) => Activity::ImportFailed { message },
         });
+        import_finished.notify_all();
     });
     Ok(())
 }
@@ -437,7 +438,13 @@ pub(super) fn run_import(
             }
         }
     })?;
-    state.lock().unwrap().activity = Some(Activity::Publishing);
+    {
+        let mut state = state.lock().unwrap();
+        if state.stopping_import {
+            return Err(CANCELLED.into());
+        }
+        state.activity = Some(Activity::Publishing);
+    }
     let entries = match read_report(&report) {
         Ok(entries) => entries,
         Err(_) if finished.cancelled => Vec::new(),

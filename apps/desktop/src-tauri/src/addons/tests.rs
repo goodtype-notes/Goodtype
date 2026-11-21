@@ -978,3 +978,33 @@ fn real_pinned_importers_upgrade_to_manifest_packages() {
         assert!(path.join(manifest::FILE).is_file());
     }
 }
+
+#[test]
+fn lifecycle_cancels_and_joins_imports_but_cannot_interrupt_publication() {
+    let job = Importer::default();
+    job.begin(Activity::Importing {
+        done: 0,
+        total: 1,
+        cancelling: false,
+    })
+    .unwrap();
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !job.cancel.load(Ordering::SeqCst) && Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+            let invalidated = job.state.lock().unwrap().stopping_import;
+            job.set(Activity::Idle);
+            assert!(invalidated);
+        });
+        job.stop_import_and_reserve().unwrap();
+        assert!(job.busy());
+    });
+    job.set(Activity::Publishing);
+    assert!(job.stop_import_and_reserve().is_err());
+    assert!(matches!(
+        job.state.lock().unwrap().activity,
+        Some(Activity::Publishing)
+    ));
+}

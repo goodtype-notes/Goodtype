@@ -377,23 +377,34 @@ pub async fn addon_set_enabled(
     id: String,
     enabled: bool,
 ) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || set_enabled(&app, id, enabled))
+        .await
+        .map_err(|_| "enable-write-failed")?
+}
+
+fn set_enabled(app: &tauri::AppHandle, id: String, enabled: bool) -> Result<(), String> {
     let importers = app.state::<Importers>();
     let (job, addon) = importers.get(&id)?;
-    job.begin(Activity::Installing).map_err(|_| "busy")?;
+    if enabled {
+        job.begin(Activity::Installing)
+    } else {
+        job.stop_import_and_reserve()
+    }
+    .map_err(|_| "busy")?;
     let result = (|| {
         if enabled {
-            let (version, path) = install_dir(&app, addon)?.active().ok_or("unavailable")?;
+            let (version, path) = install_dir(app, addon)?.active().ok_or("unavailable")?;
             if !platform_supported() {
                 return Err("unsupported-os".into());
             }
             installed(addon, &path, &version, true).map_err(manifest_problem)?;
             job.state.lock().unwrap().startup_invalid = false;
         }
-        patch(&app, |policy| {
+        patch(app, |policy| {
             policy.addons.entry(id).or_default().enabled = enabled;
         })?;
         if !enabled {
-            shutdown(&app, addon);
+            shutdown(app, addon);
             job.state.lock().unwrap().source = None;
         }
         Ok(())
@@ -404,12 +415,18 @@ pub async fn addon_set_enabled(
 
 #[tauri::command]
 pub async fn addon_remove(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || remove(&app, &id))
+        .await
+        .map_err(|_| "remove-failed")?
+}
+
+fn remove(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     let importers = app.state::<Importers>();
-    let (job, addon) = importers.get(&id)?;
-    job.begin(Activity::Installing).map_err(|_| "busy")?;
+    let (job, addon) = importers.get(id)?;
+    job.stop_import_and_reserve().map_err(|_| "busy")?;
     let result = (|| {
-        shutdown(&app, addon);
-        let dir = install_dir(&app, addon)?;
+        shutdown(app, addon);
+        let dir = install_dir(app, addon)?;
         let root = fs::canonicalize(app.path().app_local_data_dir().map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
         let target = fs::canonicalize(&dir.0).map_err(|e| e.to_string())?;
@@ -418,7 +435,7 @@ pub async fn addon_remove(app: tauri::AppHandle, id: String) -> Result<(), Strin
         }
         let removed = target.with_extension(format!("removed-{}", unique_suffix()));
         fs::rename(&target, &removed).map_err(|e| e.to_string())?;
-        if let Err(error) = patch(&app, |policy| {
+        if let Err(error) = patch(app, |policy| {
             policy.addons.remove(addon.id);
         }) {
             fs::rename(&removed, &target).map_err(|e| e.to_string())?;
@@ -447,9 +464,7 @@ pub async fn addon_set_direct_apply(
     if let Some(id) = &id {
         let (job, addon) = importers.get(id)?;
         let state = job.state.lock().unwrap();
-        if state.activity.as_ref().is_some_and(Activity::is_busy)
-            || install_dir(&app, addon)?.active().is_none()
-        {
+        if state.busy() || install_dir(&app, addon)?.active().is_none() {
             return Err("unavailable".into());
         }
         return patch(&app, |policy| {
