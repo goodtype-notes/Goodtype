@@ -91,13 +91,8 @@ pub struct AddonView {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum CapabilityView {
-    Import {
-        extensions: &'static [&'static str],
-        artwork: bool,
-    },
-    Recognize {
-        recognizes: &'static str,
-    },
+    Import { artwork: bool },
+    Recognize { recognizes: &'static str },
 }
 
 #[tauri::command]
@@ -108,14 +103,7 @@ pub fn addon_catalog() -> Vec<AddonView> {
             id: addon.id,
             i18n_prefix: addon.i18n_prefix,
             capability: match addon.kind {
-                Kind::Import {
-                    extensions,
-                    artwork,
-                    ..
-                } => CapabilityView::Import {
-                    extensions,
-                    artwork,
-                },
+                Kind::Import { artwork, .. } => CapabilityView::Import { artwork },
                 Kind::Recognize { recognizes, .. } => CapabilityView::Recognize { recognizes },
             },
         })

@@ -28,10 +28,11 @@
     bounds: Bounds;
     recognizers: string[];
     math: ImporterStatus | null;
+    mathAddon: RecognitionAddon | null;
     onInsert: (source: string, label: UiText) => void;
     onClose: () => void;
   };
-  let { polylines, bounds, recognizers, math, onInsert, onClose }: Props = $props();
+  let { polylines, bounds, recognizers, math, mathAddon, onInsert, onClose }: Props = $props();
 
   let addon = $state<ImporterStatus | null>(null);
   let addonBusy = $state(false);
@@ -63,7 +64,9 @@
     message = { text: notice("transcription.failed", { details: errorDetails(error) }), problem: true };
   }
 
-  let recognizerAddon = $state<RecognitionAddon | null>(null);
+  let loadedAddon = $state<RecognitionAddon | null>(null);
+  /** The workspace loads the catalog entry up front, so Math shows immediately; refresh keeps it current. */
+  const recognizerAddon = $derived(loadedAddon ?? mathAddon);
 
   /** Re-read the add-on, polling only while a download or install is running. */
   async function refresh() {
@@ -71,7 +74,7 @@
     try {
       const entry = await mathRecognitionAddon();
       if (disposed || !entry) return;
-      recognizerAddon = entry;
+      loadedAddon = entry;
       const found = await importerStatus(entry.id);
       if (disposed) return;
       addon = found;

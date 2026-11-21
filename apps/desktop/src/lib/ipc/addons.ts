@@ -10,7 +10,6 @@ export type ImportAddon = {
   id: string;
   kind: "import";
   i18nPrefix: PrefixWith<"fileHelp">;
-  extensions: string[];
   artwork: boolean;
 };
 

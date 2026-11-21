@@ -2606,6 +2606,7 @@
       bounds={transcribing.bounds}
       recognizers={recognition?.recognizers ?? []}
       math={recognition?.math ?? null}
+      mathAddon={recognition?.mathAddon ?? null}
       onInsert={insertTranscription}
       onClose={() => (transcribing = null)}
     />

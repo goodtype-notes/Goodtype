@@ -4,7 +4,7 @@ import { translate, formatNumber } from "../i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { importAddons } from "./addons";
 
-// The optional Goodnotes and OneNote importers (ADR 0029, 0032). Rust owns the download, the
+// The optional import addons (ADR 0029, 0032, 0045). Rust owns the download, the
 // installation, the source path and the process; this side only asks and shows.
 
 export type NotebookOutcomeStatus = "imported" | "failed" | "needsArtwork" | "cancelled" | "alreadyThere";

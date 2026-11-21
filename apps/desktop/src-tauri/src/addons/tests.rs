@@ -917,14 +917,12 @@ fn catalog_exposes_only_frontend_metadata() {
                 "id": "goodnotes",
                 "kind": "import",
                 "i18nPrefix": "addons.goodnotes",
-                "extensions": ["goodnotes", "zip"],
                 "artwork": true,
             },
             {
                 "id": "onenote",
                 "kind": "import",
                 "i18nPrefix": "addons.onenote",
-                "extensions": ["one", "onetoc2", "onepkg", "zip"],
                 "artwork": false,
             },
             {
