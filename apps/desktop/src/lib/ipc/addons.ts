@@ -53,6 +53,7 @@ export type ManagedAddon = {
   id: string;
   name: { en: string; de: string };
   installed: string | null;
+  previous: string | null;
   status: "unsupported-os" | "unpublished" | "available" | "enabled" | "disabled" | "incompatible-api" | "verification-failed" | "needs-reinstall";
   expectedApi: string;
   foundApi: string | null;
@@ -64,16 +65,25 @@ export type ManagedAddon = {
   outputBytes: number;
   release: Release | null;
   update: Release | null;
-  updateChecked: boolean;
-  updateFailed: boolean;
-  canCheckUpdate: boolean;
   directApply: boolean;
   activity: "awaitingApproval" | "idle" | "checking" | "downloading" | "installing" | "installFailed" | "updateIncompatible" | "importing" | "publishing" | "finished" | "importFailed";
   approval: AddonApproval | null;
   progress: [number, number] | null;
 };
 
-export type AddonManager = { allowDirectApply: boolean; recovery: boolean; addons: ManagedAddon[] };
+export type RegistryCheck = { lastCheck: number | null; checking: boolean; failed: boolean; expired: boolean };
+export type AddonManager = {
+  allowDirectApply: boolean;
+  recovery: boolean;
+  autoCheck: boolean;
+  registry: RegistryCheck;
+  addons: ManagedAddon[];
+};
+
+export const checkAddonRegistry = (mode: "startup" | "manager" | "manual") =>
+  invoke<void>("addon_check_registry", { mode });
+export const setAddonAutoCheck = (enabled: boolean) =>
+  invoke<void>("addon_set_auto_check", { enabled });
 
 export const listAddons = () => invoke<AddonManager>("addon_list");
 export const ADDON_AVAILABILITY_CHANGED = "goodtype:addon-availability-changed";
@@ -84,6 +94,10 @@ export async function setAddonEnabled(id: string, enabled: boolean) {
 
 export async function removeAddon(id: string) {
   await invoke<void>("addon_remove", { id });
+  window.dispatchEvent(new Event(ADDON_AVAILABILITY_CHANGED));
+}
+export async function rollbackAddon(id: string) {
+  await invoke<void>("addon_rollback", { id });
   window.dispatchEvent(new Event(ADDON_AVAILABILITY_CHANGED));
 }
 export const setAddonDirectApply = (id: string | null, allowed: boolean) =>

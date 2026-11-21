@@ -1,7 +1,7 @@
 <script lang="ts">
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import AddonManagerSheet from "./AddonManager.svelte";
-  import { listAddons, resetAddonPolicy, setAddonDirectApply, type AddonManager } from "../ipc/addons";
+  import { checkAddonRegistry, listAddons, resetAddonPolicy, setAddonAutoCheck, setAddonDirectApply, type AddonManager } from "../ipc/addons";
   import CodexSettings from "../helper/CodexSettings.svelte";
   import HelperSetup from "../helper/HelperSetup.svelte";
   import { onMount, tick, untrack } from "svelte";
@@ -97,16 +97,20 @@
 
   $effect(() => {
     if (!addonId) return;
+    void checkAddonRegistry("manager").catch(() => {}).finally(() => {
+      void refreshAddons();
+    });
     const timer = setInterval(() => void refreshAddons(), 700);
     return () => clearInterval(timer);
   });
 
-  async function toggleAddonPolicy() {
+  async function toggleAddonPolicy(preference: "autoCheck" | "allowDirectApply") {
     if (!addonManager || policyPending) return;
     policyPending = true;
     addonError = null;
     try {
-      await setAddonDirectApply(null, !addonManager.allowDirectApply);
+      if (preference === "autoCheck") await setAddonAutoCheck(!addonManager.autoCheck);
+      else await setAddonDirectApply(null, !addonManager.allowDirectApply);
       await refreshAddons();
     } catch {
       addonError = "policyFailed";
@@ -195,10 +199,13 @@
       onclick={() => apply(item, !on)}
     ><span></span></button>
   {:else if item.control.kind === "addonPolicy"}
-    <button type="button" role="switch" aria-checked={addonManager?.allowDirectApply ?? false}
-      aria-label={item.label} class="toggle" class:on={addonManager?.allowDirectApply}
-      disabled={!addonManager || addonManager.recovery || policyPending} onclick={() => void toggleAddonPolicy()}><span></span></button>
-    {#if addonManager?.recovery}
+    {@const preference = item.control.preference}
+    {@const enabled = addonManager?.[preference] ?? (preference === "autoCheck")}
+    <button type="button" role="switch" aria-checked={enabled}
+      aria-label={item.label} aria-describedby={item.hint ? item.id + "-hint" : undefined}
+      class="toggle" class:on={enabled}
+      disabled={!addonManager || addonManager.recovery || policyPending} onclick={() => void toggleAddonPolicy(preference)}><span></span></button>
+    {#if addonManager?.recovery && preference === "allowDirectApply"}
       <p role="alert" class="hint">{$t("addons.manager.recovery")}</p>
       <button type="button" class="run" disabled={policyPending} onclick={() => confirmReset = true}>
         {$t("addons.manager.resetPolicy")}
@@ -258,7 +265,7 @@
     <div class="words">
       <span class="name">{item.label}</span>
       {#if where}<span class="where">{where}</span>{/if}
-      {#if item.hint}<span class="hint">{item.hint}</span>{/if}
+      {#if item.hint}<span class="hint" id={item.id + "-hint"}>{item.hint}</span>{/if}
     </div>
     {@render control(item)}
   </div>
@@ -355,8 +362,8 @@
   </div>
 </div>
 
-{#if managedAddon}
-  <AddonManagerSheet addon={managedAddon} refresh={refreshAddons} onClose={() => addonId = undefined} />
+{#if managedAddon && addonManager}
+  <AddonManagerSheet addon={managedAddon} registry={addonManager.registry} refresh={refreshAddons} onClose={() => addonId = undefined} />
 {/if}
 
 {#if confirmReset}

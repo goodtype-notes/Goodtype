@@ -102,13 +102,14 @@ describe("bundled English and German interface", () => {
   it("finds addon settings by name in both languages and renders accessible management actions", () => {
     const addon: ManagedAddon = {
       id: "onenote", name: { en: "OneNote Importer", de: "OneNote-Import" },
-      installed: "0.1.0", status: "disabled", expectedApi: "goodtype-api 0.1", foundApi: null,
+      installed: "0.1.0", previous: null, status: "disabled", expectedApi: "goodtype-api 0.1", foundApi: null,
       permissions: ["picked-import-file"], catalogPermissions: ["picked-import-file"],
       formats: ["one"], memoryBytes: 1024, timeoutSeconds: 30, outputBytes: 1024,
-      release: null, update: null, updateChecked: false, updateFailed: false,
-      canCheckUpdate: true, directApply: false, activity: "idle", approval: null, progress: null,
+      release: null, update: null,
+      directApply: false, activity: "idle", approval: null, progress: null,
     };
-    const manager = { allowDirectApply: false, recovery: false, addons: [addon] };
+    const registry = { lastCheck: null, checking: false, failed: false, expired: false };
+    const manager = { allowDirectApply: false, recovery: false, autoCheck: true, registry, addons: [addon] };
     for (const language of ["en", "de"] as const) {
       setLanguage(language);
       const groups = settingGroups(get(t), [], false, manager, language);
@@ -116,10 +117,12 @@ describe("bundled English and German interface", () => {
       expect(hits.map(hit => hit.item.id)).toContain("addons:onenote");
       expect(hits.find(hit => hit.item.id === "addons:onenote")?.item.label).toBe(addon.name[language]);
       expect(searchSettings(translate("addons.manager.global"), groups).map(hit => hit.item.id)).toContain("addons:direct-apply");
-      const html = render(AddonManagerSheet, { props: { addon, refresh: async () => {}, onClose() {} } }).body;
+      expect(searchSettings(translate("addons.manager.autoCheck"), groups).map(hit => hit.item.id)).toContain("addons:auto-check");
+      const html = render(AddonManagerSheet, { props: { addon, registry, refresh: async () => {}, onClose() {} } }).body;
       expect(html).toContain('role="dialog"');
       expect(html).toContain('type="checkbox"');
       expect(html).toContain(translate("addons.manager.enable"));
+      expect(html).toContain(translate("addons.manager.check"));
       expect(html).toContain(translate("addons.manager.permission.picked-import-file"));
     }
   });

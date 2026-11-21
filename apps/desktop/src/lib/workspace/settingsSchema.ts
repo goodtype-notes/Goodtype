@@ -29,7 +29,7 @@ export type SettingActions = { openMetrics: () => void; changePython: () => void
 
 export type SettingControl =
   | { kind: "addon"; addonId: string; buttonLabel: string }
-  | { kind: "addonPolicy" }
+  | { kind: "addonPolicy"; preference: "autoCheck" | "allowDirectApply" }
   | {
       kind: "toggle";
       read: (settings: AppSettings) => boolean;
@@ -396,7 +396,14 @@ export function settingGroups(t: Translator = translate, fonts: string[] = [], a
         label: t("addons.manager.global"),
         hint: t("addons.manager.globalHint"),
         keywords: t("addons.manager.search").split(" "),
-        control: { kind: "addonPolicy" },
+        control: { kind: "addonPolicy", preference: "allowDirectApply" },
+      },
+      {
+        id: "addons:auto-check",
+        label: t("addons.manager.autoCheck"),
+        hint: t("addons.manager.autoCheckHint"),
+        keywords: t("addons.manager.search").split(" "),
+        control: { kind: "addonPolicy", preference: "autoCheck" },
       },
       ...(addons?.addons ?? []).map((addon): SettingItem => ({
         id: `addons:${addon.id}`,

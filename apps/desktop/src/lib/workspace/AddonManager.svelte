@@ -1,34 +1,42 @@
 <script lang="ts">
-  import { t, locale, formatNumber } from "../i18n";
-  import { removeAddon, setAddonDirectApply, setAddonEnabled, type ManagedAddon } from "../ipc/addons";
-  import { cancelImporter, checkImporterUpdate, installImporter, megabytes, updateImporter } from "../ipc/importer";
+  import { t, locale, displayLocale, formatNumber, notice, renderMessage } from "../i18n";
+  import { checkAddonRegistry, removeAddon, rollbackAddon, setAddonDirectApply, setAddonEnabled, type ManagedAddon, type RegistryCheck } from "../ipc/addons";
+  import { cancelImporter, installImporter, megabytes, updateImporter } from "../ipc/importer";
   import AddonApproval from "./AddonApproval.svelte";
   import AddonPermissions from "./AddonPermissions.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import Dialog from "./Dialog.svelte";
 
-  let { addon, refresh, onClose }: {
+  let { addon, registry, refresh, onClose }: {
     addon: ManagedAddon;
+    registry: RegistryCheck;
     refresh: () => Promise<void>;
     onClose: () => void;
   } = $props();
 
   let pending = $state(false);
   let confirming = $state(false);
-  let problem = $state<"actionFailed" | "policyFailed" | "removeFailed" | null>(null);
+  let problem = $state<"actionFailed" | "policyFailed" | "removeFailed" | "checkFailed" | null>(null);
   const name = $derived($locale === "de" ? addon.name.de : addon.name.en);
   const busy = $derived(["checking", "downloading", "installing", "awaitingApproval", "importing", "publishing"].includes(addon.activity));
   const release = $derived(addon.update ?? addon.release);
+
+  const registryNotice = $derived(registry.checking ? notice("addons.manager.activity.checking")
+    : registry.expired ? notice("addons.manager.outdated")
+    : registry.failed ? notice("addons.manager.checkFailed")
+    : registry.lastCheck !== null && addon.installed && !addon.update ? notice("addons.manager.current") : null);
+  const checkedAt = $derived(registry.lastCheck === null ? null
+    : new Intl.DateTimeFormat($displayLocale, { dateStyle: "medium", timeStyle: "short" }).format(registry.lastCheck * 1000));
 
   async function run(action: (id: string) => Promise<void>, failure: typeof problem = "actionFailed") {
     pending = true;
     problem = null;
     try {
       await action(addon.id);
-      await refresh();
     } catch {
       problem = failure;
     } finally {
+      await refresh().catch(() => { problem ??= failure; });
       pending = false;
     }
   }
@@ -83,12 +91,17 @@
       <progress max={addon.progress[1]} value={addon.progress[0]} aria-label={$t("addons.manager.activity.downloading")}></progress>
     {/if}
   {/if}
-  {#if problem}
-    <p role="alert" class="problem">{$t(`addons.manager.${problem}`)}</p>
-  {:else if addon.updateFailed}
-    <p role="status" class="problem">{$t("addons.manager.checkFailed")}</p>
-  {:else if addon.updateChecked && !addon.update && !busy}
-    <p role="status" class="hint">{$t("addons.manager.current")}</p>
+  {#if problem && !(problem === "checkFailed" && registry.expired)}
+    <p role="alert" class="problem">{renderMessage(notice(`addons.manager.${problem}`), $t)}</p>
+  {/if}
+  {#if addon.update}
+    <p role="status">{renderMessage(notice("addons.manager.updateAvailable"), $t)}</p>
+  {/if}
+  {#if registryNotice && !(registry.failed && !registry.expired && problem === "checkFailed")}
+    <p role="status" class="hint">{renderMessage(registryNotice, $t)}</p>
+  {/if}
+  {#if checkedAt}
+    <p class="hint">{$t("addons.manager.lastChecked", { date: checkedAt })}</p>
   {/if}
 
   {#if addon.approval}
@@ -110,8 +123,12 @@
         <button class="danger" disabled={busy || pending} onclick={() => confirming = true}>{$t("addons.manager.remove")}</button>
       {/if}
       {#if addon.status !== "unsupported-os"}
-        {#if addon.canCheckUpdate && addon.installed}
-          <button class="control" disabled={busy || pending} onclick={() => void run(checkImporterUpdate)}>{$t("addons.manager.check")}</button>
+        <button class="control" disabled={registry.checking || pending}
+          onclick={() => void run(() => checkAddonRegistry("manual"), "checkFailed")}>{$t("addons.manager.check")}</button>
+        {#if addon.previous}
+          <button class="control" disabled={busy || pending} onclick={() => void run(rollbackAddon)}>
+            {$t("addons.manager.rollback", { version: addon.previous })}
+          </button>
         {/if}
         {#if addon.update}
           <button class="primary" disabled={busy || pending} onclick={() => void run(updateImporter)}>{$t("addons.manager.update")}</button>
