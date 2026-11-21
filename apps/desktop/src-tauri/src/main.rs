@@ -8,6 +8,7 @@ mod library;
 mod notebook;
 mod preset;
 mod recognition;
+pub mod sandbox;
 mod settings;
 mod store;
 mod tinymist;
