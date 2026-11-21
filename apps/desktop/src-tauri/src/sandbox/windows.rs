@@ -1,5 +1,5 @@
 use super::{SandboxSpec, SandboxedChild};
-use std::ffi::{OsStr, c_void};
+use std::ffi::{OsStr, OsString, c_void};
 use std::mem::{size_of, size_of_val, zeroed};
 use std::os::windows::{
     ffi::OsStrExt,
@@ -10,12 +10,14 @@ use std::os::windows::{
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::ptr::{null, null_mut};
+use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant};
 use std::{fs, io};
 
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows_sys::Win32::Security::Isolation::{
-    CreateAppContainerProfile, DeleteAppContainerProfile,
+    CreateAppContainerProfile, DeleteAppContainerProfile, DeriveAppContainerSidFromAppContainerName,
 };
 use windows_sys::Win32::Security::{
     DeriveCapabilitySidsFromName, FreeSid, PSID, SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
@@ -26,10 +28,61 @@ use windows_sys::Win32::System::Threading::*;
 #[cfg(test)]
 mod tests;
 
-fn acl_command(executable: &Path) -> Command {
-    let mut command = Command::new(executable);
-    command.creation_flags(CREATE_NO_WINDOW);
+/// How long a kill waits for the job to empty before it closes the job instead.
+const STOP: Duration = Duration::from_secs(5);
+/// Per-launch profile name prefixes. Stable addon profiles are swept by their owner.
+const TRANSIENT: [&str; 2] = ["goodtype.sandbox.", "goodtype.calculation."];
+
+/// Every icacls run in the process is serialized: a recursive revoke of one profile must never
+/// interleave with a recursive grant on the same tree.
+static ACL: Mutex<()> = Mutex::new(());
+
+fn icacls(path: &Path, args: &[&OsStr]) -> Result<(), String> {
+    let tool = super::system_root()?.join("System32/icacls.exe");
+    let _serial = ACL.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut command = Command::new(tool);
     command
+        .creation_flags(CREATE_NO_WINDOW)
+        .arg(path)
+        .args(args);
+    let output = super::output(&mut command).map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(format!(
+            "icacls {}: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
+fn grant_acl(path: &Path, sid: &str, permission: &str) -> Result<(), String> {
+    let inheritance = if path.is_dir() { "(OI)(CI)" } else { "" };
+    let ace = OsString::from(format!("*{sid}:{inheritance}{permission}"));
+    icacls(
+        path,
+        &[
+            "/grant".as_ref(),
+            &ace,
+            "/T".as_ref(),
+            "/Q".as_ref(),
+            "/L".as_ref(),
+        ],
+    )
+}
+
+fn revoke_acl(path: &Path, sid: &str) -> Result<(), String> {
+    let ace = OsString::from(format!("*{sid}"));
+    icacls(
+        path,
+        &[
+            "/remove:g".as_ref(),
+            &ace,
+            "/T".as_ref(),
+            "/Q".as_ref(),
+            "/L".as_ref(),
+        ],
+    )
 }
 
 fn wide(value: impl AsRef<OsStr>) -> Vec<u16> {
@@ -50,7 +103,30 @@ unsafe impl Send for Handle {}
 unsafe impl Sync for Handle {}
 impl Drop for Handle {
     fn drop(&mut self) {
-        unsafe { CloseHandle(self.0) };
+        if !self.0.is_null() {
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+}
+
+fn sid_text(sid: PSID) -> Result<String, String> {
+    let mut text = null_mut();
+    check(
+        unsafe { ConvertSidToStringSidW(sid, &mut text) },
+        "ConvertSidToStringSidW",
+    )?;
+    unsafe {
+        let length = (0..).take_while(|index| *text.add(*index) != 0).count();
+        let value = String::from_utf16_lossy(std::slice::from_raw_parts(text, length));
+        LocalFree(text.cast());
+        Ok(value)
+    }
+}
+
+fn delete_profile(name: &[u16]) {
+    let result = unsafe { DeleteAppContainerProfile(name.as_ptr()) };
+    if result < 0 {
+        eprintln!("Sandbox profile cleanup failed: {result:#x}");
     }
 }
 
@@ -60,25 +136,31 @@ struct Profile {
     sid_text: String,
     capabilities: Vec<SID_AND_ATTRIBUTES>,
     grants: Vec<PathBuf>,
-    acl_tool: PathBuf,
+    /// A per-launch profile is deleted, and its grants revoked, when the launch ends. A stable
+    /// profile belongs to its caller, which grants and revokes its tree outside any launch.
+    transient: bool,
 }
 
 impl Profile {
     fn new(capability_names: &[&str]) -> Result<Self, String> {
-        let acl_tool = super::system_root()?.join("System32/icacls.exe");
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
             .unwrap_or(0);
-        let name = wide(format!(
+        let name = format!(
             "Goodtype.Sandbox.{}.{}.{}",
             std::process::id(),
             timestamp,
             NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
+        );
+        Self::open(&name, capability_names, true)
+    }
+
+    fn open(name: &str, capability_names: &[&str], transient: bool) -> Result<Self, String> {
+        let name = wide(name);
         let mut sid = null_mut();
-        let result = unsafe {
+        let mut result = unsafe {
             CreateAppContainerProfile(
                 name.as_ptr(),
                 name.as_ptr(),
@@ -88,8 +170,12 @@ impl Profile {
                 &mut sid,
             )
         };
+        // HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS): a stable profile from an earlier grant.
+        if !transient && result == (0x8007_0000u32 | ERROR_ALREADY_EXISTS) as i32 {
+            result = unsafe { DeriveAppContainerSidFromAppContainerName(name.as_ptr(), &mut sid) };
+        }
         if result < 0 {
-            return Err(format!("CreateAppContainerProfile HRESULT {result:#x}"));
+            return Err(format!("AppContainer profile HRESULT {result:#x}"));
         }
         let mut profile = Self {
             name,
@@ -97,18 +183,9 @@ impl Profile {
             sid_text: String::new(),
             capabilities: Vec::new(),
             grants: Vec::new(),
-            acl_tool,
+            transient,
         };
-        let mut text = null_mut();
-        check(
-            unsafe { ConvertSidToStringSidW(sid, &mut text) },
-            "ConvertSidToStringSidW",
-        )?;
-        unsafe {
-            let length = (0..).take_while(|index| *text.add(*index) != 0).count();
-            profile.sid_text = String::from_utf16_lossy(std::slice::from_raw_parts(text, length));
-            LocalFree(text.cast());
-        }
+        profile.sid_text = sid_text(sid)?;
         for name in capability_names {
             let mut groups = null_mut();
             let mut group_count = 0;
@@ -144,23 +221,8 @@ impl Profile {
     }
 
     fn grant(&mut self, path: &Path, permission: &str) -> Result<(), String> {
-        let inheritance = if path.is_dir() { "(OI)(CI)" } else { "" };
         self.grants.push(path.to_path_buf());
-        let result = acl_command(&self.acl_tool)
-            .arg(path)
-            .arg("/grant")
-            .arg(format!("*{}:{inheritance}{permission}", self.sid_text))
-            .args(["/T", "/Q", "/L"])
-            .output()
-            .map_err(|e| e.to_string())?;
-        if !result.status.success() {
-            return Err(format!(
-                "icacls {}: {}",
-                path.display(),
-                String::from_utf8_lossy(&result.stderr)
-            ));
-        }
-        Ok(())
+        grant_acl(path, &self.sid_text, permission)
     }
 }
 
@@ -173,31 +235,103 @@ impl Drop for Profile {
         // Revoking walks every file of the runtime (thousands with NumPy, SciPy and Matplotlib) and
         // took ~15 s, during which ending a session or changing Python appeared to hang. The
         // job has already stopped. Delete the profile synchronously and revoke its ACEs in
-        // the background.
+        // the background; the ACL lock keeps that revoke from interleaving with a later grant.
+        // A stable profile's scratch grant dies with the scratch directory.
         let grants = std::mem::take(&mut self.grants);
-        let sid = std::mem::take(&mut self.sid_text);
-        let acl_tool = self.acl_tool.clone();
-        if !grants.is_empty() {
-            std::thread::spawn(move || {
-                for path in grants {
-                    if inspect_tree(&path).is_ok() {
-                        let _ = acl_command(&acl_tool)
-                            .arg(&path)
-                            .args(["/remove:g", &format!("*{sid}"), "/T", "/Q", "/L"])
-                            .output();
+        if self.transient {
+            let sid = std::mem::take(&mut self.sid_text);
+            if !grants.is_empty() {
+                std::thread::spawn(move || {
+                    for path in grants {
+                        if inspect_tree(&path).is_ok()
+                            && let Err(error) = revoke_acl(&path, &sid)
+                        {
+                            eprintln!("Sandbox ACL revoke failed: {error}");
+                        }
                     }
-                }
-            });
+                });
+            }
+            delete_profile(&self.name);
         }
         unsafe {
-            let result = DeleteAppContainerProfile(self.name.as_ptr());
-            if result < 0 {
-                eprintln!("Profile cleanup failed: {result:#x}");
-            }
             FreeSid(self.sid);
             for capability in &self.capabilities {
                 LocalFree(capability.Sid.cast());
             }
+        }
+    }
+}
+
+/// Creates (or reopens) the stable profile `name` and grants it read and execute on `root`, once.
+/// Launches that name the profile then grant only their scratch.
+pub(super) fn grant_profile(name: &str, root: &Path) -> Result<(), String> {
+    if !root.is_absolute() {
+        return Err("Sandbox ACL path must be absolute".into());
+    }
+    inspect_tree(root)?;
+    let profile = Profile::open(name, &[], false)?;
+    grant_acl(root, &profile.sid_text, "RX")
+}
+
+/// Revokes a stable profile's grant on `root` (when it still exists) and deletes the profile.
+pub(super) fn revoke_profile(name: &str, root: Option<&Path>) -> Result<(), String> {
+    let wide_name = wide(name);
+    let mut sid = null_mut();
+    let result = unsafe { DeriveAppContainerSidFromAppContainerName(wide_name.as_ptr(), &mut sid) };
+    if result < 0 {
+        return Err(format!(
+            "DeriveAppContainerSidFromAppContainerName {result:#x}"
+        ));
+    }
+    let text = sid_text(sid);
+    unsafe { FreeSid(sid) };
+    let text = text?;
+    if let Some(root) = root.filter(|root| root.exists()) {
+        inspect_tree(root)?;
+        revoke_acl(root, &text)?;
+    }
+    delete_profile(&wide_name);
+    Ok(())
+}
+
+fn process_alive(pid: u32) -> bool {
+    let process = Handle(unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) });
+    if process.0.is_null() {
+        // A process of another user or integrity level is alive but not openable.
+        return io::Error::last_os_error().raw_os_error() == Some(ERROR_ACCESS_DENIED as i32);
+    }
+    let mut code = 0;
+    unsafe { GetExitCodeProcess(process.0, &mut code) != 0 && code == STILL_ACTIVE as u32 }
+}
+
+/// Deletes per-launch profiles left by a crashed Goodtype. Profiles of a live process (another
+/// window, a test run) are kept. Their ACEs sat on per-run trees that are already gone.
+pub(super) fn sweep_transient_profiles() {
+    let Some(packages) =
+        std::env::var_os("LOCALAPPDATA").map(|dir| Path::new(&dir).join("Packages"))
+    else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(packages) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        let Some(rest) = TRANSIENT
+            .iter()
+            .find_map(|prefix| name.strip_prefix(prefix))
+        else {
+            continue;
+        };
+        let Some(pid) = rest
+            .split('.')
+            .next()
+            .and_then(|pid| pid.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if pid != std::process::id() && !process_alive(pid) {
+            delete_profile(&wide(&name));
         }
     }
 }
@@ -311,6 +445,33 @@ fn append_arg(command: &mut Vec<u16>, arg: &OsStr) -> Result<(), String> {
     Ok(())
 }
 
+/// Scratch is the one writable root, so it must not overlap a read-only root or hold the
+/// executable. A batch file would run through cmd.exe with its own argument parsing.
+fn check_paths(spec: &SandboxSpec<'_>) -> Result<(), String> {
+    let extension = spec
+        .executable
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_lowercase());
+    if matches!(extension.as_deref(), Some("bat" | "cmd")) {
+        return Err("Sandbox executable must not be a batch file".into());
+    }
+    let Some(scratch) = spec.scratch else {
+        return Ok(());
+    };
+    let canonical = |path: &Path| fs::canonicalize(path).map_err(|error| error.to_string());
+    let scratch = canonical(scratch)?;
+    if canonical(spec.executable)?.starts_with(&scratch) {
+        return Err("Sandbox executable must not be inside the scratch directory".into());
+    }
+    for root in spec.read_only {
+        let root = canonical(root)?;
+        if root.starts_with(&scratch) || scratch.starts_with(&root) {
+            return Err("Sandbox scratch must not overlap a read-only root".into());
+        }
+    }
+    Ok(())
+}
+
 pub(super) struct Process {
     process: Handle,
     job: Handle,
@@ -325,6 +486,7 @@ pub(super) fn launch(mut spec: SandboxSpec<'_>) -> Result<SandboxedChild, String
     {
         return Err("Sandbox requires absolute executable and working directory paths and nonzero job limits".into());
     }
+    check_paths(&spec)?;
     let mut command = Vec::new();
     append_arg(&mut command, spec.executable.as_os_str())?;
     for arg in spec.args {
@@ -338,6 +500,12 @@ pub(super) fn launch(mut spec: SandboxSpec<'_>) -> Result<SandboxedChild, String
         return Err("Sandbox working directory contains a NUL".into());
     }
     if let Some(scratch) = spec.scratch {
+        // Scratch owns TEMP and TMP whatever the caller's spelling of the names.
+        spec.env.retain(|key, _| {
+            !["TEMP", "TMP"]
+                .iter()
+                .any(|name| key.eq_ignore_ascii_case(name))
+        });
         for key in ["TEMP", "TMP"] {
             spec.env.insert(key.into(), scratch.as_os_str().to_owned());
         }
@@ -374,24 +542,26 @@ pub(super) fn launch(mut spec: SandboxSpec<'_>) -> Result<SandboxedChild, String
         }
         inspect_tree(path)?;
     }
-    let mut profile = Profile::new(spec.capabilities)?;
+    let mut profile = match spec.profile {
+        Some(name) => Profile::open(name, spec.capabilities, false)?,
+        None => Profile::new(spec.capabilities)?,
+    };
     for path in spec.read_only {
         profile.grant(path, "RX")?;
     }
     if let Some(scratch) = spec.scratch {
         profile.grant(scratch, "M")?;
-        let label = acl_command(&profile.acl_tool)
-            .arg(scratch)
-            .args(["/setintegritylevel", "(OI)(CI)L", "/T", "/Q", "/L"])
-            .output()
-            .map_err(|error| error.to_string())?;
-        if !label.status.success() {
-            return Err(format!(
-                "Could not set low integrity on {}: {}",
-                scratch.display(),
-                String::from_utf8_lossy(&label.stderr)
-            ));
-        }
+        icacls(
+            scratch,
+            &[
+                "/setintegritylevel".as_ref(),
+                "(OI)(CI)L".as_ref(),
+                "/T".as_ref(),
+                "/Q".as_ref(),
+                "/L".as_ref(),
+            ],
+        )
+        .map_err(|error| format!("Could not set low integrity: {error}"))?;
     }
     let capabilities = SECURITY_CAPABILITIES {
         AppContainerSid: profile.sid,
@@ -416,6 +586,34 @@ pub(super) fn launch(mut spec: SandboxSpec<'_>) -> Result<SandboxedChild, String
     startup.StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
     startup.StartupInfo.wShowWindow = 0; // SW_HIDE: the runner must not open a visible console.
     startup.lpAttributeList = attributes.pointer;
+    let job = Handle(unsafe { CreateJobObjectW(null(), null()) });
+    if job.0.is_null() {
+        return Err(io::Error::last_os_error().to_string());
+    }
+    let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { zeroed() };
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        | JOB_OBJECT_LIMIT_PROCESS_MEMORY
+        | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+        | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION
+        | if spec.active_process_limit > 1 {
+            JOB_OBJECT_LIMIT_JOB_MEMORY
+        } else {
+            0
+        };
+    limits.BasicLimitInformation.ActiveProcessLimit = spec.active_process_limit;
+    limits.ProcessMemoryLimit = spec.memory_limit;
+    limits.JobMemoryLimit = spec.memory_limit;
+    check(
+        unsafe {
+            SetInformationJobObject(
+                job.0,
+                JobObjectExtendedLimitInformation,
+                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                size_of_val(&limits) as u32,
+            )
+        },
+        "SetInformationJobObject",
+    )?;
     let (mut child_pipes, mut host_pipes) = (None, None);
     if spec.stdio {
         let (child_in, host_in) = io::pipe().map_err(|error| error.to_string())?;
@@ -431,65 +629,54 @@ pub(super) fn launch(mut spec: SandboxSpec<'_>) -> Result<SandboxedChild, String
     let child_handles = child_pipes
         .as_ref()
         .map(|pipes| pipes.each_ref().map(AsRawHandle::as_raw_handle));
-    if let Some(handles) = &child_handles {
-        for handle in handles {
-            check(
-                unsafe { SetHandleInformation(*handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) },
-                "SetHandleInformation",
-            )?;
-        }
-        startup.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
-        [
-            startup.StartupInfo.hStdInput,
-            startup.StartupInfo.hStdOutput,
-            startup.StartupInfo.hStdError,
-        ] = *handles;
-        attributes.set(PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handles)?;
-    }
-    let job = Handle(unsafe { CreateJobObjectW(null(), null()) });
-    if job.0.is_null() {
-        return Err(io::Error::last_os_error().to_string());
-    }
-    let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { zeroed() };
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        | JOB_OBJECT_LIMIT_PROCESS_MEMORY
-        | JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
-    limits.BasicLimitInformation.ActiveProcessLimit = spec.active_process_limit;
-    limits.ProcessMemoryLimit = spec.memory_limit;
-    check(
-        unsafe {
-            SetInformationJobObject(
-                job.0,
-                JobObjectExtendedLimitInformation,
-                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
-                size_of_val(&limits) as u32,
-            )
-        },
-        "SetInformationJobObject",
-    )?;
     let mut info: PROCESS_INFORMATION = unsafe { zeroed() };
-    check(
-        unsafe {
-            CreateProcessW(
-                executable.as_ptr(),
-                command.as_mut_ptr(),
-                null(),
-                null(),
-                i32::from(spec.stdio),
-                CREATE_SUSPENDED
-                    | CREATE_NO_WINDOW
-                    | CREATE_UNICODE_ENVIRONMENT
-                    | EXTENDED_STARTUPINFO_PRESENT,
-                environment.as_ptr().cast(),
-                cwd.as_ptr(),
-                &startup.StartupInfo,
-                &mut info,
+    {
+        // From the first inheritable child end until those ends are closed, no other spawn in
+        // this crate may run: a Command spawn inherits every inheritable handle in the process.
+        let _spawn = super::spawn_lock();
+        let created = (|| {
+            if let Some(handles) = &child_handles {
+                for handle in handles {
+                    check(
+                        unsafe {
+                            SetHandleInformation(*handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT)
+                        },
+                        "SetHandleInformation",
+                    )?;
+                }
+                startup.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
+                [
+                    startup.StartupInfo.hStdInput,
+                    startup.StartupInfo.hStdOutput,
+                    startup.StartupInfo.hStdError,
+                ] = *handles;
+                attributes.set(PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handles)?;
+            }
+            check(
+                unsafe {
+                    CreateProcessW(
+                        executable.as_ptr(),
+                        command.as_mut_ptr(),
+                        null(),
+                        null(),
+                        i32::from(spec.stdio),
+                        CREATE_SUSPENDED
+                            | CREATE_NO_WINDOW
+                            | CREATE_UNICODE_ENVIRONMENT
+                            | EXTENDED_STARTUPINFO_PRESENT,
+                        environment.as_ptr().cast(),
+                        cwd.as_ptr(),
+                        &startup.StartupInfo,
+                        &mut info,
+                    )
+                },
+                "CreateProcessW",
             )
-        },
-        "CreateProcessW",
-    )?;
+        })();
+        drop(child_pipes);
+        created?;
+    }
     drop(attributes);
-    drop(child_pipes);
     let process = Handle(info.hProcess);
     let thread = Handle(info.hThread);
     if let Err(error) = check(
@@ -498,7 +685,7 @@ pub(super) fn launch(mut spec: SandboxSpec<'_>) -> Result<SandboxedChild, String
     ) {
         unsafe {
             TerminateProcess(process.0, 1);
-            WaitForSingleObject(process.0, INFINITE);
+            WaitForSingleObject(process.0, STOP.as_millis() as u32);
         }
         return Err(error);
     }
@@ -523,7 +710,9 @@ pub(super) fn launch(mut spec: SandboxSpec<'_>) -> Result<SandboxedChild, String
 }
 
 impl Process {
+    /// Terminates the job and waits up to [`STOP`] for it to empty.
     pub(super) fn kill(&self) -> Result<(), String> {
+        let deadline = Instant::now() + STOP;
         let mut accounting: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { zeroed() };
         loop {
             check(
@@ -541,12 +730,16 @@ impl Process {
             if accounting.ActiveProcesses == 0 {
                 return Ok(());
             }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err("Sandbox job did not stop in time".into());
+            }
             check(
                 unsafe { TerminateJobObject(self.job.0, 124) },
                 "TerminateJobObject",
             )?;
-            self.wait()?;
-            std::thread::sleep(std::time::Duration::from_millis(1));
+            unsafe { WaitForSingleObject(self.process.0, remaining.as_millis() as u32) };
+            std::thread::sleep(Duration::from_millis(1));
         }
     }
 
@@ -575,9 +768,9 @@ impl Drop for Process {
     fn drop(&mut self) {
         if let Err(error) = self.kill() {
             eprintln!("Sandbox job shutdown failed: {error}");
-            // Close the kill-on-close job before waiting or dropping the profile.
+            // Close the kill-on-close job, then wait a bounded time before dropping the profile.
             drop(std::mem::replace(&mut self.job, Handle(null_mut())));
-            let _ = self.wait();
+            unsafe { WaitForSingleObject(self.process.0, STOP.as_millis() as u32) };
         }
     }
 }

@@ -3,9 +3,13 @@ use serde::{Deserialize, de};
 use serde_json::{Map, Value, json};
 use std::{
     collections::HashSet,
-    io::{BufRead, BufReader, Read, Write},
+    io::{self, BufRead, BufReader, Read, Write},
     path::Path,
-    sync::{Arc, Mutex, mpsc},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
 
@@ -15,6 +19,9 @@ pub(super) const MAX_SCOPE: usize = MAX_FRAME - 1024;
 const STDERR_LIMIT: usize = 16 * 1024;
 const OFFER: [&str; 3] = ["progress", "cancel", "page-batch-v0"];
 const POLL: Duration = Duration::from_millis(20);
+/// Per-session scratch cap, checked while the process runs.
+const SCRATCH_LIMIT: u64 = 256 * 1024 * 1024;
+const SCRATCH_CHECK: Duration = Duration::from_millis(250);
 /// The math worker accepts 65,536 request IDs per process; retire it before the last one.
 const MAX_REQUESTS: u64 = 65_536;
 
@@ -27,6 +34,8 @@ pub(super) enum Failure {
     Unavailable,
     /// The restricted launcher refused or failed; never retried without confinement.
     Sandbox,
+    /// The process outgrew its scratch cap and was stopped.
+    StorageExceeded,
 }
 
 #[derive(Debug, Deserialize)]
@@ -223,35 +232,53 @@ pub(super) struct Session {
     pub used: Instant,
 }
 
-/// A `stdio-jsonrpc` addon in a fresh AppContainer with only `registryRead` (no network
-/// capability), read-only access to its verified install, and one private low-integrity scratch
-/// directory. `registryRead` was approved by the user on 2026-11-21: without it the math runtime
-/// blocks before loading ONNX Runtime; the Python runner holds the same capability.
+/// A `stdio-jsonrpc` addon in its stable per-version AppContainer profile with only `registryRead`
+/// (no network capability), read-only access to its verified install (granted once by
+/// [`ensure_grant`]) and one private low-integrity scratch directory per process, capped at
+/// [`SCRATCH_LIMIT`]. `registryRead` was approved by the user on 2026-11-21: without it the math
+/// runtime blocks before loading ONNX Runtime; the Python runner holds the same capability.
 /// A launch or ACL failure makes the addon unavailable; there is no unconfined fallback.
 pub(super) struct Launched {
     // Declared first so the job is shut down before the scratch directory is removed.
-    child: crate::sandbox::SandboxedChild,
+    child: Arc<crate::sandbox::SandboxedChild>,
+    exceeded: Arc<AtomicBool>,
     _scratch: tempfile::TempDir,
 }
 
-fn launch(install: &Path, executable: &Path, scratch_root: &Path) -> Result<Launched, Failure> {
+impl Drop for Launched {
+    fn drop(&mut self) {
+        // The scratch watcher may briefly hold the child; stop the job before removing scratch.
+        if let Err(error) = self.child.kill() {
+            eprintln!("Addon session shutdown failed: {error}");
+        }
+    }
+}
+
+type Pipes = (io::PipeWriter, io::PipeReader, io::PipeReader);
+
+fn launch(
+    executable: &Path,
+    scratch_root: &Path,
+    profile: &str,
+) -> Result<(Launched, Pipes), Failure> {
     if !super::platform_supported() {
         return Err(Failure::Unavailable);
     }
-    // The launcher rejects reparse points in both trees (and their ancestors) before any ACL.
+    // The launcher rejects reparse points in scratch (and its ancestors) before any ACL.
     let scratch = tempfile::Builder::new()
         .prefix("session-")
         .tempdir_in(scratch_root)
         .map_err(|_| Failure::Sandbox)?;
     let env = crate::sandbox::minimal_environment().map_err(|_| Failure::Sandbox)?;
-    let child = crate::sandbox::launch(crate::sandbox::SandboxSpec {
+    let mut child = crate::sandbox::launch(crate::sandbox::SandboxSpec {
         executable,
         args: &["--session".into()],
         cwd: scratch.path(),
         env,
-        read_only: &[install],
+        read_only: &[],
         scratch: Some(scratch.path()),
         capabilities: &["registryRead"],
+        profile: Some(profile),
         memory_limit: crate::recognition::math_process::MEMORY_BYTES,
         active_process_limit: 1,
         stdio: true,
@@ -260,26 +287,178 @@ fn launch(install: &Path, executable: &Path, scratch_root: &Path) -> Result<Laun
         eprintln!("Addon sandbox launch failed: {error}");
         Failure::Sandbox
     })?;
-    Ok(Launched {
-        child,
-        _scratch: scratch,
-    })
+    let pipes = (
+        child.stdin.take().ok_or(Failure::Unavailable)?,
+        child.stdout.take().ok_or(Failure::Unavailable)?,
+        child.stderr.take().ok_or(Failure::Unavailable)?,
+    );
+    let child = Arc::new(child);
+    let exceeded = Arc::new(AtomicBool::new(false));
+    let (watched, flag, dir) = (
+        Arc::downgrade(&child),
+        Arc::clone(&exceeded),
+        scratch.path().to_path_buf(),
+    );
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(SCRATCH_CHECK);
+            if !watched.upgrade().is_some_and(|child| child.running()) {
+                break;
+            }
+            if crate::computation::directory_bytes(&dir, SCRATCH_LIMIT).is_err() {
+                flag.store(true, Ordering::SeqCst);
+                if let Some(child) = watched.upgrade() {
+                    let _ = child.kill();
+                }
+                break;
+            }
+        }
+    });
+    Ok((
+        Launched {
+            child,
+            exceeded,
+            _scratch: scratch,
+        },
+        pipes,
+    ))
+}
+
+static GRANTS: Mutex<()> = Mutex::new(());
+
+/// `Goodtype.Addon.<id>.<version>`, within the 64-character AppContainer name limit.
+fn profile_name(id: &str, version: &str) -> Option<String> {
+    let name = format!("Goodtype.Addon.{id}.{version}");
+    (name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-'))
+    .then_some(name)
+}
+
+fn grants_dir(sessions: &Path) -> std::path::PathBuf {
+    sessions.join("grants")
+}
+
+/// Grants the stable profile of this verified install read and execute on its tree, once per
+/// activated version rather than per session. A marker records the grant; "pending" is written
+/// first, so a crash mid-grant leaves something the startup sweep revokes.
+pub(super) fn ensure_grant(
+    sessions: &Path,
+    id: &str,
+    version: &str,
+    install: &Path,
+) -> Result<String, Failure> {
+    let name = profile_name(id, version).ok_or(Failure::Sandbox)?;
+    let _serial = GRANTS.lock().unwrap_or_else(PoisonError::into_inner);
+    let dir = grants_dir(sessions);
+    std::fs::create_dir_all(&dir).map_err(|_| Failure::Sandbox)?;
+    let marker = dir.join(&name);
+    let root = install.to_string_lossy();
+    if std::fs::read_to_string(&marker).ok() == Some(format!("ok\n{root}")) {
+        return Ok(name);
+    }
+    std::fs::write(&marker, format!("pending\n{root}")).map_err(|_| Failure::Sandbox)?;
+    crate::sandbox::grant_profile(&name, install).map_err(|error| {
+        eprintln!("Addon install grant failed: {error}");
+        Failure::Sandbox
+    })?;
+    std::fs::write(&marker, format!("ok\n{root}")).map_err(|_| Failure::Sandbox)?;
+    Ok(name)
+}
+
+/// Revokes recorded grants whose marker `keep` rejects, deleting their profiles. A failed revoke
+/// keeps its marker so the next sweep tries again.
+fn revoke_where(sessions: &Path, keep: impl Fn(&str, &Path) -> bool) {
+    let _serial = GRANTS.lock().unwrap_or_else(PoisonError::into_inner);
+    let Ok(entries) = std::fs::read_dir(grants_dir(sessions)) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some((state, root)) = std::fs::read_to_string(entry.path()).ok().and_then(|text| {
+            text.split_once('\n')
+                .map(|(a, b)| (a.to_owned(), b.to_owned()))
+        }) else {
+            continue;
+        };
+        let root = Path::new(&root);
+        if !name.starts_with("Goodtype.Addon.") || (state == "ok" && keep(&name, root)) {
+            continue;
+        }
+        match crate::sandbox::revoke_profile(&name, Some(root)) {
+            Ok(()) => {
+                if let Err(error) = std::fs::remove_file(entry.path()) {
+                    eprintln!("Addon grant marker cleanup failed: {error}");
+                }
+            }
+            Err(error) => eprintln!("Addon install revoke failed: {error}"),
+        }
+    }
+}
+
+/// Every grant of `addon_id`: called on disable, removal, update and rollback.
+pub(super) fn revoke_grants(app: &tauri::AppHandle, addon_id: &str) {
+    if let Ok(sessions) = scratch_root(app) {
+        let prefix = format!("Goodtype.Addon.{addon_id}.");
+        revoke_where(&sessions, |name, _| !name.starts_with(&prefix));
+    }
+}
+
+/// Startup: remove scratch left by a crash. Run before any session can start.
+pub(crate) fn sweep_scratch(app: &tauri::AppHandle) {
+    let Ok(sessions) = scratch_root(app) else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(&sessions) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.file_name().to_string_lossy().starts_with("session-")
+            && let Err(error) = std::fs::remove_dir_all(entry.path())
+        {
+            eprintln!("Stale addon scratch cleanup failed: {error}");
+        }
+    }
+}
+
+/// Startup, in the background: delete per-launch profiles of crashed runs and revoke grants
+/// that no longer belong to an enabled, active session install.
+pub(crate) fn sweep_grants(app: &tauri::AppHandle) {
+    crate::sandbox::sweep_transient_profiles();
+    let Ok(sessions) = scratch_root(app) else {
+        return;
+    };
+    let active: Vec<_> = super::CATALOG
+        .iter()
+        .filter(|addon| super::manager::enabled(app, addon).unwrap_or(false))
+        .filter_map(|addon| {
+            let (version, path) = super::install_dir(app, addon).ok()?.active()?;
+            super::manager::installed(addon, &path, &version, false)
+                .ok()
+                .filter(|manifest| manifest.uses_session())?;
+            Some((profile_name(addon.id, &version)?, path))
+        })
+        .collect();
+    revoke_where(&sessions, |name, root| {
+        active
+            .iter()
+            .any(|(profile, path)| profile == name && path == root)
+    });
 }
 
 impl Session {
-    /// `executable` must be the exact file inside `install` that was just verified.
+    /// `executable` must be the exact file inside the install that was just verified and granted
+    /// to `profile` by [`ensure_grant`].
     pub(super) fn start(
-        install: &Path,
         executable: &Path,
         scratch_root: &Path,
+        profile: &str,
         id: &str,
         version: &str,
         cancelled: impl Fn() -> bool,
     ) -> Result<Self, Failure> {
-        let mut process = launch(install, executable, scratch_root)?;
-        let stdin = process.child.stdin.take().ok_or(Failure::Unavailable)?;
-        let stdout = process.child.stdout.take().ok_or(Failure::Unavailable)?;
-        let stderr = process.child.stderr.take().ok_or(Failure::Unavailable)?;
+        let (process, (stdin, stdout, stderr)) = launch(executable, scratch_root, profile)?;
         Self::connect(stdin, stdout, stderr, Some(process), id, version, cancelled)
     }
 
@@ -361,6 +540,12 @@ impl Session {
             .is_none_or(|process| process.child.running())
     }
 
+    fn exceeded(&self) -> bool {
+        self.process
+            .as_ref()
+            .is_some_and(|process| process.exceeded.load(Ordering::SeqCst))
+    }
+
     /// Bounded stderr, for explicit diagnostics only; never shown as status or persisted.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn diagnostics(&self) -> Vec<u8> {
@@ -376,6 +561,20 @@ impl Session {
     }
 
     fn call(
+        &mut self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<Result<Value, CommandError>, Failure> {
+        let result = self.exchange(method, params, timeout, cancelled);
+        if result.is_err() && self.exceeded() {
+            return Err(Failure::StorageExceeded);
+        }
+        result
+    }
+
+    fn exchange(
         &mut self,
         method: &str,
         params: Value,
@@ -537,20 +736,33 @@ impl Runtime {
         }
         let mut worker = match worker {
             Some(worker) => worker,
-            None => match Session::start(
-                &path,
-                &path.join(addon.executable()),
-                &scratch_root(app)?,
-                addon.id,
-                &version,
-                cancelled,
-            ) {
-                Err(Failure::NeedsUpdate) => {
-                    job.state.lock().unwrap().incompatible_session = Some(version);
-                    return Err(Failure::NeedsUpdate);
+            None => {
+                let sessions = scratch_root(app)?;
+                let profile = ensure_grant(&sessions, addon.id, &version, &path)?;
+                if cancelled() {
+                    return Err(Failure::Cancelled);
                 }
-                result => result?,
-            },
+                match Session::start(
+                    &path.join(addon.executable()),
+                    &sessions,
+                    &profile,
+                    addon.id,
+                    &version,
+                    cancelled,
+                ) {
+                    Err(Failure::NeedsUpdate) => {
+                        job.state.lock().unwrap().incompatible_session = Some(version);
+                        return Err(Failure::NeedsUpdate);
+                    }
+                    Err(Failure::Sandbox) => {
+                        // Grant again next time in case the recorded ACEs were removed.
+                        let _serial = GRANTS.lock().unwrap_or_else(PoisonError::into_inner);
+                        let _ = std::fs::remove_file(grants_dir(&sessions).join(&profile));
+                        return Err(Failure::Sandbox);
+                    }
+                    result => result?,
+                }
+            }
         };
         // Manifest v1 currently admits only empty settings descriptors.
         let reply = worker.invoke(
@@ -584,6 +796,7 @@ impl Failure {
             Self::Timeout => "addon-timeout",
             Self::Unavailable => "addon-unavailable",
             Self::Sandbox => "addon-sandbox-failed",
+            Self::StorageExceeded => "addon-storage-exceeded",
             Self::Protocol => "addon-invalid-response",
         }
     }

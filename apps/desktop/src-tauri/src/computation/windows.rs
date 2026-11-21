@@ -42,6 +42,7 @@ impl Process {
             read_only: &[runtime, input],
             scratch: Some(scratch),
             capabilities: &["registryRead"],
+            profile: None,
             memory_limit: 1024 * 1024 * 1024,
             active_process_limit: 1,
             stdio: false,

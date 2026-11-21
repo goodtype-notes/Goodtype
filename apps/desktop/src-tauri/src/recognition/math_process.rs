@@ -216,7 +216,7 @@ impl Session {
         }
         #[cfg(windows)]
         let job = crate::addons::job::Job::new(MEMORY_BYTES).map_err(|e| e.to_string())?;
-        let mut child = command.spawn().map_err(|e| e.to_string())?;
+        let mut child = crate::sandbox::spawn(&mut command).map_err(|e| e.to_string())?;
         #[cfg(windows)]
         if let Err(error) = job.assign(&child) {
             let _ = child.kill();

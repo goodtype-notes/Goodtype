@@ -648,6 +648,7 @@ fn shutdown(app: &tauri::AppHandle, addon: &Addon) {
     }
     app.state::<super::selection::Proposals>()
         .forget_addon(addon.id);
+    super::session::revoke_grants(app, addon.id);
     if matches!(addon.kind, Kind::Recognize { .. }) {
         app.state::<super::session::Runtime>().shutdown();
         app.state::<crate::recognition::math_process::MathProcess>()

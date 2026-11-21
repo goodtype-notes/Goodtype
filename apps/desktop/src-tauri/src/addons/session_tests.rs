@@ -425,11 +425,45 @@ fn sandbox_launch_failure_makes_the_addon_unavailable_without_fallback() {
         .output()
         .unwrap();
     assert!(status.status.success(), "{status:?}");
-    let result = Session::start(&install, &executable, &scratch, "math", "0.1.0", || false);
+    // The install tree is inspected once, when its stable profile is granted.
+    let result = ensure_grant(&scratch, "math", "0.1.0", &install);
     assert_eq!(result.err(), Some(Failure::Sandbox));
     assert_eq!(Failure::Sandbox.code(), "addon-sandbox-failed");
-    // The per-process scratch directory is removed with the failed launch.
-    assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0);
+    // No session scratch was created, and the marker stays "pending" for the startup sweep.
+    let entries: Vec<_> = std::fs::read_dir(&scratch)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(entries, ["grants"]);
+    let marker = std::fs::read_to_string(scratch.join("grants/Goodtype.Addon.math.0.1.0")).unwrap();
+    assert!(
+        marker.starts_with(
+            "pending
+"
+        ),
+        "{marker}"
+    );
+    // A launch that names the profile never inspects or grants the install again, but the
+    // launcher still refuses an executable inside scratch.
+    let inside = scratch.join("session-x");
+    std::fs::create_dir(&inside).unwrap();
+    std::fs::write(inside.join("a.exe"), b"MZ").unwrap();
+    assert!(
+        crate::sandbox::launch(crate::sandbox::SandboxSpec {
+            executable: &inside.join("a.exe"),
+            args: &[],
+            cwd: &inside,
+            env: crate::sandbox::minimal_environment().unwrap(),
+            read_only: &[],
+            scratch: Some(&inside),
+            capabilities: &[],
+            profile: None,
+            memory_limit: 64 << 20,
+            active_process_limit: 1,
+            stdio: false,
+        })
+        .is_err()
+    );
     std::fs::remove_dir(&linked).unwrap();
 }
 
@@ -461,17 +495,30 @@ fn native_math_session_recognizes_a_selection() {
 
     let scratch = home.path().join("sessions");
     std::fs::create_dir(&scratch).unwrap();
-    let started = Instant::now();
-    let mut session = Session::start(
-        &dir,
-        &dir.join(math.executable()),
-        &scratch,
-        math.id,
-        &version,
-        || false,
-    )
-    .unwrap();
-    let handshake = started.elapsed();
+    let granting = Instant::now();
+    let profile = ensure_grant(&scratch, math.id, &version, &dir).unwrap();
+    let grant = granting.elapsed();
+    let start = || {
+        let started = Instant::now();
+        let session = Session::start(
+            &dir.join(math.executable()),
+            &scratch,
+            &profile,
+            math.id,
+            &version,
+            || false,
+        )
+        .unwrap();
+        (session, started.elapsed())
+    };
+    let (first, first_handshake) = start();
+    drop(first);
+    // A later session reuses the grant: only its fresh scratch gets an ACE.
+    assert_eq!(
+        ensure_grant(&scratch, math.id, &version, &dir).unwrap(),
+        profile
+    );
+    let (mut session, handshake) = start();
     // A handwritten "x": two crossing diagonals.
     let scope = json!({"command":"recognize-math","scope":{"kind":"ink-selection",
         "page":{"widthPt":595.28,"heightPt":841.89},
@@ -506,5 +553,10 @@ fn native_math_session_recognizes_a_selection() {
         }
     }
     assert!(session.healthy());
-    eprintln!("handshake {handshake:?}, cold invoke {cold:?}, warm invoke {warm:?}");
+    drop(session);
+    eprintln!(
+        "grant once {grant:?}, first handshake {first_handshake:?}, next handshake {handshake:?}, cold invoke {cold:?}, warm invoke {warm:?}"
+    );
+    revoke_where(&scratch, |_, _| false);
+    assert!(!scratch.join("grants").join(&profile).exists());
 }

@@ -966,8 +966,7 @@ fn run_contained(
     }
     #[cfg(windows)]
     let job = job::Job::new(JOB_MEMORY_BYTES).map_err(|error| error.to_string())?;
-    let mut child = command
-        .spawn()
+    let mut child = crate::sandbox::spawn(command)
         .map_err(|error| format!("the importer could not start ({error})"))?;
     #[cfg(windows)]
     if let Err(error) = job.assign(&child) {

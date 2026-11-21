@@ -328,7 +328,7 @@ impl Session {
         }
     }
 }
-fn directory_bytes(root: &Path, limit: u64) -> Result<u64, String> {
+pub(crate) fn directory_bytes(root: &Path, limit: u64) -> Result<u64, String> {
     let mut total = 0u64;
     let mut count = 0;
     let mut pending = vec![(root.to_path_buf(), 0)];

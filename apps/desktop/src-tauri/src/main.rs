@@ -36,6 +36,10 @@ fn main() {
             if let Err(error) = addons::manager::startup(&handle) {
                 eprintln!("Addon startup verification failed: {error}");
             }
+            // Crash leftovers: scratch before any session can start, then profiles and grants.
+            addons::session::sweep_scratch(&handle);
+            let sweeper = handle.clone();
+            std::thread::spawn(move || addons::session::sweep_grants(&sweeper));
             let policy = app.state::<settings::RemotePackages>();
             if let Ok(settings) = settings::load_app_settings(handle.clone()) {
                 policy.set(settings.remote_packages);
