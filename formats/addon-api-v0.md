@@ -149,9 +149,12 @@ dispatch, obtain the relevant grant and supply only granted data.
 A Windows Job Object bounds process resources and lifetime. Filesystem and
 network isolation requires a verified restricted launcher. The host MUST
 accurately disclose which boundary applies. The Addons manager shows it per
-addon. Session addons are described as isolated: no network, only their own
-installed files. Legacy importers are described as running with the user's
-file and network access and limited only in memory and running time.
+addon from the installed manifest's transport. Session addons are described as
+isolated: no network, read-only access to their own install and a private
+scratch directory. Resources Windows makes readable to every AppContainer
+(system files, and the registry under `registryRead`) remain readable. Legacy
+importers are described as running with the user's file and network access and
+limited only in memory and running time.
 
 ## Registry index format 1
 
@@ -238,14 +241,28 @@ denies concurrent writes and deletion on Windows. Keep the previous verified ver
 **Implemented on the host (Step 3a, launcher Step 3b).** Each session process
 starts through the shared AppContainer launcher (`sandbox::launch`). The
 executable is the exact verified file in the active install, with host argv
-`--session`. The profile is fresh and holds only the `registryRead` capability
-(read-only registry access, approved for math on 2026-11-21); it has no network
-capability and no loopback exemption. The install directory is granted read and execute.
-A fresh per-process directory under app-local `addon-sessions` is the
-low-integrity scratch, the working directory, and TEMP/TMP. The environment is
-`minimal_environment()`. The job allows one active process with the 3 GiB math
-memory budget, and only the three stdio pipe ends are inherited. Before any ACL
-change the launcher rejects reparse points in both trees and their ancestors.
+`--session`. Each verified addon version has one stable profile,
+`Goodtype.Addon.<id>.<version>`, granted read and execute on its install tree
+once, before its first session. Disable, remove, update and rollback revoke the
+grant and delete the profile. A marker under `addon-sessions/grants` records
+each grant, and startup revokes any grant that no longer belongs to an enabled,
+active session install. Sessions hold only the `registryRead` capability
+(read-only registry access, approved for math on 2026-11-21); they have no
+network capability and no loopback exemption. A fresh per-process directory
+under app-local `addon-sessions` is the low-integrity scratch, the working
+directory, and TEMP/TMP. It is capped at 256 MiB while the process runs, and
+exceeding the cap stops the process with `addon-storage-exceeded`. Startup
+removes scratch and per-launch profiles left by a crashed run. The environment
+is `minimal_environment()`. The job allows one active process with the 3 GiB
+math memory budget per process, kills it on an unhandled exception, and only
+the three stdio pipe ends are inherited. Every process the host itself creates
+takes one spawn lock while those ends are inheritable. Spawns by third-party
+crates or Windows components inside the host process are outside that lock.
+Every recursive ACL change is serialized and first rejects reparse points in
+the tree and its ancestors. Scratch must not overlap a read-only root or hold
+the executable, and batch files are refused. A math install with a session
+manifest is never started through the legacy `--serve` process, whatever its
+authorization state.
 A launch or ACL failure returns `addon-sandbox-failed` with a localized
 reason. The host never falls back to an unconfined launch. Deadlines,
 retirement and epochs are unchanged. The `progress` phase vocabulary is catalog-defined and is currently
@@ -329,8 +346,10 @@ default of on. Manual discovery remains available during recovery.
 
 Sandbox evidence (Windows 11 26200, local math build
 `0.1.0-local.20261121121521`): the shared launcher probe denies reads outside
-granted roots and writes outside scratch. Winsock fails to start, and the probe
-finds no inherited handles. The math build reports `--version --json`
+granted roots and writes outside scratch, and finds no inherited handles. With
+zero capabilities Winsock fails to start (`WSAStartup` 10107). With
+`registryRead` Winsock starts and `socket()` is denied (10013), for loopback
+and external targets alike. The math build reports `--version --json`
 inside the container. With zero capabilities, its ONNX Runtime start blocks
 indefinitely before the model DLL is mapped (about 5 MB working set, no
 output), so the handshake times out. With only the `registryRead` capability,
@@ -339,7 +358,10 @@ it loads and recognizes: handshake 2.44 s including ACL setup, cold 0.34 to
 The Job Object run took 2.76 s, 0.58 s and 0.46 s. The user approved
 `registryRead` for math on 2026-11-21. With it, the signed stable release
 `v0.1.0` (SHA-256 `415bc6a8…3d02e38`) recognizes inside the container:
-handshake 1.24 s, cold 0.37 s, warm 0.24 s.
+handshake 1.24 s, cold 0.37 s, warm 0.24 s. With stable per-version profiles,
+the one-time grant takes about 0.1 s. Later session handshakes took 1.18 to
+1.64 s, against 1.83 to 2.29 s with a fresh profile and grant per session.
+Most of the remaining handshake time is the addon's own startup.
 
 ## Legacy importer CLI adapter
 
@@ -397,5 +419,9 @@ The wire contract is unchanged.
 Step 3b moved session v0 processes onto the shared AppContainer launcher and
 added the `addon-sandbox-failed` command problem. The Addons manager now
 discloses the actual boundary for each addon. The wire contract is unchanged.
+
+Step 3b hardening moved session installs to stable per-version profiles with a
+one-time tree grant and added the host-side `addon-storage-exceeded` problem
+for the 256 MiB scratch cap. The wire contract is unchanged.
 
 Math catalog: Ed25519 key from `Just8it/Goodtype-ink-recognition` (0.1.0), no bootstrap pin; math installs from the signed index (index-3 onward, now also the bundled snapshot). Math sessions hold `registryRead` only (user-approved 2026-11-21). No wire change.
