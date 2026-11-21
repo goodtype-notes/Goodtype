@@ -27,6 +27,8 @@ pub(crate) mod manager;
 mod manifest;
 pub(crate) mod recognize;
 pub(crate) mod registry;
+pub(crate) mod selection;
+pub(crate) mod session;
 mod update;
 
 use catalog::CATALOG;
@@ -1165,6 +1167,8 @@ struct State {
     activity: Option<Activity>,
     source: Option<PathBuf>,
     startup_invalid: bool,
+    incompatible_session: Option<String>,
+    authorization_epoch: u64,
     stopping_import: bool,
 }
 
@@ -1348,12 +1352,13 @@ pub async fn importer_status(
     tool: String,
 ) -> Result<ImporterStatus, String> {
     let (importer, tool) = importers.get(&tool)?;
-    let (activity, source, startup_invalid) = {
+    let (activity, source, startup_invalid, incompatible_session) = {
         let state = importer.state.lock().unwrap();
         (
             state.activity.clone(),
             state.source.clone(),
             state.startup_invalid,
+            state.incompatible_session.clone(),
         )
     };
     let mut needs_reinstall = false;
@@ -1364,6 +1369,9 @@ pub async fn importer_status(
         && let Some((version, path)) = install_dir(&app, tool)?.active()
     {
         match manager::installed(tool, &path, &version, false) {
+            Ok(_) if incompatible_session.as_ref() == Some(&version) => {
+                (None, Some("incompatible addon API".into()))
+            }
             Ok(_) if manager::enabled(&app, tool)? => (Some(version), None),
             Ok(_) => {
                 disabled = true;

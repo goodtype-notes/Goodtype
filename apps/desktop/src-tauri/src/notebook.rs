@@ -640,6 +640,88 @@ pub async fn insert_helper_proposal(
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AddonInvocation {
+    review: crate::addons::selection::Review,
+    direct: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AddonSelection {
+    root: String,
+    page_id: String,
+    stroke_ids: Vec<String>,
+    addon_id: String,
+    command: String,
+    request_id: String,
+    review_first: bool,
+}
+
+#[tauri::command]
+pub async fn invoke_addon_selection(
+    roots: tauri::State<'_, AllowedRoots>,
+    histories: tauri::State<'_, NotebookHistories>,
+    app: tauri::AppHandle,
+    selection: AddonSelection,
+) -> Result<AddonInvocation, NotebookError> {
+    use crate::addons::selection as addons;
+    let AddonSelection {
+        root,
+        page_id,
+        stroke_ids,
+        addon_id,
+        command,
+        request_id,
+        review_first,
+    } = selection;
+    let capture = on_page(&roots, &histories, root, page_id, move |root, page, _| {
+        addons::capture(root, page, stroke_ids)
+    })
+    .await?;
+    let (review, direct) = tauri::async_runtime::spawn_blocking(move || {
+        addons::invoke(&app, &addon_id, &command, capture, request_id, review_first)
+    })
+    .await
+    .map_err(NotebookError::other)??;
+    Ok(AddonInvocation { review, direct })
+}
+
+#[tauri::command]
+pub async fn insert_addon_proposal(
+    roots: tauri::State<'_, AllowedRoots>,
+    histories: tauri::State<'_, NotebookHistories>,
+    app: tauri::AppHandle,
+    root: String,
+    page_id: String,
+    proposal: crate::helper::proposals::ProposalInsert,
+    direct: bool,
+) -> Result<Option<CommitResult>, NotebookError> {
+    on_page(
+        &roots,
+        &histories,
+        root,
+        page_id,
+        move |root, page_id, history| {
+            Ok(crate::addons::selection::insert(
+                &app,
+                root,
+                page_id,
+                history,
+                &proposal.proposal_id,
+                proposal.proposal_version,
+                direct,
+            )?
+            .map(|result| CommitResult {
+                result,
+                asset_paths: None,
+            }))
+        },
+    )
+    .await
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CommitResult {
     #[serde(flatten)]
     result: HistoryResult,

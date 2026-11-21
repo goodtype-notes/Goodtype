@@ -402,6 +402,16 @@ fn install_preference(
     }
 }
 
+pub(super) fn direct_apply(app: &tauri::AppHandle, id: &str) -> bool {
+    policy(app).is_ok_and(|policy| {
+        policy.allow_direct_apply
+            && policy
+                .addons
+                .get(id)
+                .is_some_and(|pref| pref.enabled && pref.direct_apply)
+    })
+}
+
 pub(super) fn enabled(app: &tauri::AppHandle, addon: &Addon) -> Result<bool, String> {
     Ok(policy(app)
         .unwrap_or_default()
@@ -535,6 +545,12 @@ pub async fn addon_list(
             };
         }
         let state = job.state.lock().unwrap();
+        if active
+            .as_ref()
+            .is_some_and(|(version, _)| state.incompatible_session.as_ref() == Some(version))
+        {
+            status = Status::IncompatibleApi;
+        }
         if state.startup_invalid {
             status = Status::VerificationFailed;
         }
@@ -615,7 +631,13 @@ pub fn addon_reset_policy(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 fn shutdown(app: &tauri::AppHandle, addon: &Addon) {
+    if let Ok((job, _)) = app.state::<Importers>().get(addon.id) {
+        let mut state = job.state.lock().unwrap();
+        state.authorization_epoch += 1;
+        state.incompatible_session = None;
+    }
     if matches!(addon.kind, Kind::Recognize { .. }) {
+        app.state::<super::session::Runtime>().shutdown();
         app.state::<crate::recognition::math_process::MathProcess>()
             .shutdown();
     }
@@ -693,10 +715,14 @@ fn remove(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
         }
         // Keep the job reserved until the retired directory has been pruned.
         let cleanup = fs::remove_dir_all(removed).map_err(|e| e.to_string());
-        *job.state.lock().unwrap() = State {
+        let mut state = job.state.lock().unwrap();
+        // The epoch survives so a reinstall of the same version cannot revive old proposals.
+        *state = State {
             activity: Some(Activity::Installing),
+            authorization_epoch: state.authorization_epoch,
             ..State::default()
         };
+        drop(state);
         cleanup?;
         Ok(())
     })();

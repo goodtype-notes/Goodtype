@@ -28,6 +28,8 @@ fn main() {
         .manage(addons::Importers::default())
         .manage(addons::registry::Checks::default())
         .manage(recognition::math_process::MathProcess::default())
+        .manage(addons::session::Runtime::default())
+        .manage(addons::selection::Proposals::default())
         .setup(|app| {
             let handle = app.handle().clone();
             if let Err(error) = addons::manager::startup(&handle) {
@@ -61,6 +63,12 @@ fn main() {
             helper::proposals::helper_request_change,
             helper::proposals::helper_edit_proposal,
             notebook::insert_helper_proposal,
+            notebook::invoke_addon_selection,
+            notebook::insert_addon_proposal,
+            addons::selection::addon_selection_commands,
+            addons::selection::addon_cancel,
+            addons::selection::addon_edit,
+            addons::selection::addon_dismiss,
             notebook::apply_helper_cell_proposal,
             notebook::apply_helper_page_proposal,
             helper::helper_install_relay,

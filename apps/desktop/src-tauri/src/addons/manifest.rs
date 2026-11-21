@@ -185,6 +185,32 @@ impl Addon {
 }
 
 impl Manifest {
+    pub(super) fn selection_labels(&self) -> impl Iterator<Item = (&str, &str, &str)> {
+        self.commands
+            .iter()
+            .filter(|command| self.supports_selection(&command.id))
+            .map(|command| {
+                let en = &self.strings.en[&command.label];
+                (
+                    command.id.as_str(),
+                    en.as_str(),
+                    self.strings.de.get(&command.label).unwrap_or(en).as_str(),
+                )
+            })
+    }
+
+    pub(super) fn supports_selection(&self, id: &str) -> bool {
+        self.transport == Transport::StdioJsonrpc
+            && self
+                .commands
+                .iter()
+                .any(|command| command.id == id && command.surface == Surface::InkSelection)
+    }
+
+    pub(super) fn uses_session(&self) -> bool {
+        self.transport == Transport::StdioJsonrpc
+    }
+
     pub(super) fn same_scope(&self, other: &Self) -> bool {
         self.transport == other.transport
             && self.permissions.len() == other.permissions.len()
