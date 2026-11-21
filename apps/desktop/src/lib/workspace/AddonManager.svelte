@@ -72,6 +72,7 @@
     {#if addon.status === "disabled"}
       <p class="hint">{$t("addons.manager.reviewPermissions")}</p>
     {/if}
+    <p class="hint">{$t(`addons.manager.isolation.${addon.isolation}`)}</p>
     <p class="hint">{$t("addons.manager.network")}</p>
   </section>
 

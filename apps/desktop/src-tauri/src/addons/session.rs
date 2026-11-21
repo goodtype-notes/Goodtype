@@ -5,7 +5,6 @@ use std::{
     collections::HashSet,
     io::{BufRead, BufReader, Read, Write},
     path::Path,
-    process::{Child, Command, Stdio},
     sync::{Arc, Mutex, mpsc},
     time::{Duration, Instant},
 };
@@ -26,6 +25,8 @@ pub(super) enum Failure {
     Timeout,
     Cancelled,
     Unavailable,
+    /// The restricted launcher refused or failed; never retried without confinement.
+    Sandbox,
 }
 
 #[derive(Debug, Deserialize)]
@@ -222,66 +223,58 @@ pub(super) struct Session {
     pub used: Instant,
 }
 
-impl Drop for Launched {
-    fn drop(&mut self) {
-        #[cfg(windows)]
-        self.job.terminate();
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-/// The supervised child. Today a Job Object bounds memory and lifetime; the restricted
-/// AppContainer launcher replaces only `launch` at integration.
+/// A `stdio-jsonrpc` addon in a fresh AppContainer with no capabilities (so no network),
+/// read-only access to its verified install, and one private low-integrity scratch directory.
+/// A launch or ACL failure makes the addon unavailable; there is no unconfined fallback.
 pub(super) struct Launched {
-    child: Child,
-    #[cfg(windows)]
-    job: super::job::Job,
+    // Declared first so the job is shut down before the scratch directory is removed.
+    child: crate::sandbox::SandboxedChild,
+    _scratch: tempfile::TempDir,
 }
 
-fn launch(executable: &Path) -> Result<Launched, Failure> {
-    // Job Object supervision only: no filesystem or network confinement on this path.
+fn launch(install: &Path, executable: &Path, scratch_root: &Path) -> Result<Launched, Failure> {
     if !super::platform_supported() {
         return Err(Failure::Unavailable);
     }
-    let mut command = Command::new(executable);
-    command
-        .arg("--session")
-        .current_dir(executable.parent().ok_or(Failure::Unavailable)?)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000);
-    }
-    #[cfg(windows)]
-    let job = super::job::Job::new(crate::recognition::math_process::MEMORY_BYTES)
-        .map_err(|_| Failure::Unavailable)?;
-    #[allow(unused_mut)]
-    let mut child = command.spawn().map_err(|_| Failure::Unavailable)?;
-    #[cfg(windows)]
-    if job.assign(&child).is_err() {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(Failure::Unavailable);
-    }
+    // The launcher rejects reparse points in both trees (and their ancestors) before any ACL.
+    let scratch = tempfile::Builder::new()
+        .prefix("session-")
+        .tempdir_in(scratch_root)
+        .map_err(|_| Failure::Sandbox)?;
+    let env = crate::sandbox::minimal_environment().map_err(|_| Failure::Sandbox)?;
+    let child = crate::sandbox::launch(crate::sandbox::SandboxSpec {
+        executable,
+        args: &["--session".into()],
+        cwd: scratch.path(),
+        env,
+        read_only: &[install],
+        scratch: Some(scratch.path()),
+        capabilities: &[],
+        memory_limit: crate::recognition::math_process::MEMORY_BYTES,
+        active_process_limit: 1,
+        stdio: true,
+    })
+    .map_err(|error| {
+        eprintln!("Addon sandbox launch failed: {error}");
+        Failure::Sandbox
+    })?;
     Ok(Launched {
         child,
-        #[cfg(windows)]
-        job,
+        _scratch: scratch,
     })
 }
 
 impl Session {
+    /// `executable` must be the exact file inside `install` that was just verified.
     pub(super) fn start(
+        install: &Path,
         executable: &Path,
+        scratch_root: &Path,
         id: &str,
         version: &str,
         cancelled: impl Fn() -> bool,
     ) -> Result<Self, Failure> {
-        let mut process = launch(executable)?;
+        let mut process = launch(install, executable, scratch_root)?;
         let stdin = process.child.stdin.take().ok_or(Failure::Unavailable)?;
         let stdout = process.child.stdout.take().ok_or(Failure::Unavailable)?;
         let stderr = process.child.stderr.take().ok_or(Failure::Unavailable)?;
@@ -363,7 +356,7 @@ impl Session {
     fn running(&mut self) -> bool {
         self.process
             .as_mut()
-            .is_none_or(|process| matches!(process.child.try_wait(), Ok(None)))
+            .is_none_or(|process| process.child.running())
     }
 
     /// Bounded stderr, for explicit diagnostics only; never shown as status or persisted.
@@ -540,7 +533,9 @@ impl Runtime {
         let mut worker = match worker {
             Some(worker) => worker,
             None => match Session::start(
+                &path,
                 &path.join(addon.executable()),
+                &scratch_root(app)?,
                 addon.id,
                 &version,
                 cancelled,
@@ -564,6 +559,18 @@ impl Runtime {
     }
 }
 
+/// Per-process scratch lives under app-local data, beside (not inside) the install directories.
+fn scratch_root(app: &tauri::AppHandle) -> Result<std::path::PathBuf, Failure> {
+    use tauri::Manager;
+    let root = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| Failure::Sandbox)?
+        .join("addon-sessions");
+    std::fs::create_dir_all(&root).map_err(|_| Failure::Sandbox)?;
+    Ok(root)
+}
+
 impl Failure {
     pub(super) fn code(&self) -> &'static str {
         match self {
@@ -571,6 +578,7 @@ impl Failure {
             Self::Cancelled => "addon-cancelled",
             Self::Timeout => "addon-timeout",
             Self::Unavailable => "addon-unavailable",
+            Self::Sandbox => "addon-sandbox-failed",
             Self::Protocol => "addon-invalid-response",
         }
     }

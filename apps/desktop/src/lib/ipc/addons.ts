@@ -63,6 +63,8 @@ export type ManagedAddon = {
   memoryBytes: number;
   timeoutSeconds: number;
   outputBytes: number;
+  /** "sandbox": AppContainer, no network, own files only. "job": user access, memory/time limits. */
+  isolation: "sandbox" | "job";
   release: Release | null;
   update: Release | null;
   directApply: boolean;

@@ -479,6 +479,8 @@ struct ManagedAddon {
     memory_bytes: usize,
     timeout_seconds: u64,
     output_bytes: usize,
+    /// What actually confines the process: the AppContainer sandbox or Job Object limits only.
+    isolation: &'static str,
     release: Option<ReleaseView>,
     update: Option<ReleaseView>,
     direct_apply: bool,
@@ -569,18 +571,21 @@ pub async fn addon_list(
             Activity::Finished { .. } => ("finished", None),
             Activity::ImportFailed { .. } => ("importFailed", None),
         };
-        let (formats, memory_bytes, timeout_seconds, output_bytes) = match addon.kind {
+        // Legacy importers stay on the Job Object path this beta; sessions run sandboxed.
+        let (formats, memory_bytes, timeout_seconds, output_bytes, isolation) = match addon.kind {
             Kind::Import { extensions, .. } => (
                 extensions,
                 JOB_MEMORY_BYTES,
                 import::IMPORT_TIMEOUT.as_secs(),
                 MAX_JSON_BYTES,
+                "job",
             ),
             Kind::Recognize { .. } => (
                 &[][..],
                 crate::recognition::math_process::MEMORY_BYTES,
                 30,
                 crate::recognition::math_process::LINE_LIMIT,
+                "sandbox",
             ),
         };
         addons.push(ManagedAddon {
@@ -600,6 +605,7 @@ pub async fn addon_list(
             memory_bytes,
             timeout_seconds,
             output_bytes,
+            isolation,
             release,
             update,
             direct_apply: preference.direct_apply,

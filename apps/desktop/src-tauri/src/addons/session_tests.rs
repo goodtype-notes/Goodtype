@@ -404,6 +404,35 @@ fn unsolicited_output_and_the_request_cap_retire_a_warm_worker() {
     assert!(!capped.healthy());
 }
 
+/// A launcher refusal (here a junction inside the install tree) must surface as the sandbox
+/// failure itself. A fallback launch would instead fail later at the handshake.
+#[cfg(windows)]
+#[test]
+fn sandbox_launch_failure_makes_the_addon_unavailable_without_fallback() {
+    let home = tempfile::tempdir().unwrap();
+    let install = home.path().join("install");
+    let scratch = home.path().join("sessions");
+    for dir in [&install, &scratch] {
+        std::fs::create_dir(dir).unwrap();
+    }
+    let executable = install.join("goodtype-math-recognize.exe");
+    std::fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+    let linked = install.join("linked");
+    let status = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&linked)
+        .arg(home.path())
+        .output()
+        .unwrap();
+    assert!(status.status.success(), "{status:?}");
+    let result = Session::start(&install, &executable, &scratch, "math", "0.1.0", || false);
+    assert_eq!(result.err(), Some(Failure::Sandbox));
+    assert_eq!(Failure::Sandbox.code(), "addon-sandbox-failed");
+    // The per-process scratch directory is removed with the failed launch.
+    assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0);
+    std::fs::remove_dir(&linked).unwrap();
+}
+
 /// Runs the real local math package: `GOODTYPE_MATH_ZIP=<zip> cargo test -- --ignored
 /// native_math_session`. Only release-signature verification is bypassed; the inventory,
 /// manifest and handshake are the production checks.
@@ -430,9 +459,18 @@ fn native_math_session_recognizes_a_selection() {
     let manifest = super::super::manifest::parse(&bytes, math, &version).unwrap();
     assert!(manifest.supports_selection("recognize-math"));
 
+    let scratch = home.path().join("sessions");
+    std::fs::create_dir(&scratch).unwrap();
     let started = Instant::now();
-    let mut session =
-        Session::start(&dir.join(math.executable()), math.id, &version, || false).unwrap();
+    let mut session = Session::start(
+        &dir,
+        &dir.join(math.executable()),
+        &scratch,
+        math.id,
+        &version,
+        || false,
+    )
+    .unwrap();
     let handshake = started.elapsed();
     // A handwritten "x": two crossing diagonals.
     let scope = json!({"command":"recognize-math","scope":{"kind":"ink-selection",

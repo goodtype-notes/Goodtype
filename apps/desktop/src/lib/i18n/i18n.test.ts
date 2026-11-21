@@ -104,7 +104,7 @@ describe("bundled English and German interface", () => {
       id: "onenote", name: { en: "OneNote Importer", de: "OneNote-Import" },
       installed: "0.1.0", previous: null, status: "disabled", expectedApi: "goodtype-api 0.1", foundApi: null,
       permissions: ["picked-import-file"], catalogPermissions: ["picked-import-file"],
-      formats: ["one"], memoryBytes: 1024, timeoutSeconds: 30, outputBytes: 1024,
+      formats: ["one"], memoryBytes: 1024, timeoutSeconds: 30, outputBytes: 1024, isolation: "job",
       release: null, update: null,
       directApply: false, activity: "idle", approval: null, progress: null,
     };
@@ -123,6 +123,9 @@ describe("bundled English and German interface", () => {
       expect(html).toContain('type="checkbox"');
       expect(html).toContain(translate("addons.manager.enable"));
       expect(html).toContain(translate("addons.manager.check"));
+      // Importers must not be described as isolated (the second sentence has no apostrophe to escape).
+      expect(html).toContain(translate("addons.manager.isolation.job").split(". ")[1]);
+      expect(html).not.toContain(translate("addons.manager.isolation.sandbox").split(":")[0]);
       expect(html).toContain(translate("addons.manager.permission.picked-import-file"));
       const unavailable = render(AddonManagerSheet, { props: {
         addon: { ...addon, status: "needs-reinstall" },

@@ -5,6 +5,7 @@ const PROBLEMS = {
   "addon-cancelled": "addonCommand.problem.cancelled",
   "addon-timeout": "addonCommand.problem.timeout",
   "addon-unavailable": "addonCommand.problem.unavailable",
+  "addon-sandbox-failed": "addonCommand.problem.sandboxFailed",
   "addon-invalid-response": "addonCommand.problem.invalidResponse",
   "addon-invalid-selection": "addonCommand.problem.invalidSelection",
   "addon-unsupported": "addonCommand.problem.unsupported",

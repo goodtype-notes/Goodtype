@@ -6,8 +6,10 @@
 the built-in catalog and retains the legacy importer CLI adapter. Step 2
 implements manifest v1 validation and the device-local Addons manager. Step 2b
 implements index format 1. Step 3a implements the host side of session v0,
-ink-selection commands, addon-owned proposals and direct apply. The restricted
-launcher and settings descriptors remain pending.
+ink-selection commands, addon-owned proposals and direct apply. Step 3b runs
+`stdio-jsonrpc` sessions in the restricted AppContainer launcher. Legacy
+importers stay on the Job Object path for this beta. Settings descriptors
+remain pending.
 
 During beta, the host MUST require an exact match to its current
 `goodtype-api 0.N` for declarations and handshakes. An incompatible installed
@@ -146,7 +148,10 @@ dispatch, obtain the relevant grant and supply only granted data.
 
 A Windows Job Object bounds process resources and lifetime. Filesystem and
 network isolation requires a verified restricted launcher. The host MUST
-accurately disclose which boundary applies.
+accurately disclose which boundary applies. The Addons manager shows it per
+addon. Session addons are described as isolated: no network, only their own
+installed files. Legacy importers are described as running with the user's
+file and network access and limited only in memory and running time.
 
 ## Registry index format 1
 
@@ -230,10 +235,19 @@ denies concurrent writes and deletion on Windows. Keep the previous verified ver
 
 ## Session v0
 
-**Implemented on the host (Step 3a).** Session v0 currently launches through
-the Windows Job Object path (memory and lifetime bounds only, no filesystem or
-network confinement). A single launch function is the seam for the restricted
-launcher. The `progress` phase vocabulary is catalog-defined and is currently
+**Implemented on the host (Step 3a, launcher Step 3b).** Each session process
+starts through the shared AppContainer launcher (`sandbox::launch`). The
+executable is the exact verified file in the active install, with host argv
+`--session`. The profile is fresh and has no capabilities, so it has no network
+and no loopback exemption. The install directory is granted read and execute.
+A fresh per-process directory under app-local `addon-sessions` is the
+low-integrity scratch, the working directory, and TEMP/TMP. The environment is
+`minimal_environment()`. The job allows one active process with the 3 GiB math
+memory budget, and only the three stdio pipe ends are inherited. Before any ACL
+change the launcher rejects reparse points in both trees and their ancestors.
+A launch or ACL failure returns `addon-sandbox-failed` with a localized
+reason. The host never falls back to an unconfined launch. Deadlines,
+retirement and epochs are unchanged. The `progress` phase vocabulary is catalog-defined and is currently
 only `recognizing`. A warm worker is keyed by verified version, inventory
 digest and authorization context (notebook root and grant kind: the writer's
 own command or an assistant grant). Each disable, remove, update or rollback
@@ -312,6 +326,19 @@ is readable, addon execution and automatic discovery pause until the user
 confirms resetting the preferences. Reset restores automatic discovery to its
 default of on. Manual discovery remains available during recovery.
 
+Sandbox evidence (Windows 11 26200, local math build
+`0.1.0-local.20261121121521`): the shared launcher probe denies reads outside
+granted roots and writes outside scratch. Winsock fails to start, and the probe
+finds no inherited handles. The math build reports `--version --json`
+inside the container. With zero capabilities, its ONNX Runtime start blocks
+indefinitely before the model DLL is mapped (about 5 MB working set, no
+output), so the handshake times out. With only the `registryRead` capability,
+it loads and recognizes: handshake 2.44 s including ACL setup, cold 0.34 to
+0.41 s, warm 0.25 to 0.28 s. ONNX Runtime also logs a denied ETW registration.
+The Job Object run took 2.76 s, 0.58 s and 0.46 s. Whether to grant
+`registryRead` to math is an open permission decision. Until it is made, math
+sessions on this path time out and fail closed.
+
 ## Legacy importer CLI adapter
 
 **Implemented (existing adapter, retained in Step 1).** The Goodnotes and
@@ -329,9 +356,10 @@ For import, Rust re-verifies the installed files and invokes
 `<executable> <source> <staging>/batch` with staging as working directory and
 an optional trailing `--allow-derived` on a supported, consented import.
 The current adapter passes the picked source path. The staged input copy
-described above belongs to the planned restricted launcher. Current process
-supervision uses a Windows Job Object, a 4 GiB job memory limit and a four-hour
-import deadline.
+described above belongs to the planned restricted launcher. For this beta the
+importers deliberately stay on Job Object supervision, as ADR 0045 allows with
+disclosure. That means a 4 GiB job memory limit and a four-hour import deadline,
+with no filesystem or network confinement.
 
 The host polls `batch/import-report.json` and reads it again when the
 process ends. The file is a JSON array capped at 4 MiB and 500 entries.
@@ -363,3 +391,7 @@ proposals. Insertion works with AI disabled and is one undo step. Direct apply
 requires both opt-ins at invocation and commit. A math install declaring
 `stdio-jsonrpc` uses `--session`, and other installs keep the legacy path.
 The wire contract is unchanged.
+
+Step 3b moved session v0 processes onto the shared AppContainer launcher and
+added the `addon-sandbox-failed` command problem. The Addons manager now
+discloses the actual boundary for each addon. The wire contract is unchanged.
