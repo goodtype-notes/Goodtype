@@ -118,23 +118,26 @@ pub(super) fn installed(
     if is_package_link(&fs::symlink_metadata(path).map_err(|_| Error::Invalid)?) {
         return Err(Error::Invalid);
     }
+    // A same-user process that can rewrite app-local data is outside the threat model.
+    let provenance: Provenance = read_bounded(&path.join(PROVENANCE), 4096)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .ok_or(Error::NeedsReinstall)?;
+    if !update::is_hash(&provenance.archive_sha256, 64)
+        || installation_digest(path).map_err(|_| Error::Invalid)? != provenance.inventory_sha256
+    {
+        return Err(Error::NeedsReinstall);
+    }
     let legacy_pin = if !path.join(manifest::FILE).exists() && addon.legacy == Some(version) {
-        // A same-user process that can rewrite app-local data is outside the threat model.
-        let provenance: Provenance = read_bounded(&path.join(PROVENANCE), 4096)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .ok_or(Error::NeedsReinstall)?;
-        let pin = addon
-            .pinned
-            .filter(|pin| {
-                pin.version == version
-                    && pin.sha256.eq_ignore_ascii_case(&provenance.archive_sha256)
-            })
-            .ok_or(Error::NeedsReinstall)?;
-        if installation_digest(path).map_err(|_| Error::Invalid)? != provenance.inventory_sha256 {
-            return Err(Error::NeedsReinstall);
-        }
-        Some(pin)
+        Some(
+            addon
+                .pinned
+                .filter(|pin| {
+                    pin.version == version
+                        && pin.sha256.eq_ignore_ascii_case(&provenance.archive_sha256)
+                })
+                .ok_or(Error::NeedsReinstall)?,
+        )
     } else {
         None
     };
@@ -303,6 +306,9 @@ pub(super) fn install(
             Ok(())
         },
         |candidate| {
+            if job.cancel.load(Ordering::SeqCst) {
+                return Err(CANCELLED.into());
+            }
             activate(
                 app,
                 dir,
@@ -493,18 +499,23 @@ pub async fn addon_list(
         let dir = install_dir(&app, addon).map_err(|_| "installation-read-failed")?;
         let active = dir.active();
         let preference = policy.addons.get(addon.id).copied().unwrap_or_default();
-        let candidate = registry.as_ref().and_then(|registry| {
-            registry.release(addon, active.as_ref().map(|(version, _)| version.as_str()))
-        });
-        let update = candidate
-            .filter(|_| active.is_some())
+        let active_version = active.as_ref().map(|(version, _)| version.as_str());
+        let update = active_version
+            .and_then(|version| registry.as_ref()?.release(addon, Some(version)))
             .map(registry::Release::view);
-        let release = candidate.map(registry::Release::view).or_else(|| {
-            addon.pinned.map(|pin| ReleaseView {
-                version: pin.version.into(),
-                size_bytes: pin.size,
-            })
-        });
+        let release = registry
+            .as_ref()
+            .and_then(|registry| registry.install_release(addon, active_version))
+            .map(registry::Release::view)
+            .or_else(|| {
+                addon
+                    .pinned
+                    .filter(|pin| active_version.is_none_or(|version| version == pin.version))
+                    .map(|pin| ReleaseView {
+                        version: pin.version.into(),
+                        size_bytes: pin.size,
+                    })
+            });
         let mut status = if !platform_supported() {
             Status::UnsupportedOs
         } else if release.is_some() {
@@ -765,6 +776,7 @@ mod tests {
         write_policy(&path, &Policy::default()).unwrap();
         let policy = read_policy(&path).unwrap();
         assert!(!policy.allow_direct_apply && policy.addons.is_empty());
+        assert!(policy.auto_check);
         assert!(!first_run(&path));
     }
 
@@ -827,6 +839,10 @@ mod tests {
         assert!(persisted.allow_direct_apply);
         assert!(!persisted.auto_check);
         assert!(persisted.addons.is_empty());
+
+        fs::write(&path, b"{").unwrap();
+        assert!(!read_policy(&path).unwrap().auto_check);
+        assert!(!read_policy_file(&path).unwrap().auto_check);
     }
 
     #[test]

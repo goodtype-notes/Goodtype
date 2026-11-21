@@ -127,7 +127,8 @@ impl Addon {
                     && inventory.version == version
                     && inventory.decoder_commit == pin.decoder_commit
                     && release.is_some_and(|candidate| {
-                        candidate.sha256 == pin.sha256 && candidate.size == pin.size
+                        candidate.sha256.eq_ignore_ascii_case(pin.sha256)
+                            && candidate.size == pin.size
                     })
             })
     }

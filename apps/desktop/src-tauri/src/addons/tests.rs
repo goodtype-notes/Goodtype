@@ -312,25 +312,55 @@ fn a_verified_update_retains_the_previous_release_for_local_rollback() {
     for version in ["9.9.8", VERSION] {
         let bytes = package(tool, version, false, None);
         fs::write(&archive, &bytes).unwrap();
-        install_archive(
+        let approved = std::cell::Cell::new(false);
+        let release = PinnedRelease {
+            version,
+            ..pin(tool, &bytes)
+        };
+        install_with_policy(
             &dir,
             &archive,
-            &PinnedRelease {
-                version,
-                ..pin(tool, &bytes)
-            },
-            &|_| {
+            &release,
+            &|staging| {
+                assert!(approved.get());
+                let provenance: Provenance =
+                    serde_json::from_slice(&fs::read(staging.join(PROVENANCE)).unwrap()).unwrap();
+                assert_eq!(provenance.archive_sha256, release.sha256);
                 Ok(ToolVersion {
                     version: version.into(),
                     ..good_probe(tool)?
                 })
             },
+            |declaration| {
+                assert_eq!(declaration.permissions, tool.permissions());
+                assert_ne!(
+                    dir.active().as_ref().map(|(version, _)| version.as_str()),
+                    Some(version)
+                );
+                approved.set(true);
+                Ok(())
+            },
+            |_| dir.activate(version),
         )
         .unwrap();
     }
     assert_eq!(dir.active().unwrap().0, VERSION);
     let (previous, path) = dir.previous().unwrap();
     assert_eq!(previous, "9.9.8");
+    let provenance_path = path.join(PROVENANCE);
+    let bytes = fs::read(&provenance_path).unwrap();
+    let provenance: Provenance = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        provenance.archive_sha256,
+        sha(&package(tool, &previous, false, None))
+    );
+    fs::remove_file(&provenance_path).unwrap();
+    assert!(matches!(
+        manager::installed(tool, &path, &previous, true),
+        Err(manifest::Error::NeedsReinstall)
+    ));
+    assert_eq!(dir.active().unwrap().0, VERSION);
+    fs::write(provenance_path, bytes).unwrap();
     manager::installed(tool, &path, &previous, true).unwrap();
     dir.activate(&previous).unwrap();
     assert_eq!(dir.active().unwrap().0, previous);

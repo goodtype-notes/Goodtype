@@ -772,16 +772,14 @@ fn install_with_policy(
         let declaration =
             manifest::load(dir.1, &staging, release.version, &manifest, Some(release))
                 .map_err(manager::manifest_problem)?;
-        if !staging.join(manifest::FILE).exists() {
-            crate::store::write_json(
-                &staging.join(PROVENANCE),
-                &Provenance {
-                    archive_sha256: hash,
-                    inventory_sha256: installation_digest(&staging)?,
-                },
-                4096,
-            )?;
-        }
+        crate::store::write_json(
+            &staging.join(PROVENANCE),
+            &Provenance {
+                archive_sha256: hash,
+                inventory_sha256: installation_digest(&staging)?,
+            },
+            4096,
+        )?;
         approve(&declaration)?;
         let tool = probe(&staging)?;
         check_contract(dir.1, &manifest, Some(&tool), Some(release))?;
@@ -1361,8 +1359,9 @@ pub async fn importer_status(
     let update = registry
         .as_ref()
         .and_then(|registry| registry.release(tool, active_version.as_deref()));
-    let release = update
-        .filter(|_| active_version.is_none())
+    let release = registry
+        .as_ref()
+        .and_then(|registry| registry.install_release(tool, active_version.as_deref()))
         .map(registry::Release::view)
         .or_else(|| {
             tool.pinned.map(|pin| ReleaseView {
@@ -1442,13 +1441,20 @@ fn start_install(
     let active = dir.active().map(|(version, _)| version);
     let candidate = registry
         .as_ref()
-        .and_then(|registry| registry.release(tool, active.as_deref()))
+        .and_then(|registry| {
+            if updating {
+                registry.release(tool, active.as_deref())
+            } else {
+                registry.install_release(tool, active.as_deref())
+            }
+        })
         .cloned();
-    let pin = if updating || active.is_some() {
-        None
-    } else {
-        tool.pinned
-    };
+    let pin = tool.pinned.filter(|pin| {
+        !updating
+            && active
+                .as_deref()
+                .is_none_or(|version| version == pin.version)
+    });
     let Some(size) = candidate
         .as_ref()
         .map(|release| release.size)
@@ -1488,10 +1494,14 @@ fn start_install(
             let verified = candidate
                 .map(|release| update::descriptor_for(tool, release))
                 .transpose()?;
-            let release = verified
-                .as_ref()
-                .map(update::VerifiedUpdate::pin)
-                .unwrap_or(release);
+            let release = PinnedRelease {
+                decoder_commit: verified
+                    .as_ref()
+                    .map_or(release.decoder_commit, |descriptor| {
+                        descriptor.pin().decoder_commit
+                    }),
+                ..release
+            };
             manager::install(&app, &dir, &archive, &release)
         })();
         let _ = fs::remove_file(&archive);

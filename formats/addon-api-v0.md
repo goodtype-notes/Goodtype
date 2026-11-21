@@ -285,14 +285,17 @@ descriptor and verifies the staged inventory and manifest before running a
 probe. A first install or a changed capability scope pauses for approval of the
 candidate's declared permissions. Cancel or restart discards the candidate.
 
-Legacy packages without an addon manifest are eligible only when a host-written
-provenance record binds their inventory digest to the catalog's exact archive
-pin. Earlier installations without this record require reinstalling. A
+A host-written provenance record binds the installed inventory digest to the
+verified archive digest. Registry installs record the signed index entry digest.
+Legacy packages without an addon manifest also have to match the catalog pin.
+Rollback verifies the retained release and its provenance before switching the
+active pointer. Earlier installations without this record require reinstalling. A
 same-user process able to rewrite app-local data is outside the threat model.
 
 Addon policy is stored with an atomic last-good backup. If neither existing copy
-is readable, addon execution remains disabled until the user confirms resetting
-the preferences.
+is readable, addon execution and automatic discovery pause until the user
+confirms resetting the preferences. Reset restores automatic discovery to its
+default of on. Manual discovery remains available during recovery.
 
 ## Legacy importer CLI adapter
 

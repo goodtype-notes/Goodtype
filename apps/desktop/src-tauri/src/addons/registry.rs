@@ -232,13 +232,18 @@ pub(super) struct Registry {
 
 impl Registry {
     pub fn release(&self, addon: &Addon, installed: Option<&str>) -> Option<&Release> {
-        self.release_at(addon, installed, now())
+        self.release_at(addon, installed, false, now())
+    }
+
+    pub fn install_release(&self, addon: &Addon, installed: Option<&str>) -> Option<&Release> {
+        self.release_at(addon, installed, true, now())
     }
 
     fn release_at(
         &self,
         addon: &Addon,
         installed: Option<&str>,
+        include_current: bool,
         now: Duration,
     ) -> Option<&Release> {
         if self.index.expired(now) {
@@ -253,7 +258,10 @@ impl Registry {
             .iter()
             .filter(|release| release.api == manifest::API && release.target == TARGET)
             .filter(|release| {
-                baseline.is_none_or(|version| numeric_version(&release.version).unwrap() > version)
+                baseline.is_none_or(|version| {
+                    let candidate = numeric_version(&release.version).unwrap();
+                    candidate > version || (include_current && candidate == version)
+                })
             })
             .max_by_key(|release| numeric_version(&release.version))
     }
@@ -616,14 +624,21 @@ mod tests {
         // Use a fixed check time so the test remains useful after the bundled index expires.
         assert_eq!(
             registry
-                .release_at(addon, Some("0.1.9"), at("2026-11-22T00:00:00Z"))
+                .release_at(addon, Some("0.1.9"), false, at("2026-11-22T00:00:00Z"))
+                .unwrap()
+                .version,
+            "0.1.10"
+        );
+        assert_eq!(
+            registry
+                .release_at(addon, Some("0.1.10"), true, at("2026-11-22T00:00:00Z"))
                 .unwrap()
                 .version,
             "0.1.10"
         );
         assert!(
             registry
-                .release_at(addon, Some("0.1.10"), at("2026-11-22T00:00:00Z"))
+                .release_at(addon, Some("0.1.10"), false, at("2026-11-22T00:00:00Z"))
                 .is_none()
         );
     }

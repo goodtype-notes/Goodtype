@@ -121,8 +121,19 @@ fn verify(
     {
         return Err("importer update is not a clean, identified release".into());
     }
+    let schema = if tool.legacy == Some(descriptor.version.as_str())
+        && tool.pinned.is_some_and(|pin| {
+            pin.version == descriptor.version
+                && pin.size == descriptor.archive.size_bytes
+                && pin.decoder_commit == descriptor.decoder_commit
+                && pin.sha256.eq_ignore_ascii_case(&descriptor.archive.sha256)
+        }) {
+        goodtype_core::BINARY_INK_SCHEMA_VERSION
+    } else {
+        SCHEMA_VERSION
+    };
     if descriptor.protocol_version != PROTOCOL_VERSION
-        || descriptor.notebook_schema_version != SCHEMA_VERSION
+        || descriptor.notebook_schema_version != schema
         || descriptor.target != TARGET
     {
         return Err("the newest importer requires a different Goodtype version; the installed version was kept".into());
@@ -264,6 +275,35 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn signed_legacy_descriptor_must_match_the_catalog_archive() {
+        let tool = &GOODNOTES;
+        let pin = tool.pinned.unwrap();
+        let key = SigningKey::from_bytes(&[42; 32]);
+        let mut value = descriptor(tool);
+        value["notebookSchemaVersion"] = json!(goodtype_core::BINARY_INK_SCHEMA_VERSION);
+        value["version"] = json!(pin.version);
+        value["decoderCommit"] = json!(pin.decoder_commit);
+        value["archive"] = json!({
+            "fileName": pin.url.rsplit('/').next().unwrap(),
+            "sizeBytes": pin.size,
+            "sha256": pin.sha256,
+            "url": pin.url,
+        });
+        let verify_descriptor = |value: &serde_json::Value| {
+            let bytes = serde_json::to_vec(value).unwrap();
+            verify(
+                tool,
+                &bytes,
+                &key.sign(&bytes).to_bytes(),
+                key.verifying_key().as_bytes(),
+            )
+        };
+        assert!(verify_descriptor(&value).is_ok());
+        value["archive"]["sha256"] = json!("3".repeat(64));
+        assert!(verify_descriptor(&value).is_err());
     }
 
     #[test]
