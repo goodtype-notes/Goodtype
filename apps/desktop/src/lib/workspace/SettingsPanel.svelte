@@ -61,19 +61,27 @@
   let policyPending = $state(false);
   const managedAddon = $derived(addonManager?.addons.find(addon => addon.id === addonId));
 
+  let addonRequest = 0;
   async function refreshAddons() {
-    addonManager = await listAddons();
-    if (addonError === "loadFailed") addonError = null;
+    const request = ++addonRequest;
+    try {
+      const next = await listAddons();
+      if (request !== addonRequest) return;
+      addonManager = next;
+      if (addonError === "loadFailed") addonError = null;
+    } catch {
+      if (request === addonRequest) addonError = "loadFailed";
+    }
   }
 
   $effect(() => {
     if (!("__TAURI_INTERNALS__" in window)) return;
-    void refreshAddons().catch(() => addonError = "loadFailed");
+    void refreshAddons();
   });
 
   $effect(() => {
     if (!addonId) return;
-    const timer = setInterval(() => void refreshAddons().catch(() => addonError = "loadFailed"), 700);
+    const timer = setInterval(() => void refreshAddons(), 700);
     return () => clearInterval(timer);
   });
 
