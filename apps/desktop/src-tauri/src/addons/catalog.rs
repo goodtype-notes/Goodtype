@@ -78,7 +78,13 @@ pub static MATH: Addon = Addon {
     name: "goodtype-math-recognize",
     package: "goodtype-math-recognizer",
     repository: "/Just8it/Goodtype-ink-recognition",
-    public_key: None,
+    // Raw Ed25519 key from that repository's release-public-key.pem (v0.1.0, 2026-11-21).
+    // No bootstrap pin: math is installed from the signed registry index (index-3 onward).
+    public_key: Some([
+        0xc9, 0xbe, 0xee, 0xed, 0x66, 0x4e, 0x24, 0x5b, 0x76, 0x77, 0x13, 0x80, 0xed, 0x37, 0xb6,
+        0x6c, 0x94, 0x05, 0xd4, 0x45, 0xe2, 0x88, 0x0a, 0xf9, 0x35, 0x6d, 0x13, 0xa3, 0x84, 0x95,
+        0x55, 0x81,
+    ]),
     pinned: None,
     kind: Kind::Recognize {
         recognizes: "math",

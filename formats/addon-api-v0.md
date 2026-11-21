@@ -238,8 +238,9 @@ denies concurrent writes and deletion on Windows. Keep the previous verified ver
 **Implemented on the host (Step 3a, launcher Step 3b).** Each session process
 starts through the shared AppContainer launcher (`sandbox::launch`). The
 executable is the exact verified file in the active install, with host argv
-`--session`. The profile is fresh and has no capabilities, so it has no network
-and no loopback exemption. The install directory is granted read and execute.
+`--session`. The profile is fresh and holds only the `registryRead` capability
+(read-only registry access, approved for math on 2026-11-21); it has no network
+capability and no loopback exemption. The install directory is granted read and execute.
 A fresh per-process directory under app-local `addon-sessions` is the
 low-integrity scratch, the working directory, and TEMP/TMP. The environment is
 `minimal_environment()`. The job allows one active process with the 3 GiB math
@@ -335,9 +336,10 @@ indefinitely before the model DLL is mapped (about 5 MB working set, no
 output), so the handshake times out. With only the `registryRead` capability,
 it loads and recognizes: handshake 2.44 s including ACL setup, cold 0.34 to
 0.41 s, warm 0.25 to 0.28 s. ONNX Runtime also logs a denied ETW registration.
-The Job Object run took 2.76 s, 0.58 s and 0.46 s. Whether to grant
-`registryRead` to math is an open permission decision. Until it is made, math
-sessions on this path time out and fail closed.
+The Job Object run took 2.76 s, 0.58 s and 0.46 s. The user approved
+`registryRead` for math on 2026-11-21. With it, the signed stable release
+`v0.1.0` (SHA-256 `415bc6a8…3d02e38`) recognizes inside the container:
+handshake 1.24 s, cold 0.37 s, warm 0.24 s.
 
 ## Legacy importer CLI adapter
 
@@ -395,3 +397,5 @@ The wire contract is unchanged.
 Step 3b moved session v0 processes onto the shared AppContainer launcher and
 added the `addon-sandbox-failed` command problem. The Addons manager now
 discloses the actual boundary for each addon. The wire contract is unchanged.
+
+Math catalog: Ed25519 key from `Just8it/Goodtype-ink-recognition` (0.1.0), no bootstrap pin; math installs from the signed index (index-3 onward, now also the bundled snapshot). Math sessions hold `registryRead` only (user-approved 2026-11-21). No wire change.

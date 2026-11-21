@@ -646,8 +646,8 @@ mod tests {
     #[test]
     fn bundled_registry_authenticates_exact_bytes() {
         let index = verify(SNAPSHOT, SIGNATURE, &KEY).unwrap();
-        assert_eq!(index.sequence, 1);
-        assert_eq!(index.addons.len(), 2);
+        assert_eq!(index.sequence, 3);
+        assert_eq!(index.addons.len(), 3);
         assert!(verify(SNAPSHOT, &[], &KEY).is_err());
         assert!(verify(SNAPSHOT, &[0; 64], &KEY).is_err());
         let mut modified = SNAPSHOT.to_vec();
@@ -664,7 +664,7 @@ mod tests {
         assert!(accept(&signed(&input).unwrap(), &floor, at("2026-11-22T00:00:00Z")).is_err());
         let index = verify(SNAPSHOT, SIGNATURE, &KEY).unwrap();
         assert_eq!(
-            accept(&index, &floor, at("2027-03-21T11:36:11Z")),
+            accept(&index, &floor, at("2027-03-21T13:11:58Z")),
             Err(Problem::Expired)
         );
         assert!(timestamp("2100-02-29T00:00:00Z").is_none());
@@ -676,7 +676,7 @@ mod tests {
     fn unknown_ids_are_ignored_and_catalog_binding_is_strict() {
         let mut input = fixture();
         input["addons"][0]["id"] = json!("unlisted");
-        assert_eq!(signed(&input).unwrap().addons.len(), 1);
+        assert_eq!(signed(&input).unwrap().addons.len(), 2);
         for (path, value) in [
             ("/addons/0/publicKey", json!("1".repeat(64))),
             ("/addons/0/repository", json!("/Another/repo")),
@@ -904,7 +904,7 @@ mod tests {
             }
             fs::write(path.with_extension("state.json"), b"{").unwrap();
             let state = load(&path, key).unwrap();
-            assert_eq!(state.index.sequence, 1);
+            assert_eq!(state.index.sequence, 3);
             assert_eq!(state.floor.sequence, 5);
             let later = || start + Duration::from_secs(DAY);
             assert!(matches!(

@@ -29,10 +29,25 @@
           "version": "0.1.0"
         }
       ]
+    },
+    {
+      "id": "math",
+      "publicKey": "c9beeeed664e245b76771380ed37b66c9405d445e2880af9356d13a384955581",
+      "repository": "/Just8it/Goodtype-ink-recognition",
+      "versions": [
+        {
+          "api": "goodtype-api 0.1",
+          "sha256": "415bc6a86c6e1340d0a04b7876cdaca9089cbcaa9ceefd899c08386043d02e38",
+          "size": 337200465,
+          "target": "x86_64-pc-windows-msvc",
+          "url": "https://github.com/Just8it/Goodtype-ink-recognition/releases/download/v0.1.0/goodtype-math-recognizer-0.1.0-windows-x64.zip",
+          "version": "0.1.0"
+        }
+      ]
     }
   ],
-  "expires": "2027-03-21T11:36:11Z",
+  "expires": "2027-03-21T13:11:58Z",
   "format": 1,
-  "issued": "2026-11-21T11:36:11Z",
-  "sequence": 1
+  "issued": "2026-11-21T13:11:58Z",
+  "sequence": 3
 }

@@ -702,8 +702,9 @@ fn math_manifest_requires_name_version_and_protocol() {
     report.protocol_version = 1;
     report.name = "other".into();
     assert!(check_contract(&MATH, &manifest, Some(&report), None).is_err());
+    // Installed from the signed registry only; the key binds index entries and descriptors.
     assert!(MATH.pinned.is_none());
-    assert!(MATH.public_key.is_none());
+    assert!(MATH.public_key.is_some());
     assert!(!download_url_allowed(
         &MATH,
         "https://example.com/math.zip",

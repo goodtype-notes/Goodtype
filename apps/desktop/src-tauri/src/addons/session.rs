@@ -223,8 +223,10 @@ pub(super) struct Session {
     pub used: Instant,
 }
 
-/// A `stdio-jsonrpc` addon in a fresh AppContainer with no capabilities (so no network),
-/// read-only access to its verified install, and one private low-integrity scratch directory.
+/// A `stdio-jsonrpc` addon in a fresh AppContainer with only `registryRead` (no network
+/// capability), read-only access to its verified install, and one private low-integrity scratch
+/// directory. `registryRead` was approved by the user on 2026-11-21: without it the math runtime
+/// blocks before loading ONNX Runtime; the Python runner holds the same capability.
 /// A launch or ACL failure makes the addon unavailable; there is no unconfined fallback.
 pub(super) struct Launched {
     // Declared first so the job is shut down before the scratch directory is removed.
@@ -249,7 +251,7 @@ fn launch(install: &Path, executable: &Path, scratch_root: &Path) -> Result<Laun
         env,
         read_only: &[install],
         scratch: Some(scratch.path()),
-        capabilities: &[],
+        capabilities: &["registryRead"],
         memory_limit: crate::recognition::math_process::MEMORY_BYTES,
         active_process_limit: 1,
         stdio: true,
