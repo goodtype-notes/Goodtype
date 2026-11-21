@@ -160,15 +160,15 @@ pub(super) fn fetch(
     url: &str,
     limit: u64,
     allowed: impl Fn(&str, bool) -> bool,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, super::registry::Problem> {
     let mut bytes = Vec::new();
     github_asset(url, allowed)?
         .into_reader()
         .take(limit + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| format!("the importer update check was interrupted ({error})"))?;
+        .map_err(|_| super::registry::Problem::Offline)?;
     if bytes.len() as u64 > limit {
-        return Err("importer update metadata exceeds its size limit".into());
+        return Err(super::registry::Problem::Invalid);
     }
     Ok(bytes)
 }
@@ -186,8 +186,10 @@ pub(super) fn descriptor_for(
         &format!("{folder}/importer-update.json"),
         MAX_DESCRIPTOR,
         allowed,
-    )?;
-    let signature = fetch(&format!("{folder}/importer-update.json.sig"), 64, allowed)?;
+    )
+    .map_err(|problem| format!("cannot read the addon descriptor ({problem:?})"))?;
+    let signature = fetch(&format!("{folder}/importer-update.json.sig"), 64, allowed)
+        .map_err(|problem| format!("cannot read the addon signature ({problem:?})"))?;
     let verified = verify(
         tool,
         &bytes,

@@ -138,7 +138,11 @@
   }
 
   const download = () => act(() => (status?.update ? updateImporter(tool) : installImporter(tool)));
-  const checkUpdate = () => act(() => checkImporterUpdate(tool));
+  async function checkUpdate() {
+    failure = null;
+    await checkImporterUpdate(tool).catch(() => {});
+    await refresh();
+  }
   const update = () => act(() => updateImporter(tool));
   const cancel = () => act(() => cancelImporter(tool));
   const pick = () => act(() => pickImportSource(tool));
@@ -397,14 +401,14 @@
             {activity.kind === "installFailed" ? $t("library.retryDownload") : $t("library.downloadImporter", { "value1": megabytes(downloadRelease.sizeBytes) })}
           </button>
         {:else}
-          <p class="hint">{$t("library.noVerifiedImporterReleaseIsAvailableFor")}</p>
+          <p class="hint">{$t(status.needsReinstall ? "addons.manager.noCompatibleRelease" : "library.noVerifiedImporterReleaseIsAvailableFor")}</p>
         {/if}
         {#if !status.update}
           <button type="button" class="control" disabled={checking} onclick={checkUpdate}>{checking ? $t("library.checking") : $t("library.checkForUpdates")}</button>
         {/if}
       </div>
       {#if status.updateProblem && !checking}
-        <p class="problem" role="alert">{$t("library.updateCheckFailed", { "updateProblem": status.updateProblem })}</p>
+        <p class="problem" role="alert">{$t("library.updateCheckFailed", { "updateProblem": $t(`addons.manager.registryProblem.${status.updateProblem}`) })}</p>
       {:else if status.updateChecked && !status.update && !checking}
         <p class="hint" role="status">{$t("library.noNewerImporterVersionIsAvailable")}</p>
       {/if}
@@ -431,7 +435,7 @@
           </div>
         {/if}
         {#if status.updateProblem && !checking}
-          <p class="problem" role="alert">{$t("library.updateCheckFailedYouCanKeepImporting", { "updateProblem": status.updateProblem })}</p>
+          <p class="problem" role="alert">{$t("library.updateCheckFailedYouCanKeepImporting", { "updateProblem": $t(`addons.manager.registryProblem.${status.updateProblem}`) })}</p>
         {/if}
         {#if activity.kind === "installFailed"}
           <p class="problem" role="alert">{$t("library.updateFailedThePreviousVersionIsStill", { "message": activity.message })}</p>

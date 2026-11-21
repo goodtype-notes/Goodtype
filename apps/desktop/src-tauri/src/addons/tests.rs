@@ -425,7 +425,7 @@ fn refuses_unsafe_archives() {
             fs::write(&archive, zip_bytes(&borrowed)).unwrap();
             let into = home.path().join(format!("out-{index}"));
             assert!(
-                extract_package(&archive, &top, &into).is_err(),
+                extract_package(&mut fs::File::open(&archive).unwrap(), &top, &into).is_err(),
                 "{} case {index} was accepted",
                 tool.id
             );
@@ -447,7 +447,14 @@ fn refuses_links_and_decompression_beyond_the_budget() {
         .unwrap();
     let archive = home.path().join("link.zip");
     fs::write(&archive, writer.finish().unwrap().into_inner()).unwrap();
-    assert!(extract_package(&archive, &top, &home.path().join("a")).is_err());
+    assert!(
+        extract_package(
+            &mut fs::File::open(&archive).unwrap(),
+            &top,
+            &home.path().join("a")
+        )
+        .is_err()
+    );
 
     // 513 MiB of zeros compresses to well under a megabyte.
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
@@ -465,7 +472,12 @@ fn refuses_links_and_decompression_beyond_the_budget() {
     assert!((bytes.len() as u64) < 4 * MIB);
     let archive = home.path().join("bomb.zip");
     fs::write(&archive, bytes).unwrap();
-    let error = extract_package(&archive, &top, &home.path().join("b")).unwrap_err();
+    let error = extract_package(
+        &mut fs::File::open(&archive).unwrap(),
+        &top,
+        &home.path().join("b"),
+    )
+    .unwrap_err();
     assert!(error.contains("512 MiB"), "{error}");
 }
 
@@ -1216,4 +1228,39 @@ fn dismiss_leaves_pending_or_reserved_jobs_intact() {
     state.stopping_import = false;
     state.dismiss();
     assert!(matches!(state.activity, Some(Activity::Idle)));
+}
+
+#[test]
+fn release_selection_only_offers_a_usable_pin() {
+    let addon = &catalog::GOODNOTES;
+    let pin = addon.pinned.unwrap();
+    for active in [None, Some(pin.version)] {
+        assert_eq!(
+            select_release(None, addon, active, false)
+                .unwrap()
+                .view()
+                .version,
+            pin.version
+        );
+    }
+    assert!(select_release(None, addon, Some("99.0.0"), false).is_none());
+    assert!(select_release(None, addon, Some(pin.version), true).is_none());
+}
+
+#[cfg(windows)]
+#[test]
+fn retained_archive_allows_readers_and_denies_writes_and_deletion() {
+    let local = tempfile::tempdir().unwrap();
+    let archive = local.path().join("archive.zip");
+    fs::write(&archive, b"original").unwrap();
+    let mut retained = open_archive(&archive).unwrap();
+    assert!(fs::File::open(&archive).is_ok());
+    assert!(fs::OpenOptions::new().write(true).open(&archive).is_err());
+    assert!(fs::remove_file(&archive).is_err());
+    assert_eq!(
+        sha256_reader(&mut retained).unwrap(),
+        hex(&Sha256::digest(b"original"))
+    );
+    drop(retained);
+    fs::remove_file(&archive).unwrap();
 }

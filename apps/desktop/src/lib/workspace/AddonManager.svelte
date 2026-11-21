@@ -23,7 +23,7 @@
 
   const registryNotice = $derived(registry.checking ? notice("addons.manager.activity.checking")
     : registry.expired ? notice("addons.manager.outdated")
-    : registry.failed ? notice("addons.manager.checkFailed")
+    : registry.problem ? notice(`addons.manager.registryProblem.${registry.problem}`)
     : registry.lastCheck !== null && addon.installed && !addon.update ? notice("addons.manager.current") : null);
   const checkedAt = $derived(registry.lastCheck === null ? null
     : new Intl.DateTimeFormat($displayLocale, { dateStyle: "medium", timeStyle: "short" }).format(registry.lastCheck * 1000));
@@ -52,6 +52,10 @@
     {#if release}
       <dt>{$t("addons.manager.download")}</dt>
       <dd>{$t("addons.manager.release", { version: release.version, size: megabytes(release.sizeBytes) })}</dd>
+    {/if}
+    {#if addon.status === "needs-reinstall" && !release}
+      <dt>{$t("addons.manager.download")}</dt>
+      <dd>{$t("addons.manager.noCompatibleRelease")}</dd>
     {/if}
     {#if addon.formats.length}
       <dt>{$t("addons.manager.formats")}</dt><dd>{addon.formats.join(", ")}</dd>
@@ -91,13 +95,13 @@
       <progress max={addon.progress[1]} value={addon.progress[0]} aria-label={$t("addons.manager.activity.downloading")}></progress>
     {/if}
   {/if}
-  {#if problem && !(problem === "checkFailed" && registry.expired)}
+  {#if problem && !(problem === "checkFailed" && registryNotice)}
     <p role="alert" class="problem">{renderMessage(notice(`addons.manager.${problem}`), $t)}</p>
   {/if}
   {#if addon.update}
     <p role="status">{renderMessage(notice("addons.manager.updateAvailable"), $t)}</p>
   {/if}
-  {#if registryNotice && !(registry.failed && !registry.expired && problem === "checkFailed")}
+  {#if registryNotice}
     <p role="status" class="hint">{renderMessage(registryNotice, $t)}</p>
   {/if}
   {#if checkedAt}

@@ -1,3 +1,4 @@
+import type { RegistryProblem } from "./addons";
 import { get } from "svelte/store";
 import { locale } from "../i18n";
 import { translate, formatNumber } from "../i18n";
@@ -54,7 +55,7 @@ export type ImporterStatus = {
   activity: ImporterActivity;
   update: { version: string; sizeBytes: number } | null;
   updateChecked: boolean;
-  updateProblem: string | null;
+  updateProblem: RegistryProblem | null;
 };
 
 /** The optional importers. Each keeps its own installation, chosen file and job in Rust. */

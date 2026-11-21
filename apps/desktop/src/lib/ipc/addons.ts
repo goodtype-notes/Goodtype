@@ -71,7 +71,8 @@ export type ManagedAddon = {
   progress: [number, number] | null;
 };
 
-export type RegistryCheck = { lastCheck: number | null; checking: boolean; failed: boolean; expired: boolean };
+export type RegistryProblem = "offline" | "status" | "signature" | "expired" | "rollback" | "invalid";
+export type RegistryCheck = { lastCheck: number | null; checking: boolean; problem: RegistryProblem | null; expired: boolean };
 export type AddonManager = {
   allowDirectApply: boolean;
   recovery: boolean;

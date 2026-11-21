@@ -108,7 +108,7 @@ describe("bundled English and German interface", () => {
       release: null, update: null,
       directApply: false, activity: "idle", approval: null, progress: null,
     };
-    const registry = { lastCheck: null, checking: false, failed: false, expired: false };
+    const registry = { lastCheck: null, checking: false, problem: null, expired: false };
     const manager = { allowDirectApply: false, recovery: false, autoCheck: true, registry, addons: [addon] };
     for (const language of ["en", "de"] as const) {
       setLanguage(language);
@@ -124,6 +124,15 @@ describe("bundled English and German interface", () => {
       expect(html).toContain(translate("addons.manager.enable"));
       expect(html).toContain(translate("addons.manager.check"));
       expect(html).toContain(translate("addons.manager.permission.picked-import-file"));
+      const unavailable = render(AddonManagerSheet, { props: {
+        addon: { ...addon, status: "needs-reinstall" },
+        registry: { ...registry, problem: "rollback" },
+        refresh: async () => {},
+        onClose() {},
+      } }).body;
+      expect(unavailable).toContain(translate("addons.manager.noCompatibleRelease"));
+      expect(unavailable).toContain(translate("addons.manager.registryProblem.rollback"));
+      expect(unavailable).not.toContain(`>${translate("addons.manager.reinstall")}</button>`);
     }
   });
 

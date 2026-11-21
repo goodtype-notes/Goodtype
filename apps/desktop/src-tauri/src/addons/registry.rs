@@ -13,10 +13,32 @@ const SNAPSHOT: &[u8] = include_bytes!("registry-snapshot/index.json");
 const SIGNATURE: &[u8] = include_bytes!("registry-snapshot/index.json.sig");
 const MAX_INDEX: u64 = MIB;
 const MAX_CACHE: usize = 2 * MIB as usize;
+const DAY: u64 = 86_400;
+const MAX_SEQUENCE: u64 = 9_007_199_254_740_991;
+const MAX_STATE: usize = 1024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum Problem {
+    Offline,
+    Status,
+    Signature,
+    Expired,
+    Rollback,
+    Invalid,
+}
+
+impl From<String> for Problem {
+    fn from(_: String) -> Self {
+        Self::Invalid
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Index {
+    #[serde(skip)]
+    digest: String,
     format: u8,
     sequence: u64,
     issued: String,
@@ -138,19 +160,20 @@ fn valid_url(url: &str, repo: &str) -> bool {
     })
 }
 
-fn verify(bytes: &[u8], sig: &[u8], key: &[u8; 32]) -> Result<Index, String> {
+fn verify(bytes: &[u8], sig: &[u8], key: &[u8; 32]) -> Result<Index, Problem> {
     if bytes.len() as u64 > MAX_INDEX {
-        return Err("addon index exceeds its size limit".into());
+        return Err(Problem::Invalid);
     }
-    update::verify_signature(bytes, sig, key)?;
-    // As with the manifest, closed Serde structs reject both unknown and repeated fields.
-    let mut index: Index = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+    update::verify_signature(bytes, sig, key).map_err(|_| Problem::Signature)?;
+    // Closed Serde structs reject both unknown and repeated fields.
+    let mut index: Index = serde_json::from_slice(bytes).map_err(|_| Problem::Invalid)?;
+    index.digest = hex(&Sha256::digest(bytes));
     let dates = timestamp(&index.issued).zip(timestamp(&index.expires));
     if index.format != 1
-        || index.sequence > 9_007_199_254_740_991
+        || index.sequence > MAX_SEQUENCE
         || !dates.is_some_and(|(issued, expires)| issued < expires)
     {
-        return Err("invalid addon index header".into());
+        return Err(Problem::Invalid);
     }
     let mut ids = HashSet::new();
     for entry in &index.addons {
@@ -172,7 +195,7 @@ fn verify(bytes: &[u8], sig: &[u8], key: &[u8; 32]) -> Result<Index, String> {
                         .all(|c| c.is_ascii_alphanumeric() || b"_.-".contains(&c))
             })
         {
-            return Err("invalid or duplicate addon entry".into());
+            return Err(Problem::Invalid);
         }
         if let Some(addon) = CATALOG.iter().find(|addon| addon.id == entry.id)
             && (entry.repository != addon.repository
@@ -180,7 +203,7 @@ fn verify(bytes: &[u8], sig: &[u8], key: &[u8; 32]) -> Result<Index, String> {
                     .public_key
                     .is_some_and(|key| hex(&key).eq_ignore_ascii_case(&entry.public_key)))
         {
-            return Err(format!("addon index identity mismatch for {}", entry.id));
+            return Err(Problem::Invalid);
         }
         let mut versions = HashSet::new();
         for release in &entry.versions {
@@ -194,7 +217,7 @@ fn verify(bytes: &[u8], sig: &[u8], key: &[u8; 32]) -> Result<Index, String> {
                 || !(1..=MAX_PACKAGE_BYTES).contains(&release.size)
                 || !update::is_hash(&release.sha256, 64)
             {
-                return Err(format!("invalid or duplicate release for {}", entry.id));
+                return Err(Problem::Invalid);
             }
         }
     }
@@ -220,7 +243,7 @@ impl Index {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Cache {
     sequence: u64,
-    last_check: u64,
+    last_check: Option<u64>,
     bytes: String,
     signature: String,
 }
@@ -228,6 +251,9 @@ struct Cache {
 pub(super) struct Registry {
     index: Index,
     pub last_check: Option<u64>,
+    floor: Floor,
+    cached: bool,
+    last_attempt: Option<u64>,
 }
 
 impl Registry {
@@ -277,33 +303,86 @@ fn now() -> Duration {
         .unwrap_or_default()
 }
 
-fn load(path: &Path) -> Result<Registry, String> {
-    let snapshot = verify(SNAPSHOT, SIGNATURE, &KEY)?;
-    if !path.try_exists().map_err(|error| error.to_string())? {
-        return Ok(Registry {
-            index: snapshot,
-            last_check: None,
-        });
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Floor {
+    sequence: u64,
+    digest: String,
+}
+
+impl From<&Index> for Floor {
+    fn from(index: &Index) -> Self {
+        Self {
+            sequence: index.sequence,
+            digest: index.digest.clone(),
+        }
     }
-    let cache: Cache = serde_json::from_slice(&read_bounded(path, MAX_CACHE)?)
-        .map_err(|error| error.to_string())?;
-    let decode = |value| STANDARD.decode(value).map_err(|error| error.to_string());
-    let index = verify(&decode(cache.bytes)?, &decode(cache.signature)?, &KEY)?;
-    if index.sequence != cache.sequence {
-        return Err("addon cache sequence mismatch".into());
+}
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct State {
+    floor: Option<Floor>,
+    last_attempt: Option<u64>,
+    last_success: Option<u64>,
+}
+
+fn save_state(path: &Path, state: &State) -> Result<(), Problem> {
+    let bytes = crate::store::json_bytes(state, MAX_STATE)?;
+    crate::store::write_atomic(&path.with_extension("state.bak"), &bytes)?;
+    crate::store::write_atomic(&path.with_extension("state.json"), &bytes)?;
+    Ok(())
+}
+
+fn load(path: &Path, key: &[u8; 32]) -> Result<Registry, Problem> {
+    let snapshot = verify(SNAPSHOT, SIGNATURE, &KEY)?;
+    let read_state = |extension| -> Option<State> {
+        serde_json::from_slice(&read_bounded(&path.with_extension(extension), MAX_STATE).ok()?).ok()
+    };
+    let primary = read_state("state.json");
+    let backup = read_state("state.bak");
+    let mut floor = Floor::from(&snapshot);
+    // Recover the highest surviving floor even when the cache is missing or damaged.
+    // Fully deleting all app data resets protection to the bundled floor.
+    for state in [&primary, &backup].into_iter().flatten() {
+        if let Some(saved) = &state.floor
+            && saved.sequence <= MAX_SEQUENCE
+            && update::is_hash(&saved.digest, 64)
+            && saved.sequence > floor.sequence
+        {
+            floor = saved.clone();
+        }
+    }
+    let cache = (|| {
+        let cache: Cache = serde_json::from_slice(&read_bounded(path, MAX_CACHE).ok()?).ok()?;
+        let index = verify(
+            &STANDARD.decode(cache.bytes).ok()?,
+            &STANDARD.decode(cache.signature).ok()?,
+            key,
+        )
+        .ok()?;
+        (index.sequence == cache.sequence).then_some((index, cache.last_check))
+    })();
+    let old_check = cache.as_ref().and_then(|(_, check)| *check);
+    let state = primary.or(backup).unwrap_or_default();
+    let index = cache.map(|(index, _)| index).filter(|index| {
+        index.sequence > floor.sequence
+            || (index.sequence == floor.sequence && index.digest == floor.digest)
+    });
+    if let Some(index) = &index {
+        floor = Floor::from(index);
     }
     Ok(Registry {
-        index: if index.sequence >= snapshot.sequence {
-            index
-        } else {
-            snapshot
-        },
-        last_check: Some(cache.last_check),
+        cached: index.is_some(),
+        index: index.unwrap_or(snapshot),
+        last_check: state.last_success.or(old_check),
+        last_attempt: state.last_attempt.or(old_check),
+        floor,
     })
 }
 
-pub(super) fn current(app: &tauri::AppHandle) -> Result<Registry, String> {
-    load(&cache_path(app)?)
+pub(super) fn current(app: &tauri::AppHandle) -> Result<Registry, Problem> {
+    load(&cache_path(app)?, &KEY)
 }
 
 fn cache_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -327,7 +406,7 @@ fn registry_url_allowed(initial: &str, url: &str, redirected: bool) -> bool {
     https_parts(url).is_some_and(|(host, _)| ASSET_HOSTS.contains(&host.as_str()))
 }
 
-fn fetch() -> Result<(Vec<u8>, Vec<u8>), String> {
+fn fetch() -> Result<(Vec<u8>, Vec<u8>), Problem> {
     let get = |initial, limit| {
         update::fetch(initial, limit, |url, redirected| {
             registry_url_allowed(initial, url, redirected)
@@ -336,14 +415,16 @@ fn fetch() -> Result<(Vec<u8>, Vec<u8>), String> {
     Ok((get(URL, MAX_INDEX)?, get(SIG_URL, 64)?))
 }
 
-fn accept(index: Index, floor: u64, now: Duration) -> Result<Index, String> {
-    if index.sequence < floor {
-        return Err("addon index sequence rolled back".into());
+fn accept(index: &Index, floor: &Floor, now: Duration) -> Result<(), Problem> {
+    if index.sequence < floor.sequence
+        || (index.sequence == floor.sequence && index.digest != floor.digest)
+    {
+        return Err(Problem::Rollback);
     }
     if index.expired(now) {
-        return Err("addon index expired".into());
+        return Err(Problem::Expired);
     }
-    Ok(index)
+    Ok(())
 }
 
 #[derive(Clone, Copy, Deserialize)]
@@ -358,21 +439,21 @@ fn due(mode: Check, enabled: bool, last: Option<u64>, now: u64) -> bool {
     matches!(mode, Check::Manual)
         || enabled
             && last.is_none_or(|last| {
-                now.saturating_sub(last)
-                    >= match mode {
-                        Check::Startup => 86_400,
-                        Check::Manager => 3_600,
-                        Check::Manual => unreachable!(),
-                    }
+                last > now.saturating_add(DAY)
+                    || now.saturating_sub(last)
+                        >= match mode {
+                            Check::Startup => DAY,
+                            Check::Manager => 3_600,
+                            Check::Manual => unreachable!(),
+                        }
             })
 }
 
 #[derive(Default)]
 pub(crate) struct Checks {
-    attempt: Mutex<Option<u64>>,
-    failed: AtomicBool,
+    gate: Mutex<()>,
+    problem: Mutex<Option<Problem>>,
     checking: AtomicBool,
-    outdated: AtomicBool,
 }
 
 #[derive(Serialize)]
@@ -380,7 +461,7 @@ pub(crate) struct Checks {
 pub(super) struct CheckView {
     last_check: Option<u64>,
     pub checking: bool,
-    pub failed: bool,
+    pub problem: Option<Problem>,
     expired: bool,
 }
 
@@ -389,9 +470,12 @@ impl Checks {
         CheckView {
             last_check: registry.and_then(|registry| registry.last_check),
             checking: self.checking.load(Ordering::Relaxed),
-            failed: registry.is_none() || self.failed.load(Ordering::Relaxed),
-            expired: registry.is_some_and(Registry::expired)
-                || self.outdated.load(Ordering::Relaxed),
+            problem: self
+                .problem
+                .lock()
+                .unwrap()
+                .or_else(|| registry.is_none().then_some(Problem::Invalid)),
+            expired: registry.is_some_and(Registry::expired),
         }
     }
 
@@ -400,17 +484,17 @@ impl Checks {
         path: &Path,
         mode: Check,
         enabled: bool,
-        clock: impl Fn() -> Duration,
-        fetch: impl FnOnce() -> Result<(Vec<u8>, Vec<u8>), String>,
-    ) -> Result<Option<Index>, String> {
+        (clock, key): (impl Fn() -> Duration, &[u8; 32]),
+        fetch: impl FnOnce() -> Result<(Vec<u8>, Vec<u8>), Problem>,
+    ) -> Result<Option<Index>, Problem> {
         if !enabled && !matches!(mode, Check::Manual) {
             return Ok(None);
         }
-        let Ok(mut attempt) = self.attempt.try_lock() else {
+        let Ok(_gate) = self.gate.try_lock() else {
             return Ok(None);
         };
         let lock_path = path.with_extension("lock");
-        fs::create_dir_all(path.parent().ok_or("addon cache path has no parent")?)
+        fs::create_dir_all(path.parent().ok_or(Problem::Invalid)?)
             .map_err(|error| error.to_string())?;
         crate::store::reject_symlink(&lock_path)?;
         let lock = fs::OpenOptions::new()
@@ -423,57 +507,67 @@ impl Checks {
         match lock.try_lock() {
             Ok(()) => {}
             Err(fs::TryLockError::WouldBlock) => return Ok(None),
-            Err(fs::TryLockError::Error(error)) => return Err(error.to_string()),
+            Err(fs::TryLockError::Error(_)) => return Err(Problem::Invalid),
         }
-        let registry = load(path)?;
+        let registry = load(path, key)?;
         let now = clock();
-        if !due(
-            mode,
-            enabled,
-            registry.last_check.max(*attempt),
-            now.as_secs(),
-        ) {
+        if !due(mode, enabled, registry.last_attempt, now.as_secs()) {
             return Ok(None);
         }
-        *attempt = Some(now.as_secs());
+        let mut state = State {
+            floor: Some(registry.floor.clone()),
+            last_attempt: Some(now.as_secs()),
+            last_success: registry.last_check,
+        };
         self.checking.store(true, Ordering::Relaxed);
         let result = (|| {
+            save_state(path, &state)?;
             let (bytes, signature) = fetch()?;
-            let index = verify(&bytes, &signature, &KEY)?;
+            let index = verify(&bytes, &signature, key)?;
             let now = clock();
-            let expired = index.expired(now);
-            let result = accept(index, registry.index.sequence, now);
-            self.outdated.store(expired, Ordering::Relaxed);
-            let index = result?;
-            crate::store::write_json(
-                path,
-                &Cache {
-                    sequence: index.sequence,
-                    last_check: now.as_secs(),
-                    bytes: STANDARD.encode(bytes),
-                    signature: STANDARD.encode(signature),
-                },
-                MAX_CACHE,
-            )?;
-            Ok(Some(index))
+            accept(&index, &registry.floor, now)?;
+            let replaced = !registry.cached || index.sequence > registry.floor.sequence;
+            if replaced {
+                // Publish the floor before the index so deleting the cache cannot undo acceptance.
+                state.floor = Some(Floor::from(&index));
+                save_state(path, &state)?;
+                crate::store::write_json(
+                    path,
+                    &Cache {
+                        sequence: index.sequence,
+                        last_check: None,
+                        bytes: STANDARD.encode(bytes),
+                        signature: STANDARD.encode(signature),
+                    },
+                    MAX_CACHE,
+                )?;
+            }
+            state.last_success = Some(now.as_secs());
+            save_state(path, &state)?;
+            Ok(replaced.then_some(index))
         })();
-        self.failed.store(result.is_err(), Ordering::Relaxed);
+        *self.problem.lock().unwrap() = result.as_ref().err().copied();
         self.checking.store(false, Ordering::Relaxed);
         result
     }
 }
 
-fn check(app: &tauri::AppHandle, mode: Check) -> Result<(), String> {
+fn check(app: &tauri::AppHandle, mode: Check) -> Result<(), Problem> {
     if !platform_supported() {
         return Ok(());
     }
     let enabled = manager::auto_check(app);
     let path = cache_path(app)?;
     let checks = app.state::<Checks>();
-    if let Some(index) = checks.perform(&path, mode, enabled, now, fetch)? {
+    let result = checks.perform(&path, mode, enabled, (now, &KEY), fetch);
+    if let Err(problem) = result {
+        eprintln!("Addon registry check failed: {problem:?}");
+        *checks.problem.lock().unwrap() = Some(problem);
+    }
+    if let Some(index) = result? {
         let registry = Registry {
             index,
-            last_check: None,
+            ..load(&path, &KEY)?
         };
         let has_update = CATALOG.iter().any(|addon| {
             install_dir(app, addon)
@@ -489,10 +583,13 @@ fn check(app: &tauri::AppHandle, mode: Check) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub(crate) async fn addon_check_registry(app: tauri::AppHandle, mode: Check) -> Result<(), String> {
+pub(crate) async fn addon_check_registry(
+    app: tauri::AppHandle,
+    mode: Check,
+) -> Result<(), Problem> {
     tauri::async_runtime::spawn_blocking(move || check(&app, mode))
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|_| Problem::Invalid)?
 }
 
 #[cfg(test)]
@@ -501,7 +598,7 @@ mod tests {
     use ed25519_dalek::{Signer, SigningKey};
     use serde_json::{Value, json};
 
-    fn signed(value: &Value) -> Result<Index, String> {
+    fn signed(value: &Value) -> Result<Index, Problem> {
         let key = SigningKey::from_bytes(&[17; 32]);
         let bytes = serde_json::to_vec(value).unwrap();
         verify(
@@ -534,12 +631,15 @@ mod tests {
     #[test]
     fn bundled_floor_and_expiry_are_enforced() {
         let file = tempfile::tempdir().unwrap().path().join("registry.json");
-        let floor = load(&file).unwrap().index.sequence;
+        let floor = load(&file, &KEY).unwrap().floor;
         let mut input = fixture();
         input["sequence"] = json!(0);
-        assert!(accept(signed(&input).unwrap(), floor, at("2026-11-22T00:00:00Z")).is_err());
-        let index = signed(&fixture()).unwrap();
-        assert!(accept(index, floor, at("2027-03-21T11:36:11Z")).is_err());
+        assert!(accept(&signed(&input).unwrap(), &floor, at("2026-11-22T00:00:00Z")).is_err());
+        let index = verify(SNAPSHOT, SIGNATURE, &KEY).unwrap();
+        assert_eq!(
+            accept(&index, &floor, at("2027-03-21T11:36:11Z")),
+            Err(Problem::Expired)
+        );
         assert!(timestamp("2100-02-29T00:00:00Z").is_none());
         assert!(timestamp("2000-02-29T00:00:00.1Z").is_some());
         assert_eq!(timestamp("1970-01-01T00:00:00Z"), Some((0, "")));
@@ -617,7 +717,10 @@ mod tests {
         }
         let index = signed(&input).unwrap();
         let registry = Registry {
+            floor: Floor::from(&index),
             index,
+            cached: false,
+            last_attempt: None,
             last_check: None,
         };
         let addon = &catalog::GOODNOTES;
@@ -652,7 +755,9 @@ mod tests {
         for mode in [Check::Startup, Check::Manager] {
             assert!(
                 checks
-                    .perform(&path, mode, false, || start, || panic!("disabled fetch"))
+                    .perform(&path, mode, false, (|| start, &KEY), || panic!(
+                        "disabled fetch"
+                    ))
                     .unwrap()
                     .is_none()
             );
@@ -660,7 +765,7 @@ mod tests {
         let snapshot = || Ok((SNAPSHOT.to_vec(), SIGNATURE.to_vec()));
         assert!(
             checks
-                .perform(&path, Check::Manual, false, || start, snapshot)
+                .perform(&path, Check::Manual, false, (|| start, &KEY), snapshot)
                 .unwrap()
                 .is_some()
         );
@@ -673,39 +778,149 @@ mod tests {
                         &path,
                         mode,
                         true,
-                        || start + Duration::from_secs(seconds),
+                        (|| start + Duration::from_secs(seconds), &KEY),
                         || panic!("throttled fetch")
                     )
                     .unwrap()
                     .is_none()
             );
         }
-        let offline = || Err("offline".into());
+        let offline = || Err(Problem::Offline);
         assert!(
             restarted
                 .perform(
                     &path,
                     Check::Manager,
                     true,
-                    || start + Duration::from_secs(3_600),
+                    (|| start + Duration::from_secs(3_600), &KEY),
                     offline
                 )
                 .is_err()
         );
         assert_eq!(fs::read(&path).unwrap(), cached);
-        assert_eq!(load(&path).unwrap().last_check, Some(start.as_secs()));
+        assert_eq!(load(&path, &KEY).unwrap().last_check, Some(start.as_secs()));
+        let restarted = Checks::default();
+        let previous_attempt = start + Duration::from_secs(3_600);
         assert!(
-            checks
+            restarted
                 .perform(
                     &path,
                     Check::Startup,
                     true,
-                    || start + Duration::from_secs(86_400),
+                    (|| previous_attempt + Duration::from_secs(DAY - 1), &KEY),
+                    || panic!("failed attempt should throttle after restarting")
+                )
+                .unwrap()
+                .is_none()
+        );
+
+        let corrected_clock = previous_attempt - Duration::from_secs(DAY + 1);
+        assert!(
+            restarted
+                .perform(
+                    &path,
+                    Check::Startup,
+                    true,
+                    (|| corrected_clock, &KEY),
                     snapshot
                 )
                 .unwrap()
-                .is_some()
+                .is_none()
         );
+        let state = load(&path, &KEY).unwrap();
+        assert_eq!(state.last_attempt, Some(corrected_clock.as_secs()));
+        assert_eq!(state.last_check, Some(corrected_clock.as_secs()));
+        assert_eq!(fs::read(&path).unwrap(), cached);
+    }
+
+    #[test]
+    fn damaged_cache_recovers_without_lowering_the_floor() {
+        let local = tempfile::tempdir().unwrap();
+        let path = local.path().join("registry.json");
+        let signing = SigningKey::from_bytes(&[19; 32]);
+        let verifying = signing.verifying_key();
+        let key = verifying.as_bytes();
+        let start = at("2026-11-22T00:00:00Z");
+        let make = |sequence| {
+            let mut value = fixture();
+            value["sequence"] = json!(sequence);
+            serde_json::to_vec(&value).unwrap()
+        };
+        let download = |bytes: Vec<u8>| {
+            let sig = signing.sign(&bytes).to_bytes().to_vec();
+            Ok((bytes, sig))
+        };
+        let checks = Checks::default();
+        checks
+            .perform(&path, Check::Manual, false, (|| start, key), || {
+                download(make(5))
+            })
+            .unwrap();
+        let good_cache = fs::read(&path).unwrap();
+        let mut invalid_signature: Value = serde_json::from_slice(&good_cache).unwrap();
+        invalid_signature["signature"] = json!(STANDARD.encode([0; 64]));
+        let mut mismatch: Value = serde_json::from_slice(&good_cache).unwrap();
+        mismatch["sequence"] = json!(6);
+        for (mode, damage) in [
+            (Check::Startup, Some(b"{".to_vec())),
+            (
+                Check::Manual,
+                Some(serde_json::to_vec(&invalid_signature).unwrap()),
+            ),
+            (Check::Manual, Some(serde_json::to_vec(&mismatch).unwrap())),
+            (Check::Manual, None),
+        ] {
+            if let Some(bytes) = damage {
+                fs::write(&path, bytes).unwrap();
+            } else {
+                fs::remove_file(&path).unwrap();
+            }
+            fs::write(path.with_extension("state.json"), b"{").unwrap();
+            let state = load(&path, key).unwrap();
+            assert_eq!(state.index.sequence, 1);
+            assert_eq!(state.floor.sequence, 5);
+            let later = || start + Duration::from_secs(DAY);
+            assert!(matches!(
+                checks.perform(&path, mode, true, (later, key), || download(make(4))),
+                Err(Problem::Rollback)
+            ));
+            let mut changed = make(5);
+            changed.push(b' ');
+            assert!(matches!(
+                checks.perform(&path, Check::Manual, true, (later, key), || download(
+                    changed
+                )),
+                Err(Problem::Rollback)
+            ));
+            assert!(
+                checks
+                    .perform(&path, Check::Manual, false, (later, key), || download(
+                        make(5)
+                    ))
+                    .unwrap()
+                    .is_some()
+            );
+            assert_eq!(load(&path, key).unwrap().index.sequence, 5);
+        }
+    }
+
+    #[test]
+    fn registry_ipc_errors_are_closed_codes_without_urls() {
+        for (problem, code) in [
+            (Problem::Offline, "offline"),
+            (Problem::Status, "status"),
+            (Problem::Signature, "signature"),
+            (Problem::Expired, "expired"),
+            (Problem::Rollback, "rollback"),
+            (
+                Problem::from("https://example.org/?token=value".to_string()),
+                "invalid",
+            ),
+        ] {
+            let serialized = serde_json::to_string(&problem).unwrap();
+            assert_eq!(serialized, format!("\"{code}\""));
+            assert!(!serialized.contains("http"));
+        }
     }
 
     #[test]
@@ -738,12 +953,8 @@ mod tests {
     fn live_registry_verifies_the_published_index() {
         let (bytes, signature) = fetch().unwrap();
         let snapshot = verify(SNAPSHOT, SIGNATURE, &KEY).unwrap();
-        let index = accept(
-            verify(&bytes, &signature, &KEY).unwrap(),
-            snapshot.sequence,
-            now(),
-        )
-        .unwrap();
+        let index = verify(&bytes, &signature, &KEY).unwrap();
+        accept(&index, &Floor::from(&snapshot), now()).unwrap();
         println!(
             "Verified registry sequence {} with {} catalog addons, expiring {}.",
             index.sequence,

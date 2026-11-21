@@ -501,21 +501,10 @@ pub async fn addon_list(
         let preference = policy.addons.get(addon.id).copied().unwrap_or_default();
         let active_version = active.as_ref().map(|(version, _)| version.as_str());
         let update = active_version
-            .and_then(|version| registry.as_ref()?.release(addon, Some(version)))
-            .map(registry::Release::view);
-        let release = registry
-            .as_ref()
-            .and_then(|registry| registry.install_release(addon, active_version))
-            .map(registry::Release::view)
-            .or_else(|| {
-                addon
-                    .pinned
-                    .filter(|pin| active_version.is_none_or(|version| version == pin.version))
-                    .map(|pin| ReleaseView {
-                        version: pin.version.into(),
-                        size_bytes: pin.size,
-                    })
-            });
+            .and_then(|_| select_release(registry.as_ref(), addon, active_version, true))
+            .map(SelectedRelease::view);
+        let release = select_release(registry.as_ref(), addon, active_version, false)
+            .map(SelectedRelease::view);
         let mut status = if !platform_supported() {
             Status::UnsupportedOs
         } else if release.is_some() {

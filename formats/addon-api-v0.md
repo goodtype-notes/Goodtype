@@ -200,9 +200,12 @@ the addon's signed descriptor and manifest conformance.
 
 The bundled signed snapshot seeds the rollback floor and provides first-launch
 and offline metadata. The host MUST persist the highest accepted sequence and
-reject lower sequences and expired indexes. Cached index data and check state
-belong in app-local data. The cache atomically stores the sequence, last
-successful check (Unix seconds), and base64-encoded signed bytes and signature.
+the SHA-256 of its exact signed bytes. Reject lower sequences, a different
+digest at the same sequence, and expired indexes. An identical index refreshes
+check timestamps and may restore a missing or damaged cache. Store the rollback
+floor and check timestamps separately from the cached signed bytes in app-local
+data, with an atomic backup of the state. A missing or damaged cache falls back
+to the bundled snapshot while retaining the highest recoverable floor.
 Failed checks and expiration MUST leave installed
 addons usable offline. Fetch from the fixed registry GitHub Releases endpoint.
 Redirects MUST use HTTPS. GitHub's latest endpoint may redirect to the same
@@ -212,14 +215,17 @@ existing release asset host allowlist
 `github-releases.githubusercontent.com`), with at most five redirects.
 
 Automatic checks default on and MUST be disableable. Explain that checks fetch
-the public list from GitHub without sending notebook or usage data. The
-background check runs at most once per 24 hours, with a separate manager-open
-check when the last check is older than one hour. An explicit check remains
-available. Discovery MUST choose the newest compatible API and target by
+the public list from GitHub without sending notebook or usage data and that
+GitHub sees the request as it would any download. The background check runs at
+most once per 24 hours, with a separate manager-open check after one hour.
+Persist the last attempt independently of the last success so failed attempts
+also throttle after restart. Treat an attempt more than 24 hours ahead of the
+current clock as invalid. An explicit check remains available. Discovery MUST choose the newest compatible API and target by
 numeric release version. Installation requires explicit user action and MUST
 verify the index's size and digest, the independently signed addon descriptor
 bound to the same release, and the package checks above before switching the
-active pointer. Keep the previous verified version for local rollback.
+active pointer. Hash and extract from the same retained archive handle, which
+denies concurrent writes and deletion on Windows. Keep the previous verified version for local rollback.
 
 ## Session v0
 

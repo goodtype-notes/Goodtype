@@ -4,7 +4,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    io::{self, Read, Write},
+    io::{self, Read, Seek, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
@@ -205,26 +205,33 @@ fn https_agent() -> Result<ureq::Agent, String> {
         .build())
 }
 
-fn github_asset(url: &str, allowed: impl Fn(&str, bool) -> bool) -> Result<ureq::Response, String> {
-    let agent = https_agent()?;
+fn github_asset(
+    url: &str,
+    allowed: impl Fn(&str, bool) -> bool,
+) -> Result<ureq::Response, registry::Problem> {
+    use registry::Problem;
+    let agent = https_agent().map_err(|_| Problem::Offline)?;
     let mut url = url.to_owned();
     for redirects in 0..=MAX_REDIRECTS {
         if !allowed(&url, redirects > 0) {
-            return Err("refused an unexpected importer release URL".into());
+            return Err(Problem::Invalid);
         }
-        let response = agent
-            .get(&url)
-            .call()
-            .map_err(|error| format!("cannot read the GitHub release ({error})"))?;
+        let response = agent.get(&url).call().map_err(|error| match error {
+            ureq::Error::Status(status, _) => {
+                eprintln!("GitHub addon asset returned status {status}");
+                Problem::Status
+            }
+            ureq::Error::Transport(_) => Problem::Offline,
+        })?;
         if !(300..400).contains(&response.status()) {
             return Ok(response);
         }
         url = response
             .header("location")
-            .ok_or("GitHub redirected without a location")?
+            .ok_or(Problem::Invalid)?
             .to_owned();
     }
-    Err("GitHub redirected too many times".into())
+    Err(Problem::Invalid)
 }
 
 /// Streams the pinned archive to `into`, hashing as it goes. Returns the SHA-256; the caller
@@ -242,7 +249,8 @@ fn download(
     let started = Instant::now();
     let response = github_asset(release.url, |url, redirected| {
         download_url_allowed(tool, url, redirected)
-    })?;
+    })
+    .map_err(|problem| format!("cannot read the GitHub release ({problem:?})"))?;
     if let Some(length) = response
         .header("content-length")
         .and_then(|value| value.parse::<u64>().ok())
@@ -348,10 +356,21 @@ fn safe_components(path: &str) -> Result<Vec<&str>, String> {
     Ok(components)
 }
 
+fn open_archive(path: &Path) -> io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 1;
+        options.share_mode(FILE_SHARE_READ);
+    }
+    options.open(path)
+}
+
 /// Unpacks `archive` into `into`, which must not exist yet. Only the expected top folder, no
 /// links, no collisions; sizes are counted as bytes are written, not taken from headers.
-pub fn extract_package(archive: &Path, top: &str, into: &Path) -> Result<(), String> {
-    let file = fs::File::open(archive).map_err(|error| error.to_string())?;
+fn extract_package(file: &mut fs::File, top: &str, into: &Path) -> Result<(), String> {
     let mut zip =
         zip::ZipArchive::new(file).map_err(|error| format!("not a valid ZIP ({error})"))?;
     if zip.len() > MAX_ARCHIVE_ENTRIES {
@@ -423,9 +442,12 @@ pub struct PackageFile {
 }
 
 fn sha256_file(path: &Path) -> Result<String, String> {
-    let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+    sha256_reader(&mut fs::File::open(path).map_err(|error| error.to_string())?)
+}
+
+fn sha256_reader(file: &mut fs::File) -> Result<String, String> {
     let mut hasher = Sha256::new();
-    io::copy(&mut file, &mut hasher).map_err(|error| error.to_string())?;
+    io::copy(file, &mut hasher).map_err(|error| error.to_string())?;
     Ok(hex(&hasher.finalize()))
 }
 
@@ -719,10 +741,12 @@ fn install_with_policy(
     approve: impl FnOnce(&manifest::Manifest) -> Result<(), String>,
     activate: impl FnOnce(&manifest::Manifest) -> Result<(), String>,
 ) -> Result<String, String> {
-    if fs::metadata(archive).map_err(|e| e.to_string())?.len() != release.size {
+    let mut archive = open_archive(archive).map_err(|error| error.to_string())?;
+    if archive.metadata().map_err(|e| e.to_string())?.len() != release.size {
         return Err("the package size differs from the pinned release".into());
     }
-    let hash = sha256_file(archive)?;
+    let hash = sha256_reader(&mut archive)?;
+    archive.rewind().map_err(|error| error.to_string())?;
     if !hash.eq_ignore_ascii_case(release.sha256) {
         return Err("the downloaded package does not match the tested release".into());
     }
@@ -732,7 +756,11 @@ fn install_with_policy(
     let mut retired = None;
     let mut installed_target = None;
     let result = (|| {
-        extract_package(archive, &package_folder(dir.1, release.version), &staging)?;
+        extract_package(
+            &mut archive,
+            &package_folder(dir.1, release.version),
+            &staging,
+        )?;
         if package_files(&staging)?
             .iter()
             .any(|file| file.eq_ignore_ascii_case(PROVENANCE))
@@ -1267,7 +1295,7 @@ pub struct ImporterStatus {
     pub activity: Activity,
     pub update: Option<ReleaseView>,
     pub update_checked: bool,
-    pub update_problem: Option<String>,
+    pub update_problem: Option<registry::Problem>,
 }
 
 pub(crate) fn install_dir(
@@ -1356,20 +1384,11 @@ pub async fn importer_status(
     let active_version = install_dir(&app, tool)?
         .active()
         .map(|(version, _)| version);
-    let update = registry
-        .as_ref()
-        .and_then(|registry| registry.release(tool, active_version.as_deref()));
-    let release = registry
-        .as_ref()
-        .and_then(|registry| registry.install_release(tool, active_version.as_deref()))
-        .map(registry::Release::view)
-        .or_else(|| {
-            tool.pinned.map(|pin| ReleaseView {
-                version: pin.version.into(),
-                size_bytes: pin.size,
-            })
-        });
-    let update = update.filter(|_| active_version.is_some());
+    let active = active_version.as_deref();
+    let update = active
+        .and_then(|_| select_release(registry.as_ref(), tool, active, true))
+        .map(SelectedRelease::view);
+    let release = select_release(registry.as_ref(), tool, active, false).map(SelectedRelease::view);
     Ok(ImporterStatus {
         platform_supported: platform_supported(),
         release,
@@ -1387,11 +1406,11 @@ pub async fn importer_status(
         } else {
             activity.unwrap_or(Activity::Idle)
         },
-        update: update.map(registry::Release::view),
+        update,
         update_checked: registry
             .as_ref()
             .is_some_and(|registry| registry.last_check.is_some()),
-        update_problem: view.failed.then(|| "addon registry check failed".into()),
+        update_problem: view.problem,
     })
 }
 
@@ -1406,12 +1425,15 @@ pub fn importer_install(
 }
 
 #[tauri::command]
-pub async fn importer_check_update(app: tauri::AppHandle, tool: String) -> Result<(), String> {
+pub async fn importer_check_update(
+    app: tauri::AppHandle,
+    tool: String,
+) -> Result<(), registry::Problem> {
     if !CATALOG
         .iter()
         .any(|addon| addon.id == tool && addon.public_key.is_some())
     {
-        return Err("no signed update key is available".into());
+        return Err(registry::Problem::Invalid);
     }
     registry::addon_check_registry(app, registry::Check::Manual).await
 }
@@ -1423,6 +1445,45 @@ pub fn importer_update(
     tool: String,
 ) -> Result<(), String> {
     start_install(app, importers, &tool, true)
+}
+
+enum SelectedRelease<'a> {
+    Signed(&'a registry::Release),
+    Pinned(PinnedRelease<'static>),
+}
+
+impl SelectedRelease<'_> {
+    fn view(self) -> ReleaseView {
+        match self {
+            Self::Signed(release) => release.view(),
+            Self::Pinned(pin) => ReleaseView {
+                version: pin.version.into(),
+                size_bytes: pin.size,
+            },
+        }
+    }
+}
+
+fn select_release<'a>(
+    registry: Option<&'a registry::Registry>,
+    tool: &Addon,
+    active: Option<&str>,
+    updating: bool,
+) -> Option<SelectedRelease<'a>> {
+    registry
+        .and_then(|registry| {
+            if updating {
+                registry.release(tool, active)
+            } else {
+                registry.install_release(tool, active)
+            }
+        })
+        .map(SelectedRelease::Signed)
+        .or_else(|| {
+            tool.pinned
+                .filter(|pin| !updating && active.is_none_or(|version| version == pin.version))
+                .map(SelectedRelease::Pinned)
+        })
 }
 
 fn start_install(
@@ -1439,30 +1500,15 @@ fn start_install(
     importer.begin(Activity::Installing)?;
     let registry = registry::current(&app).ok();
     let active = dir.active().map(|(version, _)| version);
-    let candidate = registry
-        .as_ref()
-        .and_then(|registry| {
-            if updating {
-                registry.release(tool, active.as_deref())
-            } else {
-                registry.install_release(tool, active.as_deref())
+    let (candidate, pin, size) =
+        match select_release(registry.as_ref(), tool, active.as_deref(), updating) {
+            Some(SelectedRelease::Signed(release)) => (Some(release.clone()), None, release.size),
+            Some(SelectedRelease::Pinned(pin)) => (None, Some(pin), pin.size),
+            None => {
+                importer.set(Activity::Idle);
+                return Err("no compatible addon release is available".into());
             }
-        })
-        .cloned();
-    let pin = tool.pinned.filter(|pin| {
-        !updating
-            && active
-                .as_deref()
-                .is_none_or(|version| version == pin.version)
-    });
-    let Some(size) = candidate
-        .as_ref()
-        .map(|release| release.size)
-        .or_else(|| pin.map(|pin| pin.size))
-    else {
-        importer.set(Activity::Idle);
-        return Err("no compatible addon release is available".into());
-    };
+        };
     importer.set(Activity::Downloading {
         received: 0,
         total: size,
