@@ -13,6 +13,8 @@ const PROBLEMS = {
   "addon-compile-failed": "addonCommand.problem.compileFailed",
   "addon-does-not-fit": "addonCommand.problem.doesNotFit",
   "addon-too-many-proposals": "addonCommand.problem.tooMany",
+  "addon-storage-exceeded": "addonCommand.problem.storageExceeded",
+  flush_failed: "addonCommand.problem.flushFailed",
   proposal_changed: "addonCommand.problem.stale",
 } as const satisfies Record<string, MessageKey>;
 
@@ -21,4 +23,15 @@ export function addonProblem(details: string): MessageKey {
   if (/stale|revision_conflict|changed since/i.test(details)) return "addonCommand.problem.stale";
   const code = Object.keys(PROBLEMS).find((key) => details.includes(key)) as keyof typeof PROBLEMS | undefined;
   return code ? PROBLEMS[code] : "addonCommand.problem.failed";
+}
+
+export type AddonPhase = "running" | "review" | "applied" | "failed";
+
+/**
+ * What an unmounting panel owes Rust. A run still in flight is cancelled; a proposal that was
+ * neither inserted nor directly applied is dismissed, so a rerun, page switch or close never
+ * leaves it counting against the pending limit.
+ */
+export function panelCleanup(phase: AddonPhase, reviewId: string | null, settled: boolean) {
+  return { cancel: phase === "running", dismiss: reviewId !== null && !settled && phase !== "applied" ? reviewId : null };
 }

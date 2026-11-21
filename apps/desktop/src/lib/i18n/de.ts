@@ -1463,6 +1463,8 @@ export const de = {
     "keepsInk": "Deine Handschrift bleibt auf der Seite.",
     "unsupported": "{{addon}} konnte das nicht in Typst übersetzen. Gib es vor dem Einfügen unten ein.",
     "applied": "{{addon}} hat einen Block eingefügt. Rückgängig entfernt ihn.",
+    "appliedKept": "{{addon}} hat einen Block eingefügt. Die Seite hat sich seitdem geändert. Entferne den Block selbst, falls du ihn nicht möchtest.",
+    "appliedElsewhere": "{{addon}} hat auf Seite {{pageNumber}} einen Block eingefügt, nachdem du die Seite verlassen hast.",
     "problem": {
       "needsUpdate": "{{addon}} braucht ein Update für diese Goodtype-Version.",
       "cancelled": "{{addon}} wurde abgebrochen.",
@@ -1476,7 +1478,9 @@ export const de = {
       "compileFailed": "Der Typst-Quelltext lässt sich nicht kompilieren. Korrigiere ihn und versuche es erneut.",
       "doesNotFit": "Der Block passt nicht auf die Seite. Kürze ihn oder führe den Befehl mit einer kleineren Auswahl aus.",
       "tooMany": "Zu viele offene Addon-Vorschläge. Füge zuerst einige ein oder verwirf sie.",
-      "stale": "Die Seite hat sich geändert, seit {{addon}} lief. Führe den Befehl erneut aus."
+      "stale": "Die Seite hat sich geändert, seit {{addon}} lief. Führe den Befehl erneut aus.",
+      "flushFailed": "Goodtype konnte deine letzten Änderungen nicht speichern, deshalb wurde {{addon}} nicht ausgeführt.",
+      "storageExceeded": "{{addon}} hat zu viel temporären Speicher belegt und wurde beendet."
     }
   },
   "transcription": {

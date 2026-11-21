@@ -11,7 +11,7 @@
     type AddonReview,
     type SelectionCommand,
   } from "../ipc/addons";
-  import { addonProblem } from "./addonCommand";
+  import { addonProblem, panelCleanup, type AddonPhase } from "./addonCommand";
 
   /**
    * One explicit run of an addon's ink-selection command (ADR 0045). Rust captures the committed
@@ -23,50 +23,72 @@
     pageId: string;
     strokeIds: string[];
     command: SelectionCommand;
+    /** Saves pending edits so Rust captures the strokes the writer sees. */
+    flush: () => Promise<boolean>;
     insert: (review: AddonReview, direct: boolean) => Promise<boolean>;
+    /** Changes whenever the page or its history changes; Undo is offered only while it holds. */
+    changeMark: () => string;
     undo: () => void;
     onClose: () => void;
   };
-  let { root, pageId, strokeIds, command, insert, undo, onClose }: Props = $props();
+  let { root, pageId, strokeIds, command, flush, insert, changeMark, undo, onClose }: Props = $props();
 
-  type Phase = "running" | "review" | "applied" | "failed";
-  let phase = $state<Phase>("running");
+  let phase = $state<AddonPhase>("running");
   let review = $state<AddonReview | null>(null);
   let sources = $state<string[]>([]);
   let message = $state<UiText | null>(null);
   let busy = $state(false);
+  let appliedMark = $state<string | null>(null);
   let field = $state<HTMLTextAreaElement>();
   let panel = $state<HTMLElement>();
   const requestId = crypto.randomUUID();
   let disposed = false;
+  // Set once Rust consumed the proposal by inserting it; nothing is left to dismiss.
+  let settled = false;
 
   const name = $derived(addonText(review?.addon ?? command.label, $locale));
   const label = $derived(addonText(command.label, $locale));
+  // Undo uses the ordinary notebook history; after any later change it would undo that instead.
+  const undoable = $derived(phase === "applied" && appliedMark !== null && changeMark() === appliedMark);
+
+  async function focusPhase() {
+    await tick();
+    if (disposed) return;
+    if (phase === "review") field?.focus();
+    else if (phase === "applied") panel?.querySelector<HTMLButtonElement>(".primary")?.focus();
+    else panel?.focus();
+  }
 
   function fail(error: unknown) {
     phase = review ? "review" : "failed";
     message = notice(addonProblem(errorDetails(error)), { addon: label });
+    void focusPhase();
   }
 
   async function run() {
     phase = "running";
     message = null;
     review = null;
+    settled = false;
+    // The scope notice is on screen before anything is captured or sent.
+    await focusPhase();
     try {
+      if (!await flush()) throw new Error("flush_failed");
+      if (disposed) return;
       const result = await invokeAddonSelection({ root, pageId, strokeIds, addonId: command.addonId, command: command.command, requestId, reviewFirst: false });
       if (disposed) { void dismissAddonProposal(result.review.id).catch(() => {}); return; }
       review = result.review;
       sources = result.review.items.length ? result.review.items.map((item) => item.source) : [""];
       if (result.direct && await insert(result.review, true)) {
+        settled = true;
+        appliedMark = changeMark();
         phase = "applied";
-        await tick();
-        panel?.querySelector<HTMLButtonElement>(".primary")?.focus();
+        await focusPhase();
         return;
       }
       phase = "review";
       if (result.review.latex !== null) message = notice("addonCommand.unsupported", { addon: name });
-      await tick();
-      field?.focus();
+      await focusPhase();
     } catch (error) {
       if (!disposed) fail(error);
     }
@@ -82,6 +104,7 @@
       // A correction becomes a new proposal version, compiled and checked again by Rust.
       if (edited) current = review = await editAddonProposal(current.id, current.version, sources);
       await insert(current, false);
+      settled = true;
       onClose();
     } catch (error) {
       fail(error);
@@ -90,16 +113,20 @@
     }
   }
 
-  function close() {
-    if (phase === "running") void cancelAddonCommand(requestId).catch(() => {});
-    if (review && phase !== "applied") void dismissAddonProposal(review.id).catch(() => {});
+  function undoApplied() {
+    if (changeMark() !== appliedMark) {
+      appliedMark = null;
+      return;
+    }
+    undo();
     onClose();
   }
 
   function keydown(event: KeyboardEvent) {
     if (event.key === "Escape") {
       event.preventDefault();
-      close();
+      event.stopPropagation();
+      onClose();
     } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && phase === "review") {
       event.preventDefault();
       void accept();
@@ -107,10 +134,16 @@
   }
 
   onMount(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     void run();
     return () => {
+      const owed = panelCleanup(phase, review?.id ?? null, settled);
       disposed = true;
-      if (phase === "running") void cancelAddonCommand(requestId).catch(() => {});
+      if (owed.cancel) void cancelAddonCommand(requestId).catch(() => {});
+      if (owed.dismiss) void dismissAddonProposal(owed.dismiss).catch(() => {});
+      // Return focus only while it is still in the panel; a page switch may have moved it on.
+      const active = document.activeElement;
+      if (opener?.isConnected && (!active || active === document.body || panel?.contains(active))) opener.focus();
     };
   });
 </script>
@@ -118,7 +151,7 @@
 <div class="addon-command" role="dialog" aria-modal="false" aria-labelledby="addon-command-title" tabindex="-1" bind:this={panel} onkeydown={keydown}>
   <header>
     <h2 id="addon-command-title">{label}</h2>
-    <button type="button" class="chrome" title={$t("addonCommand.close")} aria-label={$t("addonCommand.close")} onclick={close}>
+    <button type="button" class="chrome" title={$t("addonCommand.close")} aria-label={$t("addonCommand.close")} onclick={onClose}>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg>
     </button>
   </header>
@@ -129,7 +162,7 @@
       <p class="hint">{$t("addonCommand.scope", { addon: name, count: strokeIds.length })}</p>
       <div class="progress" role="progressbar" aria-label={$t("addonCommand.running", { addon: name })}><span></span></div>
     {:else if phase === "applied"}
-      <p class="lead" role="status">{$t("addonCommand.applied", { addon: name })}</p>
+      <p class="lead" role="status">{$t(undoable ? "addonCommand.applied" : "addonCommand.appliedKept", { addon: name })}</p>
     {:else if phase === "review" && review}
       <p class="hint">{$t("addonCommand.proposedBy", { addon: name })}</p>
       {#each sources as _, index (index)}
@@ -160,15 +193,17 @@
 
   <footer>
     {#if phase === "running"}
-      <button type="button" class="control" onclick={close}>{$t("addonCommand.cancel")}</button>
+      <button type="button" class="control" onclick={onClose}>{$t("addonCommand.cancel")}</button>
     {:else if phase === "applied"}
-      <button type="button" class="control" onclick={() => { undo(); onClose(); }}>{$t("addonCommand.undo")}</button>
+      {#if undoable}
+        <button type="button" class="control" onclick={undoApplied}>{$t("addonCommand.undo")}</button>
+      {/if}
       <button type="button" class="primary" onclick={onClose}>{$t("addonCommand.done")}</button>
     {:else if phase === "failed"}
-      <button type="button" class="control" onclick={close}>{$t("addonCommand.close")}</button>
+      <button type="button" class="control" onclick={onClose}>{$t("addonCommand.close")}</button>
       <button type="button" class="primary" onclick={() => void run()}>{$t("addonCommand.retry")}</button>
     {:else}
-      <button type="button" class="control" disabled={busy} onclick={close}>{$t("addonCommand.dismiss")}</button>
+      <button type="button" class="control" disabled={busy} onclick={onClose}>{$t("addonCommand.dismiss")}</button>
       <button type="button" class="primary" disabled={busy || !sources.every((source) => source.trim())} onclick={() => void accept()}>{$t("addonCommand.insert")}</button>
     {/if}
   </footer>

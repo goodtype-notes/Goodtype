@@ -1462,6 +1462,8 @@ export const en = {
     "keepsInk": "Your ink stays on the page.",
     "unsupported": "{{addon}} could not translate this into Typst. Type it below before inserting.",
     "applied": "{{addon}} inserted a block. Undo removes it.",
+    "appliedKept": "{{addon}} inserted a block. The page has changed since, so remove the block yourself if you do not want it.",
+    "appliedElsewhere": "{{addon}} inserted a block on page {{pageNumber}} after you left that page.",
     "problem": {
       "needsUpdate": "{{addon}} needs an update for this version of Goodtype.",
       "cancelled": "{{addon}} was cancelled.",
@@ -1475,7 +1477,9 @@ export const en = {
       "compileFailed": "The Typst source does not compile. Correct it and try again.",
       "doesNotFit": "The block does not fit on the page. Shorten it or run the command on a smaller selection.",
       "tooMany": "Too many open addon proposals. Insert or dismiss some first.",
-      "stale": "The page changed since {{addon}} ran. Run the command again."
+      "stale": "The page changed since {{addon}} ran. Run the command again.",
+      "flushFailed": "Goodtype could not save your latest changes, so {{addon}} did not run.",
+      "storageExceeded": "{{addon}} used too much temporary storage and was stopped."
     }
   },
   "transcription": {

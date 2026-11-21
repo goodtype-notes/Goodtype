@@ -3,13 +3,14 @@ import { exportTarget, INCLUDE_EVERYTHING, parsePageList, type ExportChoice } fr
 import { acceptProposal, validateProposalPlacement } from "../helper/proposal";
 import { helperInsertProposal, helperCreatePage } from "../ipc/helper";
 import type { Proposal } from "../ipc/helper";
-import { insertAddonProposal as addonInsertProposal, type AddonReview } from "../ipc/addons";
+import { addonText, insertAddonProposal as addonInsertProposal, type AddonReview } from "../ipc/addons";
 import type { createSelection } from "./selectionEditing.svelte";
 import type { createNavigation } from "./viewportNavigation.svelte";
 import { shapeMessage } from "../i18n/labels";
-import { translate, notice, type UiText } from "../i18n";
+import { translate, notice, locale, type UiText } from "../i18n";
 import { notebookFailureCode } from "../ipc/errors";
 import { tick } from "svelte";
+import { get } from "svelte/store";
 
 import { commitNotebook, createNotebook, createPage, deletePage, deletePages as deletePagesIpc, duplicatePage, focusPage, importPdfPages, openNotebook, openPage, pickPdfReference, reorderPages, runHistory, runStructureHistory } from "../ipc/notebook";
 import { discardRecoveryCandidate, listRecoveryCandidates, restoreRecoveryCandidate } from "../ipc/recovery";
@@ -1603,7 +1604,14 @@ export function createSession(env: SessionEnvironment) {
         const result = await addonInsertProposal(requestRoot, pageId, review.id, version, direct);
         if (!result) return;
         inserted = true;
-        if (root !== requestRoot || activePageId !== pageId || notebookGeneration !== generation) return;
+        if (root !== requestRoot || notebookGeneration !== generation) return;
+        if (activePageId !== pageId) {
+          // A direct apply landed after the writer left; say where, since no panel shows it.
+          const pageNumber = (notebookManifest?.pages.findIndex((page) => page.id === pageId) ?? -1) + 1;
+          status = notice("addonCommand.appliedElsewhere", { addon: addonText(review.addon, get(locale)), pageNumber: pageNumber || "?" });
+          editGeneration += 1;
+          return;
+        }
         applySnapshot(result.snapshot);
         revision = result.snapshot.page.revision;
         canUndo = result.canUndo; canRedo = result.canRedo;
@@ -2358,6 +2366,7 @@ export function createSession(env: SessionEnvironment) {
     reopen,
     markCanonicalEdit() { editGeneration += 1; },
     get editGeneration() { return editGeneration; },
+    get revision() { return revision; },
     get root() { return root; },
     set root(value: typeof root) { root = value; },
     get notebookTitle() { return notebookTitle; },

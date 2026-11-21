@@ -2649,7 +2649,9 @@
         pageId={addonRun.pageId}
         strokeIds={addonRun.strokeIds}
         command={addonRun.command}
+        flush={session.persist}
         insert={session.insertAddonProposal}
+        changeMark={() => `${session.revision}:${session.editGeneration}`}
         undo={session.undo}
         onClose={() => (addonRun = null)}
       />
