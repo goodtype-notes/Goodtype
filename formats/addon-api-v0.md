@@ -117,7 +117,8 @@ safety and catalog binding. Step 2 MUST ship Rust round-trip fixture tests
 against the tracked schema and tests for the additional semantic checks.
 
 For the pinned Goodnotes 0.1.1 and OneNote 0.1.0 archives, the host supplies the
-declaration and validates the separate legacy protocol and decoder contract.
+declaration and validates the separate legacy protocol, schema 3 and decoder
+contract. Rust validates those notebooks through the normal core reader.
 Math has no verified legacy release. A new release needs its own declaration.
 For importer packages, the legacy inventory also lists and hashes
 `goodtype-addon.json`.

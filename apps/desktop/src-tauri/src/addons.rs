@@ -563,13 +563,20 @@ pub fn check_contract(
     tool: Option<&ToolVersion>,
     pin: Option<&PinnedRelease>,
 ) -> Result<(), String> {
+    let schema = if expected.is_legacy_release(&manifest.version, manifest, pin) {
+        // These two exact releases predate computational pages. The normal core reader
+        // still validates their schema-3 notebooks before publishing them.
+        goodtype_core::BINARY_INK_SCHEMA_VERSION
+    } else {
+        SCHEMA_VERSION
+    };
     if manifest.protocol_version != PROTOCOL_VERSION
-        || (expected.imports_notebooks() && manifest.notebook_schema_version != SCHEMA_VERSION)
+        || (expected.imports_notebooks() && manifest.notebook_schema_version != schema)
         || manifest.target != TARGET
     {
         return Err(format!(
             "importer {} speaks protocol {} for notebook schema {} on {}; this Goodtype needs \
-             protocol {PROTOCOL_VERSION}, schema {SCHEMA_VERSION} on {TARGET}",
+             protocol {PROTOCOL_VERSION}, schema {schema} on {TARGET}",
             manifest.version,
             manifest.protocol_version,
             manifest.notebook_schema_version,

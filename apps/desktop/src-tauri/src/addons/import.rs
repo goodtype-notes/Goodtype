@@ -346,17 +346,11 @@ pub fn import_start(
         cancelling: false,
     })?;
     let installation = (|| {
-        let (version, path) = install_dir(&app, tool)?
-            .active()
-            .ok_or("the importer is not installed")?;
-        let mut permissions = vec![
-            manifest::Permission::PickedImportFile,
-            manifest::Permission::PublishImportBatch,
-        ];
-        if allow_derived {
-            permissions.push(manifest::Permission::DerivedImportArtwork);
+        if !platform_supported() || !manager::enabled(&app, tool)? {
+            return Err("addon is disabled or unavailable".into());
         }
-        manager::require_permissions(&app, tool, &path, &version, &permissions)?;
+        let (_, path) = installed_contract(&install_dir(&app, tool)?)?
+            .ok_or("the importer is not installed")?;
         if importer.state.lock().unwrap().source.as_ref() != Some(&source) {
             return Err("the chosen source changed".into());
         }
@@ -408,9 +402,19 @@ pub(super) fn run_import(
     state: &Mutex<State>,
 ) -> Result<ImportResult, String> {
     // The files on disk are checked again right before they run.
-    verify_package(tool, installed).map_err(|error| {
-        format!("the installed importer is damaged ({error}); download it again")
-    })?;
+    let version = installed
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("invalid importer version")?;
+    let declaration =
+        manager::installed(tool, installed, version, true).map_err(manager::manifest_problem)?;
+    use manifest::Permission::{DerivedImportArtwork, PickedImportFile, PublishImportBatch};
+    if !declaration.permissions.contains(&PickedImportFile)
+        || !declaration.permissions.contains(&PublishImportBatch)
+        || allow_derived && !declaration.permissions.contains(&DerivedImportArtwork)
+    {
+        return Err("the installed importer does not declare the required permissions".into());
+    }
     let tool_batch = staging.join("batch");
     let report = tool_batch.join("import-report.json");
     let mut command = Command::new(installed.join(tool.executable()));

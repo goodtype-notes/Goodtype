@@ -114,6 +114,23 @@ fn identifier(value: &str) -> bool {
 }
 
 impl Addon {
+    pub(super) fn is_legacy_release(
+        &self,
+        version: &str,
+        inventory: &PackageManifest,
+        release: Option<&PinnedRelease<'_>>,
+    ) -> bool {
+        self.legacy == Some(version)
+            && self.pinned.is_some_and(|pin| {
+                pin.version == version
+                    && inventory.version == version
+                    && inventory.decoder_commit == pin.decoder_commit
+                    && release.is_none_or(|candidate| {
+                        candidate.sha256 == pin.sha256 && candidate.size == pin.size
+                    })
+            })
+    }
+
     pub(super) fn permissions(&self) -> &'static [Permission] {
         use Permission::*;
         match self.kind {
@@ -268,15 +285,8 @@ pub(super) fn load(
             parse(&bytes, addon, version)
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let legacy = addon.legacy.ok_or(Error::Invalid)?;
-            if version != legacy
-                || !addon.pinned.is_some_and(|pin| {
-                    pin.version == legacy
-                        && inventory.decoder_commit == pin.decoder_commit
-                        && release.is_none_or(|candidate| {
-                            candidate.sha256 == pin.sha256 && candidate.size == pin.size
-                        })
-                })
+            if !addon.is_legacy_release(version, inventory, release)
+                || inventory.notebook_schema_version != goodtype_core::BINARY_INK_SCHEMA_VERSION
             {
                 return Err(Error::Invalid);
             }
@@ -406,7 +416,7 @@ mod tests {
                 target: TARGET.into(),
                 decoder_commit: pin.decoder_commit.into(),
                 protocol_version: 1,
-                notebook_schema_version: SCHEMA_VERSION,
+                notebook_schema_version: goodtype_core::BINARY_INK_SCHEMA_VERSION,
                 files: vec![],
             };
             assert!(load(addon, home.path(), pin.version, &inventory, Some(&pin)).is_ok());
