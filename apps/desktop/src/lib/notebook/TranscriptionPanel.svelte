@@ -14,7 +14,7 @@
     removeMathRecognizer,
     type InkPolylines,
   } from "../ipc/recognition";
-  import { recognitionAddon, type RecognitionAddon } from "../ipc/addons";
+  import { mathRecognitionAddon, type RecognitionAddon } from "../ipc/addons";
   import { cancelImporter, importerStatus, installImporter, megabytes, type ImporterStatus } from "../ipc/importer";
   import type { Bounds } from "../ink/selection";
   import { editDistance, transcriptionSource, type TranscriptionKind } from "./transcription";
@@ -69,8 +69,8 @@
   async function refresh() {
     clearTimeout(pollTimer);
     try {
-      const entry = await recognitionAddon();
-      if (disposed) return;
+      const entry = await mathRecognitionAddon();
+      if (disposed || !entry) return;
       recognizerAddon = entry;
       const found = await importerStatus(entry.id);
       if (disposed) return;

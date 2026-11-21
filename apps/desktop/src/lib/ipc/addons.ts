@@ -36,10 +36,8 @@ export async function importAddons(): Promise<ImportAddon[]> {
   return (await addonCatalog()).filter((addon) => addon.kind === "import");
 }
 
-export async function recognitionAddon(): Promise<RecognitionAddon> {
-  const addon = (await addonCatalog()).find(
+export async function mathRecognitionAddon(): Promise<RecognitionAddon | undefined> {
+  return (await addonCatalog()).find(
     (addon): addon is RecognitionAddon => addon.kind === "recognize" && addon.recognizes === "math",
   );
-  if (!addon) throw new Error("Recognition addon is missing from the catalog");
-  return addon;
 }
