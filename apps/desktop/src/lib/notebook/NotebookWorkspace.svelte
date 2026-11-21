@@ -17,7 +17,7 @@
   import { createSelection } from "./selectionEditing.svelte";
   import { createNavigation } from "./viewportNavigation.svelte";
   import { patternLabel, shapeLabel, toolMessage, toolLabel } from "../i18n/labels";
-  import { setLanguage, t, formatNumber, displayLocale, notice, renderMessage, type UiText } from "../i18n";
+  import { setLanguage, t, locale, formatNumber, displayLocale, notice, renderMessage, type UiText } from "../i18n";
   import { errorDetails } from "../ipc/errors";
   import { onDestroy, onMount, tick, untrack } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -75,6 +75,8 @@
   import { addWidth as addRowWidth, canRemoveWidth, editWidth as editRowWidth, movePattern, moveSpacing, patternForWidth, prunePatterns, pruneSpacings, removeWidth as removeRowWidth, spacingForWidth, withWidthPattern, withWidthSpacing, widthTaken, WIDTH_BOUNDS_MM } from "./widths";
   import ConfirmDialog from "../workspace/ConfirmDialog.svelte";
   import TranscriptionPanel from "./TranscriptionPanel.svelte";
+  import AddonCommandPanel from "./AddonCommandPanel.svelte";
+  import { ADDON_AVAILABILITY_CHANGED, addonSelectionCommands, addonText, type SelectionCommand } from "../ipc/addons";
   import { recognitionCapabilities, type InkPolylines, type RecognitionCapabilities } from "../ipc/recognition";
   import { inkPolylines, polylineBounds, shapePolylines, transcriptionPlacement } from "./transcription";
   import ConflictDialog from "../workspace/ConflictDialog.svelte";
@@ -357,6 +359,12 @@
   let recognition = $state<RecognitionCapabilities | null>(null);
   /** The ink under review, pinned to the page it came from (ADR 0040). */
   let transcribing = $state<{ pageId: string; polylines: InkPolylines; bounds: Bounds } | null>(null);
+  /** Installed addons' ink-selection commands (ADR 0045), refreshed when availability changes. */
+  let addonCommands = $state<SelectionCommand[]>([]);
+  /** One explicit addon run, pinned to the page and committed strokes it was started on. */
+  let addonRun = $state<{ key: number; pageId: string; strokeIds: string[]; command: SelectionCommand } | null>(null);
+  let addonRuns = 0;
+  const loadAddonCommands = () => { void addonSelectionCommands().then(found => (addonCommands = found)).catch(() => (addonCommands = [])); };
   let zoom = $state(1);
   let tool = $state<InkTool>("pen");
   let strokeMetrics = $state<StrokePerformance[]>([]);
@@ -857,6 +865,8 @@
         })
         .catch(() => {});
       void recognitionCapabilities().then(found => (recognition = found)).catch(() => {});
+      loadAddonCommands();
+      window.addEventListener(ADDON_AVAILABILITY_CHANGED, loadAddonCommands);
       const appWindow = getCurrentWindow();
       void appWindow
         .onCloseRequested(windowClose.handle)
@@ -884,6 +894,7 @@
     window.removeEventListener("keydown", historyShortcut);
     window.removeEventListener("paste", selection.handlePaste);
     window.removeEventListener("resize", onResizeToolbar);
+    window.removeEventListener(ADDON_AVAILABILITY_CHANGED, loadAddonCommands);
   });
 
   $effect(() => {
@@ -1553,6 +1564,23 @@
     if (!bounds) return;
     transcribing = { pageId: session.activePageId, polylines, bounds };
   }
+
+  /** Ink-only selections on a canvas page; lassoed objects are never sent to an addon. */
+  function selectionAddonCommands() {
+    if (!tauriAvailable || session.activeCalculation || !selection.selectedStrokeIds.length || selection.lassoObjectIds.length) return [];
+    return addonCommands.map(command => ({
+      id: `${command.addonId}-${command.command}`,
+      label: addonText(command.label, $locale),
+      onSelect: () => {
+        transcribing = null;
+        addonRun = { key: ++addonRuns, pageId: session.activePageId, strokeIds: [...selection.selectedStrokeIds], command };
+      },
+    }));
+  }
+
+  $effect(() => {
+    if (addonRun && addonRun.pageId !== session.activePageId) addonRun = null;
+  });
 
   function insertTranscription(source: string, label: UiText) {
     const review = transcribing;
@@ -2475,6 +2503,7 @@
               onDuplicate={selection.fromContext(selection.duplicateSelection)}
               onDelete={selection.fromContext(() => selection.deleteSelection())}
               onTranscribe={canTranscribe() ? selection.fromContext(openTranscription) : undefined}
+              addonCommands={selectionAddonCommands().map(command => ({ ...command, onSelect: selection.fromContext(command.onSelect) }))}
             />
           {:else if selection.selectedImageId || selection.selectedTypstId || selection.selectedShapeId}
             <SelectionActions
@@ -2533,6 +2562,7 @@
               : undefined}
           onConvert={!selection.lassoObjectIds.length && selection.selectedStrokeIds.length === 1 ? session.convertSelectedInkToShape : undefined}
           onTranscribe={canTranscribe() ? openTranscription : undefined}
+          addonCommands={selectionAddonCommands()}
           onShare={shareAction}
           onAI={settings.aiHelper.enabled ? codexAction ?? explainAISetup : undefined}
           onCopy={() => void selection.copySelection()}
@@ -2604,12 +2634,26 @@
     <TranscriptionPanel
       polylines={transcribing.polylines}
       bounds={transcribing.bounds}
+      context={{ root: session.root, page: { widthPt: session.activeGeometry.widthPt, heightPt: session.activeGeometry.heightPt } }}
       recognizers={recognition?.recognizers ?? []}
       math={recognition?.math ?? null}
       mathAddon={recognition?.mathAddon ?? null}
       onInsert={insertTranscription}
       onClose={() => (transcribing = null)}
     />
+  {/if}
+  {#if addonRun && addonRun.pageId === session.activePageId}
+    {#key addonRun.key}
+      <AddonCommandPanel
+        root={session.root}
+        pageId={addonRun.pageId}
+        strokeIds={addonRun.strokeIds}
+        command={addonRun.command}
+        insert={session.insertAddonProposal}
+        undo={session.undo}
+        onClose={() => (addonRun = null)}
+      />
+    {/key}
   {/if}
   {#if session.confirmingPageDelete !== null}
     <ConfirmDialog

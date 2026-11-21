@@ -3,6 +3,7 @@ import { exportTarget, INCLUDE_EVERYTHING, parsePageList, type ExportChoice } fr
 import { acceptProposal, validateProposalPlacement } from "../helper/proposal";
 import { helperInsertProposal, helperCreatePage } from "../ipc/helper";
 import type { Proposal } from "../ipc/helper";
+import { insertAddonProposal as addonInsertProposal, type AddonReview } from "../ipc/addons";
 import type { createSelection } from "./selectionEditing.svelte";
 import type { createNavigation } from "./viewportNavigation.svelte";
 import { shapeMessage } from "../i18n/labels";
@@ -1584,6 +1585,37 @@ export function createSession(env: SessionEnvironment) {
     });
   }
 
+  /**
+   * Commit an addon proposal (ADR 0045) through the same ordered transaction as an AI insert.
+   * Rust rebuilds and checks the candidate under the notebook lock; `direct` asks Rust to apply
+   * without review, which it declines (returning false) unless both opt-ins still hold.
+   */
+  async function insertAddonProposal(review: AddonReview, direct: boolean): Promise<boolean> {
+    const requestRoot = root, pageId = activePageId, generation = notebookGeneration, version = review.version;
+    if (!requestRoot || review.root !== requestRoot || review.pageId !== pageId) throw new Error("wrong_page");
+    if (!await persist()) throw new Error("flush_failed");
+    replacingPageCount += 1; pendingTransactions += 1;
+    let failure: unknown;
+    let inserted = false;
+    transactionQueue = transactionQueue.then(async () => {
+      if (root !== requestRoot || activePageId !== pageId || notebookGeneration !== generation || transactionFailed) { failure = new Error("wrong_page"); return; }
+      try {
+        const result = await addonInsertProposal(requestRoot, pageId, review.id, version, direct);
+        if (!result) return;
+        inserted = true;
+        if (root !== requestRoot || activePageId !== pageId || notebookGeneration !== generation) return;
+        applySnapshot(result.snapshot);
+        revision = result.snapshot.page.revision;
+        canUndo = result.canUndo; canRedo = result.canRedo;
+        recordNotebookAction(pageId); editGeneration += 1;
+        env.selection.updateInkSelection([]);
+      } catch (error) { failure = error; }
+    }).finally(() => { pendingTransactions -= 1; replacingPageCount -= 1; });
+    await transactionQueue;
+    if (failure) throw failure;
+    return inserted;
+  }
+
   function addTranscribedBlock(source: string, placement: { x: number; y: number; layoutWidthPt: number }, label: UiText) {
     if (activeSnapshot?.page.calculation) return;
     insertTypstBlock(source, placement);
@@ -2299,6 +2331,7 @@ export function createSession(env: SessionEnvironment) {
     addTypstBlock,
     addTranscribedBlock,
     insertHelperProposal,
+    insertAddonProposal,
     nextVisualZIndex,
     nextReadingOrder,
     scheduleInkCommit,

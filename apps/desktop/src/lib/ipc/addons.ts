@@ -106,3 +106,44 @@ export const setAddonDirectApply = (id: string | null, allowed: boolean) =>
 
 export const resetAddonPolicy = () => invoke<void>("addon_reset_policy");
 export const approveAddon = (id: string, token: string) => invoke<void>("addon_approve", { id, token });
+
+/** Manifest strings: plain text, English for any language without its own table. */
+export type AddonName = { en: string; de: string };
+export const addonText = (name: AddonName, language: string) => (language === "de" ? name.de : name.en) || name.en;
+
+export type SelectionCommand = { addonId: string; command: string; label: AddonName };
+export const addonSelectionCommands = () => invoke<SelectionCommand[]>("addon_selection_commands");
+
+/** An addon-owned proposal. Identity, version and status belong to Rust (ADR 0045). */
+export type AddonReview = {
+  id: string;
+  version: number;
+  root: string;
+  pageId: string;
+  status: "pending";
+  addon: AddonName;
+  items: import("./helper").ProposalItem[];
+  anchor: { x: number; y: number; width: number; height: number };
+  /** Unsupported math: the recognized LaTeX, shown for correction. */
+  latex: string | null;
+  kind: "blocks";
+};
+
+export type AddonSelection = {
+  root: string;
+  pageId: string;
+  strokeIds: string[];
+  addonId: string;
+  command: string;
+  requestId: string;
+  /** False only for a command the writer started; Rust still checks both direct-apply toggles. */
+  reviewFirst: boolean;
+};
+export const invokeAddonSelection = (selection: AddonSelection) =>
+  invoke<{ review: AddonReview; direct: boolean }>("invoke_addon_selection", { selection });
+export const insertAddonProposal = (root: string, pageId: string, proposalId: string, proposalVersion: number, direct: boolean) =>
+  invoke<import("./types").HistoryResult | null>("insert_addon_proposal", { root, pageId, proposal: { proposalId, proposalVersion }, direct });
+export const editAddonProposal = (id: string, version: number, sources: string[]) =>
+  invoke<AddonReview>("addon_edit", { id, version, sources });
+export const dismissAddonProposal = (id: string) => invoke<void>("addon_dismiss", { id });
+export const cancelAddonCommand = (requestId: string) => invoke<void>("addon_cancel", { requestId });

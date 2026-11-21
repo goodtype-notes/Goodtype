@@ -4,9 +4,10 @@
 
 `goodtype-api 0.1` is the first-party Windows x64 beta contract. Step 1 implements
 the built-in catalog and retains the legacy importer CLI adapter. Step 2
-implements manifest v1 validation and the device-local Addons manager. Index
-format 1 (Step 2b) and session v0 (Step 3) are specifications awaiting
-implementation.
+implements manifest v1 validation and the device-local Addons manager. Step 2b
+implements index format 1. Step 3a implements the host side of session v0,
+ink-selection commands, addon-owned proposals and direct apply. The restricted
+launcher and settings descriptors remain pending.
 
 During beta, the host MUST require an exact match to its current
 `goodtype-api 0.N` for declarations and handshakes. An incompatible installed
@@ -229,7 +230,15 @@ denies concurrent writes and deletion on Windows. Keep the previous verified ver
 
 ## Session v0
 
-**Draft — not yet implemented (Step 3).**
+**Implemented on the host (Step 3a).** Session v0 currently launches through
+the Windows Job Object path (memory and lifetime bounds only, no filesystem or
+network confinement). A single launch function is the seam for the restricted
+launcher. The `progress` phase vocabulary is catalog-defined and is currently
+only `recognizing`. A warm worker is keyed by verified version, inventory
+digest and authorization context (notebook root and grant kind: the writer's
+own command or an assistant grant). Each disable, remove, update or rollback
+increments an authorization epoch, which revokes pending proposals and ends the
+worker. The host retires a worker before its 65,536th request ID.
 
 For `stdio-jsonrpc`, the host sends the first frame. Each frame MUST be one
 UTF-8 JSON-RPC 2.0 object followed by LF, optionally preceded by CR, with at
@@ -338,7 +347,7 @@ can retain valid completed results after cancellation.
 
 | API | Changes | Breaking changes |
 | --- | --- | --- |
-| `goodtype-api 0.1` | Initial beta specification for manifest v1, index format 1 and draft session v0. Documents the retained CLI adapter. | Initial version. |
+| `goodtype-api 0.1` | Initial beta specification for manifest v1, index format 1 and session v0. Documents the retained CLI adapter. | Initial version. |
 
 Step 2 implemented strict manifest validation, exact legacy declarations, and the local Addons manager without changing the 0.1 wire contract.
 
@@ -346,3 +355,11 @@ Step 2b implemented signed GitHub registry discovery, a bundled offline snapshot
 local rollback protection and optional automatic checks. Installs from the index
 verify the archive against the index and the addon's independently signed
 descriptor before package validation.
+
+Step 3a implemented the session v0 host client, `ink-selection` commands from
+manifest data, validated `page-batch-v0` (`addTypstBlock` only) compiled
+without notebook disk fallback or package downloads, and Rust-owned addon
+proposals. Insertion works with AI disabled and is one undo step. Direct apply
+requires both opt-ins at invocation and commit. A math install declaring
+`stdio-jsonrpc` uses `--session`, and other installs keep the legacy path.
+The wire contract is unchanged.
