@@ -52,6 +52,11 @@ export type AddonApproval = { token: string; version: string; permissions: Addon
 export type ManagedAddon = {
   id: string;
   name: { en: string; de: string };
+  summary: AddonName | null;
+  repository: string;
+  /** Older catalogs supply kind through addon_catalog. */
+  kind?: string;
+  problem?: "download" | "verify" | "probe" | "policy" | "unavailable" | null;
   installed: string | null;
   previous: string | null;
   status: "unsupported-os" | "unpublished" | "available" | "enabled" | "disabled" | "incompatible-api" | "verification-failed" | "needs-reinstall";
@@ -72,6 +77,31 @@ export type ManagedAddon = {
   approval: AddonApproval | null;
   progress: [number, number] | null;
 };
+
+export type Span = { text: string; strong: boolean; em: boolean; code: boolean; href: string | null };
+export type Block =
+  | { kind: "heading"; level: 2 | 3; spans: Span[] }
+  | { kind: "paragraph"; spans: Span[] }
+  | { kind: "list"; ordered: boolean; start: number | null; items: Block[][] }
+  | { kind: "code"; text: string }
+  | { kind: "quote"; blocks: Block[] }
+  | { kind: "rule" }
+  | { kind: "table"; head: Span[][]; rows: Span[][][] };
+
+export type AddonDetails = {
+  readme: Block[] | null;
+  preview: string | null;
+  origin: "cache" | "network" | null;
+  reference: string | null;
+  verified: boolean;
+  problem: "offline" | "invalid" | "unavailable" | null;
+};
+
+export const addonDetails = (id: string) => invoke<AddonDetails>("addon_details", { id });
+export const installAddon = (id: string, approved: AddonPermission[]) =>
+  invoke<void>("addon_install", { id, approved });
+export const updateAddon = (id: string, approved: AddonPermission[]) =>
+  invoke<void>("addon_update", { id, approved });
 
 export type RegistryProblem = "offline" | "status" | "signature" | "expired" | "rollback" | "invalid";
 export type RegistryCheck = { lastCheck: number | null; checking: boolean; problem: RegistryProblem | null; expired: boolean };

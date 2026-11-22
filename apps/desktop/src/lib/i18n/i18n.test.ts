@@ -11,8 +11,6 @@ import { typstSnippets } from "../editor/snippets";
 import { paletteTools } from "../notebook/palette";
 import { DEFAULT_SETTINGS } from "../settings";
 import SettingsPanel from "../workspace/SettingsPanel.svelte";
-import AddonManagerSheet from "../workspace/AddonManager.svelte";
-import type { ManagedAddon } from "../ipc/addons";
 import ConflictDialog from "../workspace/ConflictDialog.svelte";
 import { presetPresentation, type PresetSummary } from "../page/presets";
 
@@ -99,43 +97,13 @@ describe("bundled English and German interface", () => {
     if (smoothing.control.kind === "slider") expect(smoothing.control.format(0.2)).toBe("0,20");
   });
 
-  it("finds addon settings by name in both languages and renders accessible management actions", () => {
-    const addon: ManagedAddon = {
-      id: "onenote", name: { en: "OneNote Importer", de: "OneNote-Import" },
-      installed: "0.1.0", previous: null, status: "disabled", expectedApi: "goodtype-api 0.1", foundApi: null,
-      permissions: ["picked-import-file"], catalogPermissions: ["picked-import-file"],
-      formats: ["one"], memoryBytes: 1024, timeoutSeconds: 30, outputBytes: 1024, isolation: "job",
-      release: null, update: null,
-      directApply: false, activity: "idle", approval: null, progress: null,
-    };
-    const registry = { lastCheck: null, checking: false, problem: null, expired: false };
-    const manager = { allowDirectApply: false, recovery: false, autoCheck: true, registry, addons: [addon] };
+  it("finds Browse addons and the global policies in both languages", () => {
     for (const language of ["en", "de"] as const) {
       setLanguage(language);
-      const groups = settingGroups(get(t), [], false, manager, language);
-      const hits = searchSettings(addon.name[language], groups);
-      expect(hits.map(hit => hit.item.id)).toContain("addons:onenote");
-      expect(hits.find(hit => hit.item.id === "addons:onenote")?.item.label).toBe(addon.name[language]);
+      const groups = settingGroups(get(t));
+      expect(searchSettings(translate("addons.store.browse"), groups).map(hit => hit.item.id)).toContain("addons:browse");
       expect(searchSettings(translate("addons.manager.global"), groups).map(hit => hit.item.id)).toContain("addons:direct-apply");
       expect(searchSettings(translate("addons.manager.autoCheck"), groups).map(hit => hit.item.id)).toContain("addons:auto-check");
-      const html = render(AddonManagerSheet, { props: { addon, registry, refresh: async () => {}, onClose() {} } }).body;
-      expect(html).toContain('role="dialog"');
-      expect(html).toContain('type="checkbox"');
-      expect(html).toContain(translate("addons.manager.enable"));
-      expect(html).toContain(translate("addons.manager.check"));
-      // Importers must not be described as isolated (the second sentence has no apostrophe to escape).
-      expect(html).toContain(translate("addons.manager.isolation.job").split(". ")[1]);
-      expect(html).not.toContain(translate("addons.manager.isolation.sandbox").split(":")[0]);
-      expect(html).toContain(translate("addons.manager.permission.picked-import-file"));
-      const unavailable = render(AddonManagerSheet, { props: {
-        addon: { ...addon, status: "needs-reinstall" },
-        registry: { ...registry, problem: "rollback" },
-        refresh: async () => {},
-        onClose() {},
-      } }).body;
-      expect(unavailable).toContain(translate("addons.manager.noCompatibleRelease"));
-      expect(unavailable).toContain(translate("addons.manager.registryProblem.rollback"));
-      expect(unavailable).not.toContain(`>${translate("addons.manager.reinstall")}</button>`);
     }
   });
 

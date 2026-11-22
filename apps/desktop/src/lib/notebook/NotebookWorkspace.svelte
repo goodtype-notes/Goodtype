@@ -82,6 +82,7 @@
   import ConflictDialog from "../workspace/ConflictDialog.svelte";
   import RecoveryDialog from "../workspace/RecoveryDialog.svelte";
   import SearchOverlay from "../workspace/SearchOverlay.svelte";
+  import AddonStore from "../workspace/addons/AddonStore.svelte";
   import SettingsPanel from "../workspace/SettingsPanel.svelte";
   import LibrarySurface from "../library/LibrarySurface.svelte";
   import { SHELF_ROOT, type ShelfLocation } from "../library/location";
@@ -812,6 +813,21 @@
         ),
       });
   }
+  let addonsOpen = $state(false);
+  let addonReturn: HTMLElement | null = null;
+  let workspaceElement: HTMLElement;
+  function openAddons(fromSettings = false) {
+    addonReturn = !fromSettings && document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    settingsOpen = false;
+    settingsInitialGroup = "appearance";
+    addonsOpen = true;
+  }
+  async function closeAddons() {
+    addonsOpen = false;
+    await tick();
+    (addonReturn?.isConnected ? addonReturn : workspaceElement)?.focus();
+  }
+
   let settingsOpen = $state(false);
   let settingsInitialGroup = $state("appearance");
   let settingsReady = $state(false);
@@ -1595,7 +1611,7 @@
   });
 
   function historyShortcut(event: KeyboardEvent) {
-    if (event.defaultPrevented) return;
+    if (event.defaultPrevented || addonsOpen) return;
     // Every shortcut below edits, navigates or replaces the page; none may race a replacing reply.
     if (session.pageInputLocked) return;
     if (event.ctrlKey || event.metaKey) {
@@ -1875,7 +1891,7 @@
   {/if}
 {/snippet}
 
-<main tabindex="-1" class="workspace-app" class:ai-open={aiPanelOpen} onpointerdowncapture={event => {
+<main bind:this={workspaceElement} inert={addonsOpen} tabindex="-1" class="workspace-app" class:ai-open={aiPanelOpen} onpointerdowncapture={event => {
     if (event.target instanceof Element && event.target.closest(".active-page") && !event.target.closest(".helper-crop, .selection-actions") && tool !== "lasso") region = null;
     selection.closeObjectSelection(event);
   }} onfocusout={() => session.scheduleFocus()} onwheel={navigation.wheelZoom}>
@@ -1899,6 +1915,7 @@
       <LibrarySurface
         {tauriAvailable}
         onSettings={() => (settingsOpen = true)}
+        onAddons={() => openAddons()}
         coverRevision={session.coverRevision}
         showNotebookSetup={showInitialSetup}
         location={shelfLocation}
@@ -2684,7 +2701,7 @@
       selectedBlockFont={selection.selectedTypstId ? blockFont(session.typstBlocks.find(block => block.id === selection.selectedTypstId)?.source ?? "") : null}
       onFontChange={changeInlineFont}
       {settings}
-      actions={{ openMetrics: () => (metricsOpen = true), changePython: () => { settingsOpen = false; void calculations.changePython(); } }}
+      actions={{ browseAddons: () => openAddons(true), openMetrics: () => (metricsOpen = true), changePython: () => { settingsOpen = false; void calculations.changePython(); } }}
       onChange={changeSettings}
       onClose={() => { settingsOpen = false; settingsInitialGroup = "appearance"; }}
     />
@@ -2715,6 +2732,7 @@
   <p class="screen-reader-status" aria-live="polite">{renderMessage(session.status, $t)}</p>
   {/if}
 </main>
+{#if addonsOpen}<AddonStore onClose={closeAddons} />{/if}
 
 <style>
   :global(*) { box-sizing: border-box; }
