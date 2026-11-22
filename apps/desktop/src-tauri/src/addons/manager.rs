@@ -555,6 +555,8 @@ struct ManagedAddon {
     progress: Option<(u64, u64)>,
     approval: Option<Approval>,
     problem: Option<InstallProblem>,
+    summary: Option<registry::Summary>,
+    repository: &'static str,
 }
 
 #[derive(Serialize)]
@@ -684,6 +686,11 @@ pub async fn addon_list(
                 Some(Activity::InstallFailed { problem, .. }) => Some(*problem),
                 _ => None,
             },
+            summary: registry
+                .as_ref()
+                .and_then(|registry| registry.docs(addon))
+                .map(|docs| docs.summary.clone()),
+            repository: addon.repository.trim_start_matches('/'),
             approval: match &state.activity {
                 Some(Activity::AwaitingApproval { approval }) => Some(approval.clone()),
                 _ => None,

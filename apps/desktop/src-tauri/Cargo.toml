@@ -18,6 +18,8 @@ sha2 = "0.10"
 # Decode only bounded saved calculation PNG/JPEG outputs for helper context.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 base64 = "0.22"
+# Reuse the Markdown parser already pinned by goodtype-typst for addon README blocks.
+pulldown-cmark = { version = "0.13", default-features = false }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tempfile.workspace = true

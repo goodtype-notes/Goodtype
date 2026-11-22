@@ -103,6 +103,7 @@ fn main() {
             addons::addon_catalog,
             addons::addon_install,
             addons::addon_update,
+            addons::details::addon_details,
             addons::manager::addon_list,
             addons::manager::addon_approve,
             addons::manager::addon_reset_policy,

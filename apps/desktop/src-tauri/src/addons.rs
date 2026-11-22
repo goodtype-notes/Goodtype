@@ -22,6 +22,7 @@ use tauri::Manager;
 use crate::store::read_bounded;
 
 mod catalog;
+pub(crate) mod details;
 pub(crate) mod import;
 pub(crate) mod manager;
 mod manifest;

@@ -1741,6 +1741,7 @@ dependencies = [
  "goodtype-typst",
  "image",
  "native-tls",
+ "pulldown-cmark",
  "rmcp",
  "serde",
  "serde_json",
