@@ -1,5 +1,4 @@
 import type { AppSettings, HelperPermission } from "../settings";
-import type { AddonManager } from "../ipc/addons";
 import { LANGUAGES, translate, formatNumber, type Translator } from "../i18n";
 import { paletteTools, type PaletteCommand } from "../notebook/palette";
 
@@ -25,10 +24,9 @@ import { paletteTools, type PaletteCommand } from "../notebook/palette";
  * diagnostic belongs in Settings rather than one tap from the page, but it is not a preference,
  * so it needs somewhere to send the request.
  */
-export type SettingActions = { openMetrics: () => void; changePython: () => void };
+export type SettingActions = { openMetrics: () => void; changePython: () => void; browseAddons?: () => void };
 
 export type SettingControl =
-  | { kind: "addon"; addonId: string; buttonLabel: string }
   | { kind: "addonPolicy"; preference: "autoCheck" | "allowDirectApply" }
   | {
       kind: "toggle";
@@ -77,7 +75,7 @@ export type SettingGroup = {
   items: SettingItem[];
 };
 
-export function settingGroups(t: Translator = translate, fonts: string[] = [], aiEnabled = false, addons?: AddonManager, language = "en"): SettingGroup[] { const groups: SettingGroup[] = [
+export function settingGroups(t: Translator = translate, fonts: string[] = [], aiEnabled = false): SettingGroup[] { const groups: SettingGroup[] = [
   {
     id: "appearance",
     title: t("workspace.appearance"),
@@ -405,12 +403,12 @@ export function settingGroups(t: Translator = translate, fonts: string[] = [], a
         keywords: t("addons.manager.search").split(" "),
         control: { kind: "addonPolicy", preference: "autoCheck" },
       },
-      ...(addons?.addons ?? []).map((addon): SettingItem => ({
-        id: `addons:${addon.id}`,
-        label: language === "de" ? addon.name.de : addon.name.en,
-        keywords: [addon.id, addon.name.en, addon.name.de, ...t("addons.manager.search").split(" ")],
-        control: { kind: "addon", addonId: addon.id, buttonLabel: t("addons.manager.manage") },
-      })),
+      {
+        id: "addons:browse",
+        label: t("addons.manager.title"),
+        keywords: t("addons.manager.search").split(" "),
+        control: { kind: "action", buttonLabel: t("addons.store.browse"), run: actions => actions.browseAddons?.() },
+      },
     ],
   });
   if (aiEnabled) return groups;
@@ -465,7 +463,8 @@ export function searchSettings(query: string, groups = settingGroups()): Setting
   return groups.flatMap((group) =>
     group.items.map((item) => ({ group, item })),
   ).filter(({ group, item }) => {
-    const haystack = [group.title, item.label, item.hint ?? "", ...(item.keywords ?? [])]
+    const actionLabel = item.control.kind === "action" ? item.control.buttonLabel : "";
+    const haystack = [group.title, item.label, actionLabel, item.hint ?? "", ...(item.keywords ?? [])]
       .join(" ")
       .toLowerCase();
     return words.every((word) => haystack.includes(word));

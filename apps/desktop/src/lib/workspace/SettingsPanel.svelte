@@ -1,12 +1,11 @@
 <script lang="ts">
   import ConfirmDialog from "./ConfirmDialog.svelte";
-  import AddonManagerSheet from "./AddonManager.svelte";
-  import { checkAddonRegistry, listAddons, resetAddonPolicy, setAddonAutoCheck, setAddonDirectApply, type AddonManager } from "../ipc/addons";
+  import { listAddons, resetAddonPolicy, setAddonAutoCheck, setAddonDirectApply, type AddonManager } from "../ipc/addons";
   import CodexSettings from "../helper/CodexSettings.svelte";
   import HelperSetup from "../helper/HelperSetup.svelte";
   import { onMount, tick, untrack } from "svelte";
   import { typstFontFamilies } from "../ipc/typst";
-  import { locale, t } from "../i18n";
+  import { t } from "../i18n";
   import type { AppSettings } from "../settings";
   import {
     settingGroups,
@@ -56,12 +55,10 @@
     void typstFontFamilies().then(value => { fonts = value; }).catch(() => { fontLoadFailed = true; });
   });
   let addonManager = $state.raw<AddonManager>();
-  const groups = $derived(settingGroups($t, [...new Set([...fonts, settings.inlineTextFont, selectedBlockFont].filter((font): font is string => Boolean(font)))], settings.aiHelper.enabled, addonManager, $locale));
-  let addonId = $state<string>();
+  const groups = $derived(settingGroups($t, [...new Set([...fonts, settings.inlineTextFont, selectedBlockFont].filter((font): font is string => Boolean(font)))], settings.aiHelper.enabled));
   let addonError = $state<"loadFailed" | "policyFailed" | null>(null);
   let confirmReset = $state(false);
   let policyPending = $state(false);
-  const managedAddon = $derived(addonManager?.addons.find(addon => addon.id === addonId));
 
   let addonRequest = 0;
   async function refreshAddons() {
@@ -93,15 +90,6 @@
   $effect(() => {
     if (!("__TAURI_INTERNALS__" in window)) return;
     void refreshAddons();
-  });
-
-  $effect(() => {
-    if (!addonId) return;
-    void checkAddonRegistry("manager").catch(() => {}).finally(() => {
-      void refreshAddons();
-    });
-    const timer = setInterval(() => void refreshAddons(), 700);
-    return () => clearInterval(timer);
   });
 
   async function toggleAddonPolicy(preference: "autoCheck" | "allowDirectApply") {
@@ -212,10 +200,6 @@
       </button>
     {/if}
     {#if addonError}<p role="alert" class="hint">{$t(`addons.manager.${addonError}`)}</p>{/if}
-  {:else if item.control.kind === "addon"}
-    {@const id = item.control.addonId}
-    <button type="button" class="run" aria-label={$t("addons.manager.manageName", { name: item.label })}
-      onclick={() => addonId = id}>{item.control.buttonLabel}</button>
   {:else if item.control.kind === "action"}
     {@const control = item.control}
     <button type="button" class="run" onclick={() => control.run(actions)}>{control.buttonLabel}</button>
@@ -361,10 +345,6 @@
     </div>
   </div>
 </div>
-
-{#if managedAddon && addonManager}
-  <AddonManagerSheet addon={managedAddon} registry={addonManager.registry} refresh={refreshAddons} onClose={() => addonId = undefined} />
-{/if}
 
 {#if confirmReset}
   <ConfirmDialog title={$t("addons.manager.resetTitle")} detail={$t("addons.manager.resetDetail")}

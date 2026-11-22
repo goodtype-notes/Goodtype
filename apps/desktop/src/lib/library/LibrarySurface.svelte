@@ -54,6 +54,7 @@
     onStatus,
     showNotebookSetup = false,
     onSettings,
+    onAddons,
   }: {
     tauriAvailable: boolean;
     coverRevision?: number;
@@ -77,6 +78,7 @@
     onLocationChange?: (location: ShelfLocation) => void;
     onStatus: (message: UiText) => void;
     showNotebookSetup?: boolean;
+    onAddons?: () => void;
     onSettings?: () => void;
   } = $props();
 
@@ -762,8 +764,16 @@
          you would have to put the pen down for. Jumping between branches is what Favoriten and
          search are for, and moving is a drag onto a crumb or a folder tile. -->
 
-    {#if onSettings}
+    {#if onSettings || onAddons}
       <div class="rail-footer">
+        {#if onAddons}
+          <button type="button" class="settings-link" aria-label={$t("addons.manager.title")} title={$t("addons.manager.title")} onclick={onAddons}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 7 8-4 8 4v10l-8 4-8-4zM4 7l8 4 8-4m-8 4v10m-4-16 8 4" /></svg>
+            <span>{$t("addons.manager.title")}</span>
+            <svg class="settings-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+          </button>
+        {/if}
+        {#if onSettings}
         <button type="button" class="settings-link" aria-haspopup="dialog"
           aria-label={$t("library.settings")} title={$t("library.settings")} onclick={onSettings}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -773,6 +783,7 @@
           <span>{$t("library.settings")}</span>
           <svg class="settings-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
         </button>
+        {/if}
       </div>
     {/if}
   </aside>

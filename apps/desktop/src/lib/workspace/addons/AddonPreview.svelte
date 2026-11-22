@@ -2,12 +2,13 @@
   let { kind, image, percent = null, busy = false, large = false }: {
     kind: string | undefined; image?: string | null; percent?: number | null; busy?: boolean; large?: boolean;
   } = $props();
-  const safeImage = $derived(image && /^data:image\/(png|jpe?g|webp|gif);base64,/i.test(image) ? image : null);
+  let failedImage = $state<string>();
+  const safeImage = $derived(image && image !== failedImage && /^data:image\/(png|jpeg|webp);base64,/i.test(image) ? image : null);
 </script>
 
 <div class="preview" class:large aria-hidden="true">
   {#if safeImage}
-    <img src={safeImage} alt="" />
+    <img src={safeImage} alt="" onerror={() => { failedImage = safeImage ?? undefined; }} />
   {:else}
     <svg viewBox="0 0 72 48" fill="none" stroke-linecap="round" stroke-linejoin="round">
       {#if kind === "import"}
@@ -28,7 +29,7 @@
 <style>
   .preview { position: relative; display: grid; place-items: center; aspect-ratio: 16 / 10; background: var(--charcoal); border-radius: var(--radius); overflow: hidden; }
   .large { aspect-ratio: 16 / 9; border: 1px solid var(--edge); border-radius: var(--radius-lg); }
-  img { width: 100%; height: 100%; min-height: 0; object-fit: cover; }
+  img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   svg { width: 100px; max-width: 44%; color: var(--muted); stroke: currentColor; stroke-width: 1.2; }
   .large svg { width: 150px; }
   .secondary { stroke: var(--edge-strong); }
