@@ -236,6 +236,33 @@ bound to the same release, and the package checks above before switching the
 active pointer. Hash and extract from the same retained archive handle, which
 denies concurrent writes and deletion on Windows. Keep the previous verified version for local rollback.
 
+### Addon details and install approval
+
+An addon entry MAY include a closed `docs` object with `commit`, `summary` and
+`readme`, plus an optional `preview`. The commit MUST be 40 lowercase hex
+digits. Summary MUST contain exactly `en` and `de`, each 1 to 160 Unicode
+characters of plain text without control characters. Each asset descriptor
+MUST contain `path`, `size` and `sha256`. Paths are relative, with characters
+from `[A-Za-z0-9_./-]`, and contain no empty segments, `.` segments or
+`..` substrings. Sizes are exact byte counts, capped at 262,144 for README
+and 2,097,152 for preview. SHA-256 is 64 hexadecimal digits.
+
+When the user opens the addon details, the host fetches the pinned paths at
+the given commit on `raw.githubusercontent.com` over HTTPS without following
+redirects. It verifies both assets before caching them together in app-local
+data. An addon without `docs` uses the newest compatible release tag to fetch
+`README.md` from the same repository. That fallback has the same README size
+cap and no digest or preview. Cached details are available offline. The host
+renders only restricted Markdown blocks, drops HTML and embedded images, and
+preserves only HTTPS links. Optional previews require PNG, JPEG or WebP magic.
+
+The one-step install and update commands record the permissions the user
+approved in device-local addon policy before downloading. After verifying the
+manifest, the host requests further consent only if the manifest exceeds that
+approval. After a successful probe and swap, it enables the addon. Replacing
+an unverified installation requires a fresh approval and does not carry over
+its direct-apply preference.
+
 ## Session v0
 
 **Implemented on the host (Step 3a, launcher Step 3b).** Each session process

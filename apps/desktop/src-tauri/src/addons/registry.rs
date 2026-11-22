@@ -53,6 +53,77 @@ struct Entry {
     repository: String,
     public_key: String,
     versions: Vec<Release>,
+    #[serde(default, deserialize_with = "optional_object")]
+    docs: Option<Docs>,
+}
+
+fn optional_object<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Docs {
+    pub commit: String,
+    pub summary: Summary,
+    pub readme: DocAsset,
+    #[serde(default, deserialize_with = "optional_object")]
+    pub preview: Option<DocAsset>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Summary {
+    en: String,
+    de: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct DocAsset {
+    pub path: String,
+    pub size: usize,
+    pub sha256: String,
+}
+
+pub(super) const MAX_README: usize = 262_144;
+pub(super) const MAX_PREVIEW: usize = 2_097_152;
+
+impl DocAsset {
+    fn valid(&self, max_size: usize) -> bool {
+        !self.path.is_empty()
+            && !self.path.starts_with('/')
+            && !self.path.contains("..")
+            && self
+                .path
+                .split('/')
+                .all(|part| !part.is_empty() && part != ".")
+            && self
+                .path
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"_./-".contains(&b))
+            && self.size <= max_size
+            && update::is_hash(&self.sha256, 64)
+    }
+}
+
+impl Docs {
+    fn valid(&self) -> bool {
+        update::is_hash(&self.commit, 40)
+            && !self.commit.bytes().any(|b| b.is_ascii_uppercase())
+            && [&self.summary.en, &self.summary.de]
+                .into_iter()
+                .all(|text| {
+                    (1..=160).contains(&text.chars().count()) && !text.chars().any(char::is_control)
+                })
+            && self.readme.valid(MAX_README)
+            && self
+                .preview
+                .as_ref()
+                .is_none_or(|asset| asset.valid(MAX_PREVIEW))
+    }
 }
 
 #[derive(Clone, Deserialize)]
@@ -137,7 +208,7 @@ fn timestamp(value: &str) -> Option<(i64, &str)> {
     Some((days * 86_400 + hour * 3600 + minute * 60 + second, fraction))
 }
 
-fn valid_url(url: &str, repo: &str) -> bool {
+pub(super) fn valid_url(url: &str, repo: &str) -> bool {
     let Some(asset) = url.strip_prefix(&format!("https://github.com{repo}/releases/download/"))
     else {
         return false;
@@ -184,6 +255,7 @@ fn verify(bytes: &[u8], sig: &[u8], key: &[u8; 32]) -> Result<Index, Problem> {
         if !manifest::identifier(&entry.id)
             || !ids.insert(&entry.id)
             || !update::is_hash(&entry.public_key, 64)
+            || entry.docs.as_ref().is_some_and(|docs| !docs.valid())
             || !repo.is_some_and(|(owner, name)| {
                 !owner.is_empty()
                     && owner
@@ -257,6 +329,32 @@ pub(super) struct Registry {
 }
 
 impl Registry {
+    pub fn docs(&self, addon: &Addon) -> Option<&Docs> {
+        self.index
+            .addons
+            .iter()
+            .find(|entry| entry.id == addon.id)?
+            .docs
+            .as_ref()
+    }
+
+    pub fn details_release(&self, addon: &Addon) -> Option<&Release> {
+        self.compatible_releases(addon)?
+            .max_by_key(|release| numeric_version(&release.version))
+    }
+
+    fn compatible_releases(&self, addon: &Addon) -> Option<impl Iterator<Item = &Release>> {
+        Some(
+            self.index
+                .addons
+                .iter()
+                .find(|entry| entry.id == addon.id)?
+                .versions
+                .iter()
+                .filter(|release| release.api == manifest::API && release.target == TARGET),
+        )
+    }
+
     pub fn release(&self, addon: &Addon, installed: Option<&str>) -> Option<&Release> {
         self.release_at(addon, installed, false, now())
     }
@@ -276,13 +374,7 @@ impl Registry {
             return None;
         }
         let baseline = installed.and_then(numeric_version);
-        self.index
-            .addons
-            .iter()
-            .find(|entry| entry.id == addon.id)?
-            .versions
-            .iter()
-            .filter(|release| release.api == manifest::API && release.target == TARGET)
+        self.compatible_releases(addon)?
             .filter(|release| {
                 baseline.is_none_or(|version| {
                     let candidate = numeric_version(&release.version).unwrap();
@@ -726,6 +818,55 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn optional_docs_are_strict_and_validate_paths_and_limits() {
+        let mut index = fixture();
+        let entry = &mut index["addons"][0];
+        let docs = json!({
+            "commit": "a".repeat(40),
+            "summary": { "en": "A sample", "de": "Ein Beispiel" },
+            "readme": { "path": "ADDON.md", "size": MAX_README, "sha256": "0".repeat(64) },
+            "preview": { "path": "docs/preview.png", "size": MAX_PREVIEW, "sha256": "0".repeat(64) }
+        });
+        entry["docs"] = docs.clone();
+        assert!(signed(&index).unwrap().addons[0].docs.is_some());
+
+        for path in [
+            "../ADDON.md",
+            "/ADDON.md",
+            "a/../b",
+            "a/./b",
+            "a//b",
+            "a/b/",
+            "a\\b",
+            "a%2Fb",
+            "a..b",
+            "a?b",
+        ] {
+            index["addons"][0]["docs"]["readme"]["path"] = json!(path);
+            assert!(matches!(signed(&index), Err(Problem::Invalid)), "{path}");
+        }
+        for (field, value) in [
+            ("commit", json!("A".repeat(40))),
+            ("summary", json!({ "en": "Bad\nsummary", "de": "Beispiel" })),
+            (
+                "summary",
+                json!({ "en": "a".repeat(161), "de": "Beispiel" }),
+            ),
+            ("preview", Value::Null),
+            ("extra", json!(true)),
+        ] {
+            index["addons"][0]["docs"] = docs.clone();
+            index["addons"][0]["docs"][field] = value;
+            assert!(matches!(signed(&index), Err(Problem::Invalid)), "{field}");
+        }
+        index["addons"][0]["docs"] = docs;
+        index["addons"][0]["docs"]["preview"]["size"] = json!(MAX_PREVIEW + 1);
+        assert!(matches!(signed(&index), Err(Problem::Invalid)));
+        index["addons"][0]["docs"] = Value::Null;
+        assert!(matches!(signed(&index), Err(Problem::Invalid)));
     }
 
     #[test]

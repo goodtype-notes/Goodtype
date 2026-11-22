@@ -22,6 +22,7 @@ use tauri::Manager;
 use crate::store::read_bounded;
 
 mod catalog;
+pub(crate) mod details;
 pub(crate) mod import;
 pub(crate) mod manager;
 mod manifest;
@@ -827,7 +828,11 @@ fn install_with_policy(
     })();
     if result.is_err() {
         if let Some(target) = installed_target {
-            let _ = fs::remove_dir_all(target);
+            // Move the failed candidate aside before restoring the old directory.
+            // Deleting it first can partially fail on Windows and block the restore.
+            fs::rename(target, &staging).map_err(|error| {
+                format!("could not move the failed addon installation ({error})")
+            })?;
         }
         if let Some(previous) = retired {
             fs::rename(previous, dir.version_dir(release.version)?)
@@ -1115,6 +1120,7 @@ pub enum Activity {
     #[serde(rename_all = "camelCase")]
     InstallFailed {
         message: String,
+        problem: InstallProblem,
     },
     #[serde(rename_all = "camelCase")]
     Importing {
@@ -1145,6 +1151,16 @@ impl Activity {
                 | Self::Publishing
         )
     }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum InstallProblem {
+    Download,
+    Verify,
+    Probe,
+    Policy,
+    Unavailable,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1428,7 +1444,7 @@ pub fn importer_install(
     importers: tauri::State<'_, Importers>,
     tool: String,
 ) -> Result<(), String> {
-    start_install(app, importers, &tool, false)
+    start_install(app, importers, &tool, false, None)
 }
 
 #[tauri::command]
@@ -1451,7 +1467,27 @@ pub fn importer_update(
     importers: tauri::State<'_, Importers>,
     tool: String,
 ) -> Result<(), String> {
-    start_install(app, importers, &tool, true)
+    start_install(app, importers, &tool, true, None)
+}
+
+#[tauri::command]
+pub fn addon_install(
+    app: tauri::AppHandle,
+    importers: tauri::State<'_, Importers>,
+    id: String,
+    approved: Vec<manifest::Permission>,
+) -> Result<(), String> {
+    start_install(app, importers, &id, false, Some(approved))
+}
+
+#[tauri::command]
+pub fn addon_update(
+    app: tauri::AppHandle,
+    importers: tauri::State<'_, Importers>,
+    id: String,
+    approved: Vec<manifest::Permission>,
+) -> Result<(), String> {
+    start_install(app, importers, &id, true, Some(approved))
 }
 
 enum SelectedRelease<'a> {
@@ -1498,10 +1534,19 @@ fn start_install(
     importers: tauri::State<'_, Importers>,
     id: &str,
     updating: bool,
+    approved: Option<Vec<manifest::Permission>>,
 ) -> Result<(), String> {
     let (importer, tool) = importers.get(id)?;
     if !platform_supported() {
         return Err("the addon is available for Windows x64 only".into());
+    }
+    if let Some(approved) = &approved
+        && (approved.iter().collect::<HashSet<_>>().len() != approved.len()
+            || approved
+                .iter()
+                .any(|permission| !tool.permissions().contains(permission)))
+    {
+        return Err("invalid-approved-permissions".into());
     }
     let dir = install_dir(&app, tool)?;
     importer.begin(Activity::Installing)?;
@@ -1512,8 +1557,12 @@ fn start_install(
             Some(SelectedRelease::Signed(release)) => (Some(release.clone()), None, release.size),
             Some(SelectedRelease::Pinned(pin)) => (None, Some(pin), pin.size),
             None => {
-                importer.set(Activity::Idle);
-                return Err("no compatible addon release is available".into());
+                let message = "no compatible addon release is available".to_owned();
+                importer.set(Activity::InstallFailed {
+                    message: message.clone(),
+                    problem: InstallProblem::Unavailable,
+                });
+                return Err(message);
             }
         };
     importer.set(Activity::Downloading {
@@ -1526,7 +1575,11 @@ fn start_install(
         let set = |activity| state.lock().unwrap().activity = Some(activity);
         let archive = dir.scratch("download-").with_extension("part");
         let candidate = candidate.as_ref();
+        let mut problem = InstallProblem::Policy;
         let result = (|| {
+            if let Some(approved) = &approved {
+                manager::record_install_approval(&app, tool.id, approved)?;
+            }
             let release = candidate
                 .map(|release| PinnedRelease {
                     version: &release.version,
@@ -1537,9 +1590,11 @@ fn start_install(
                 })
                 .or(pin)
                 .ok_or("no compatible addon release is available")?;
+            problem = InstallProblem::Download;
             let hash = download(tool, &release, &archive, &cancel, &|received, total| {
                 set(Activity::Downloading { received, total });
             })?;
+            problem = InstallProblem::Verify;
             if !hash.eq_ignore_ascii_case(release.sha256) {
                 return Err("the downloaded package does not match the addon release".into());
             }
@@ -1555,8 +1610,18 @@ fn start_install(
                     }),
                 ..release
             };
-            manager::install(&app, &dir, &archive, &release)
+            manager::install(
+                &app,
+                &dir,
+                &archive,
+                &release,
+                approved.as_deref(),
+                &mut problem,
+            )
         })();
+        if approved.is_some() && result.is_err() {
+            manager::clear_install_approval(&app, tool.id);
+        }
         let _ = fs::remove_file(&archive);
         let mut state = state.lock().unwrap();
         state.activity = Some(match result {
@@ -1565,7 +1630,7 @@ fn start_install(
                 Activity::Idle
             }
             Err(message) if message == CANCELLED => Activity::Idle,
-            Err(message) => Activity::InstallFailed { message },
+            Err(message) => Activity::InstallFailed { message, problem },
         });
     });
     Ok(())
