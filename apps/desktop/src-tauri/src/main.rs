@@ -101,6 +101,8 @@ fn main() {
             library::set_library_favourite,
             library::list_library_favourites,
             addons::addon_catalog,
+            addons::addon_install,
+            addons::addon_update,
             addons::manager::addon_list,
             addons::manager::addon_approve,
             addons::manager::addon_reset_policy,

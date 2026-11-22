@@ -13,6 +13,9 @@ struct Policy {
     #[serde(default = "auto_check_default")]
     auto_check: bool,
     addons: BTreeMap<String, Preference>,
+    // A persisted record of consent for the current attempt. Never reused on retry or restart.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pending_install_approvals: BTreeMap<String, Vec<Permission>>,
 }
 
 fn auto_check_default() -> bool {
@@ -25,6 +28,7 @@ impl Default for Policy {
             allow_direct_apply: false,
             auto_check: auto_check_default(),
             addons: BTreeMap::new(),
+            pending_install_approvals: BTreeMap::new(),
         }
     }
 }
@@ -266,11 +270,45 @@ pub fn addon_approve(
     Ok(())
 }
 
+pub(super) fn record_install_approval(
+    app: &tauri::AppHandle,
+    id: &str,
+    approved: &[Permission],
+) -> Result<(), String> {
+    patch(app, |policy| {
+        policy
+            .pending_install_approvals
+            .insert(id.into(), approved.to_vec());
+    })
+}
+
+pub(super) fn clear_install_approval(app: &tauri::AppHandle, id: &str) {
+    if let Err(error) = patch(app, |policy| {
+        policy.pending_install_approvals.remove(id);
+    }) {
+        eprintln!("Could not clear addon install approval: {error}");
+    }
+}
+
+fn requires_approval(
+    approved: Option<&[Permission]>,
+    candidate: &Manifest,
+    previous: Option<&Manifest>,
+    recorded: bool,
+) -> bool {
+    match approved {
+        Some(approved) => candidate.permissions.iter().any(|p| !approved.contains(p)),
+        None => !recorded || !previous.is_some_and(|old| old.same_scope(candidate)),
+    }
+}
+
 pub(super) fn install(
     app: &tauri::AppHandle,
     dir: &InstallDir,
     archive: &Path,
     release: &PinnedRelease,
+    approved: Option<&[Permission]>,
+    problem: &mut InstallProblem,
 ) -> Result<String, String> {
     let previous = dir.active();
     let previous_declaration = previous
@@ -278,19 +316,30 @@ pub(super) fn install(
         .and_then(|(version, path)| installed(dir.1, path, version, true).ok());
     let importers = app.state::<Importers>();
     let (job, _) = importers.get(dir.1.id)?;
+    *problem = InstallProblem::Policy;
     let prior_policy = policy(app)?;
+    if let Some(approved) = approved
+        && prior_policy
+            .pending_install_approvals
+            .get(dir.1.id)
+            .map(Vec::as_slice)
+            != Some(approved)
+    {
+        return Err("install approval unavailable".into());
+    }
     let recorded = prior_policy.addons.contains_key(dir.1.id);
-    install_with_policy(
+    let phase = std::cell::Cell::new(InstallProblem::Verify);
+    let result = install_with_policy(
         dir,
         archive,
         release,
-        &|path| probe_tool(dir.1, path),
+        &|path| {
+            phase.set(InstallProblem::Probe);
+            probe_tool(dir.1, path)
+        },
         |candidate| {
-            if !recorded
-                || !previous_declaration
-                    .as_ref()
-                    .is_some_and(|old| old.same_scope(candidate))
-            {
+            phase.set(InstallProblem::Policy);
+            if requires_approval(approved, candidate, previous_declaration.as_ref(), recorded) {
                 await_approval(
                     job,
                     Approval {
@@ -309,15 +358,19 @@ pub(super) fn install(
             if job.cancel.load(Ordering::SeqCst) {
                 return Err(CANCELLED.into());
             }
+            phase.set(InstallProblem::Policy);
             activate(
                 app,
                 dir,
                 (previous.is_some(), previous_declaration.as_ref()),
                 release.version,
                 candidate,
+                approved.is_some(),
             )
         },
-    )
+    );
+    *problem = phase.get();
+    result
 }
 
 fn activate(
@@ -326,18 +379,31 @@ fn activate(
     previous: (bool, Option<&Manifest>),
     version: &str,
     candidate: &Manifest,
+    enable_after_install: bool,
 ) -> Result<(), String> {
     let _lock = POLICY.lock().unwrap();
     let path = crate::settings::config_file(app, CONFIG)?;
     let mut policy = read_policy(&path)?;
     let prior = policy.addons.get(dir.1.id).copied();
-    let next = install_preference(prior, previous.0, previous.1, candidate);
-    if Some(next) == prior {
+    let next = install_preference(
+        prior,
+        previous.0,
+        previous.1,
+        candidate,
+        enable_after_install,
+    );
+    let pending = policy.pending_install_approvals.remove(dir.1.id);
+    if Some(next) == prior && pending.is_none() {
         return dir.activate(version);
     }
     policy.addons.insert(dir.1.id.into(), next);
     write_policy(&path, &policy)?;
     if let Err(error) = dir.activate(version) {
+        if let Some(pending) = pending {
+            policy
+                .pending_install_approvals
+                .insert(dir.1.id.into(), pending);
+        }
         if let Some(prior) = prior {
             policy.addons.insert(dir.1.id.into(), prior);
         } else {
@@ -373,6 +439,7 @@ pub async fn addon_rollback(app: tauri::AppHandle, id: String) -> Result<(), Str
                 (active.is_some(), active_declaration.as_ref()),
                 &version,
                 &declaration,
+                false,
             )?;
             job.state.lock().unwrap().startup_invalid = false;
             Ok(())
@@ -389,17 +456,17 @@ fn install_preference(
     had_install: bool,
     previous: Option<&Manifest>,
     candidate: &Manifest,
+    enable_after_install: bool,
 ) -> Preference {
-    if !had_install {
-        Preference {
-            enabled: true,
-            direct_apply: false,
-        }
-    } else if previous.is_some_and(|old| old.same_scope(candidate)) {
+    let mut preference = if previous.is_some_and(|old| old.same_scope(candidate)) {
         prior.unwrap_or_default()
     } else {
         Preference::default()
+    };
+    if !had_install || enable_after_install {
+        preference.enabled = true;
     }
+    preference
 }
 
 pub(super) fn direct_apply(app: &tauri::AppHandle, id: &str) -> bool {
@@ -487,6 +554,7 @@ struct ManagedAddon {
     activity: &'static str,
     progress: Option<(u64, u64)>,
     approval: Option<Approval>,
+    problem: Option<InstallProblem>,
 }
 
 #[derive(Serialize)]
@@ -562,9 +630,6 @@ pub async fn addon_list(
             Activity::Downloading { received, total } => ("downloading", Some((*received, *total))),
             Activity::Installing => ("installing", None),
             Activity::AwaitingApproval { .. } => ("awaitingApproval", None),
-            Activity::InstallFailed { message } if message == "incompatible addon API" => {
-                ("updateIncompatible", None)
-            }
             Activity::InstallFailed { .. } => ("installFailed", None),
             Activity::Importing { .. } => ("importing", None),
             Activity::Publishing => ("publishing", None),
@@ -615,6 +680,10 @@ pub async fn addon_list(
             direct_apply: preference.direct_apply,
             activity,
             progress,
+            problem: match &state.activity {
+                Some(Activity::InstallFailed { problem, .. }) => Some(*problem),
+                _ => None,
+            },
             approval: match &state.activity {
                 Some(Activity::AwaitingApproval { approval }) => Some(approval.clone()),
                 _ => None,
@@ -874,6 +943,63 @@ mod tests {
     }
 
     #[test]
+    fn preapproval_enables_repaired_addon_without_preserving_unverified_direct_apply() {
+        let math = &catalog::MATH;
+        let candidate = math.declaration("0.1.0");
+        let prior = Preference {
+            enabled: true,
+            direct_apply: true,
+        };
+
+        assert!(requires_approval(None, &candidate, None, true));
+        assert_eq!(
+            install_preference(Some(prior), true, None, &candidate, false),
+            Preference::default()
+        );
+
+        assert!(!requires_approval(
+            Some(math.permissions()),
+            &candidate,
+            None,
+            true
+        ));
+        assert_eq!(
+            install_preference(Some(prior), true, None, &candidate, true),
+            Preference {
+                enabled: true,
+                direct_apply: false
+            }
+        );
+
+        // Previously installed scope never widens the user's approval for this attempt.
+        assert!(requires_approval(
+            Some(&[]),
+            &candidate,
+            Some(&candidate),
+            true
+        ));
+    }
+
+    #[test]
+    fn preapproval_is_persisted_for_only_the_named_addon() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join(CONFIG);
+        let permissions = catalog::MATH.permissions().to_vec();
+        patch_file(&path, |policy| {
+            policy
+                .pending_install_approvals
+                .insert("math".into(), permissions.clone());
+        })
+        .unwrap();
+        let saved = read_policy(&path).unwrap();
+        assert_eq!(
+            saved.pending_install_approvals,
+            BTreeMap::from([("math".into(), permissions)])
+        );
+        assert!(saved.addons.is_empty());
+    }
+
+    #[test]
     fn a_scope_change_revokes_enablement_and_direct_apply_consent() {
         for addon in [&catalog::GOODNOTES, &catalog::ONENOTE] {
             let old = addon.declaration(addon.legacy.unwrap());
@@ -883,19 +1009,19 @@ mod tests {
                 direct_apply: true,
             };
             assert_eq!(
-                install_preference(None, false, None, &next),
+                install_preference(None, false, None, &next, false),
                 Preference {
                     enabled: true,
                     direct_apply: false
                 }
             );
             assert_eq!(
-                install_preference(Some(prior), true, Some(&old), &next),
+                install_preference(Some(prior), true, Some(&old), &next, false),
                 prior
             );
             next.permissions.pop();
             assert_eq!(
-                install_preference(Some(prior), true, Some(&old), &next),
+                install_preference(Some(prior), true, Some(&old), &next, false),
                 Preference::default()
             );
         }

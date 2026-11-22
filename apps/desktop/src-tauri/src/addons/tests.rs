@@ -675,14 +675,36 @@ fn math_archive_uses_shared_install_and_detects_tampering() {
     fs::write(&archive, &bytes).unwrap();
     let release = pin(&MATH, &bytes);
     let dir = InstallDir(home.path().join("installed"), &MATH);
-    fs::create_dir_all(&dir.0).unwrap();
+    let legacy = dir.version_dir(VERSION).unwrap();
+    fs::create_dir_all(&legacy).unwrap();
+    fs::write(legacy.join(MATH.executable()), b"legacy math").unwrap();
+    dir.activate(VERSION).unwrap();
+    assert!(matches!(
+        manager::installed(&MATH, &legacy, VERSION, true),
+        Err(manifest::Error::NeedsReinstall)
+    ));
+
+    let job = Importer::default();
+    job.begin(Activity::Installing).unwrap();
+    let result = install_archive(&dir, &archive, &release, &|_| Err("probe failed".into()));
+    let message = result.unwrap_err();
+    job.set(Activity::InstallFailed {
+        message,
+        problem: InstallProblem::Probe,
+    });
+    assert_eq!(
+        fs::read(legacy.join(MATH.executable())).unwrap(),
+        b"legacy math"
+    );
+    assert!(!legacy.join(manifest::FILE).exists());
+
+    job.begin(Activity::Installing).unwrap();
     install_archive(&dir, &archive, &release, &|_| good_probe(&MATH)).unwrap();
     let (_, installed) = usable_installation(&dir).unwrap().unwrap();
+    assert_eq!(installed, legacy);
+    assert!(installed.join(manifest::FILE).is_file());
     fs::write(installed.join(MATH.executable()), b"tampered").unwrap();
     assert!(usable_installation(&dir).is_err());
-    // A failed replacement does not erase the installed version.
-    assert!(install_archive(&dir, &archive, &release, &|_| Err("probe failed".into())).is_err());
-    assert!(dir.active().is_some());
 }
 
 #[test]
@@ -1219,6 +1241,7 @@ fn dismiss_leaves_pending_or_reserved_jobs_intact() {
     }
     state.activity = Some(Activity::InstallFailed {
         message: "failed".into(),
+        problem: InstallProblem::Probe,
     });
     state.stopping_import = true;
     state.dismiss();
