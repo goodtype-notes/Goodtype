@@ -559,7 +559,7 @@
   }
 
   .subject { min-width: 0; flex: 1; }
-  .insert-shape { flex: none; padding-inline: 12px; }
+  .chip.insert-shape { flex: none; padding-inline: 12px; }
   .subject strong { display: block; font-size: var(--text-lg); font-weight: 600; }
 
   .destination {

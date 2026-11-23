@@ -369,7 +369,6 @@
   let addonRun = $state<{ key: number; pageId: string; strokeIds: string[]; command: SelectionCommand } | null>(null);
   let addonRuns = 0;
   let contributions = $state.raw<AddonContribution[]>([]);
-  let addPageTrigger: HTMLButtonElement;
   let moreTrigger: HTMLButtonElement;
   let formRun = $state<{ entries: ContributionEntry[]; position?: PagePosition; pageId: string; root: string }>();
   $effect(() => {

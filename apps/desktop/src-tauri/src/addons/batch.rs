@@ -1,8 +1,8 @@
 use super::{selection, *};
 use crate::helper::proposals::ProposalItem;
 use goodtype_core::{
-    ObjectFields, PageBackground, PageGeometry, PageObject, ShapeGeometry, ShapeStyle, storage,
-    template,
+    ObjectFields, PageBackground, PageGeometry, PageObject, ShapeGeometry, ShapePoint, ShapeStyle,
+    storage, template,
 };
 use serde_json::{Value, json};
 
@@ -187,30 +187,63 @@ fn leaf(root: &Path, page: &PageGeometry, op: Operation) -> Result<ProposalItem,
             geometry,
             style,
         } => {
-            geometry.validate().map_err(|_| INVALID)?;
-            style.validate().map_err(|_| INVALID)?;
-            if !fits(page, x, y, &geometry, style.stroke_width_pt / 2.0) {
+            let area = (page.width_pt, page.height_pt, style.stroke_width_pt / 2.0);
+            let object = shape_object(fresh_fields(x, y)?, geometry, style).map_err(|_| INVALID)?;
+            let PageObject::Shape { geometry, .. } = &object else {
+                unreachable!("shape_object builds a shape");
+            };
+            if !shape_within(x, y, geometry, area) {
                 return Err("addon-does-not-fit".into());
             }
-            Ok(preview_item(PageObject::Shape {
-                fields: fresh_fields(x, y)?,
-                geometry,
-                style,
-            }))
+            Ok(preview_item(object))
         }
         _ => Err(INVALID.into()),
     }
 }
 
-fn fits(page: &PageGeometry, x: f64, y: f64, shape: &ShapeGeometry, pad: f64) -> bool {
-    let contains = |px, py| {
-        (pad..=page.width_pt - pad).contains(&(x + px))
-            && (pad..=page.height_pt - pad).contains(&(y + py))
-    };
-    if !(0.0..=page.width_pt).contains(&x) || !(0.0..=page.height_pt).contains(&y) {
-        return false;
-    }
-    match shape {
+/// The one validation path for addon shapes, used by `addShape` batches and content packs.
+pub(super) fn validate_shape(
+    geometry: &ShapeGeometry,
+    style: &ShapeStyle,
+) -> Result<(), &'static str> {
+    geometry.validate()?;
+    style.validate()
+}
+
+/// The one construction path for addon shapes: an ordinary shape object after validation.
+pub(super) fn shape_object(
+    fields: ObjectFields,
+    geometry: ShapeGeometry,
+    style: ShapeStyle,
+) -> Result<PageObject, &'static str> {
+    validate_shape(&geometry, &style)?;
+    Ok(PageObject::Shape {
+        fields,
+        geometry,
+        style,
+    })
+}
+
+/// Whether the drawn outline at `(x, y)` stays inside `width × height`, keeping `pad` from each
+/// edge. Splines are measured by their curve extrema, so a handle may lie outside.
+pub(super) fn shape_within(
+    x: f64,
+    y: f64,
+    shape: &ShapeGeometry,
+    (width, height, pad): (f64, f64, f64),
+) -> bool {
+    const EPSILON: f64 = 1e-9;
+    shape_extent(shape).is_some_and(|[left, top, right, bottom]| {
+        x + left >= pad - EPSILON
+            && y + top >= pad - EPSILON
+            && x + right <= width - pad + EPSILON
+            && y + bottom <= height - pad + EPSILON
+    })
+}
+
+/// `[left, top, right, bottom]` of the drawn outline relative to the object origin.
+fn shape_extent(shape: &ShapeGeometry) -> Option<[f64; 4]> {
+    let extent = match shape {
         ShapeGeometry::Rectangle {
             width_pt,
             height_pt,
@@ -219,16 +252,78 @@ fn fits(page: &PageGeometry, x: f64, y: f64, shape: &ShapeGeometry, pad: f64) ->
         | ShapeGeometry::Ellipse {
             width_pt,
             height_pt,
-        } => contains(0.0, 0.0) && contains(*width_pt, *height_pt),
-        ShapeGeometry::Line { start, end } => contains(start.x, start.y) && contains(end.x, end.y),
-        ShapeGeometry::Spline { nodes, .. } => nodes.iter().all(|node| {
-            contains(node.point.x, node.point.y)
-                && [node.handle_in, node.handle_out]
-                    .into_iter()
-                    .flatten()
-                    .all(|handle| contains(node.point.x + handle.x, node.point.y + handle.y))
-        }),
+        } => [0.0, 0.0, *width_pt, *height_pt],
+        ShapeGeometry::Line { start, end } => [
+            start.x.min(end.x),
+            start.y.min(end.y),
+            start.x.max(end.x),
+            start.y.max(end.y),
+        ],
+        ShapeGeometry::Spline { nodes, closed } => {
+            let mut extent = [
+                f64::INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::NEG_INFINITY,
+            ];
+            let add = |point: ShapePoint, offset: ShapePoint| ShapePoint {
+                x: point.x + offset.x,
+                y: point.y + offset.y,
+            };
+            let successors = nodes
+                .iter()
+                .skip(1)
+                .chain(nodes.first().filter(|_| *closed));
+            for (from, to) in nodes.iter().zip(successors) {
+                let (p0, p3) = (from.point, to.point);
+                let p1 = from.handle_out.map_or(p0, |handle| add(p0, handle));
+                let p2 = to.handle_in.map_or(p3, |handle| add(p3, handle));
+                let (left, right) = cubic_range([p0.x, p1.x, p2.x, p3.x]);
+                let (top, bottom) = cubic_range([p0.y, p1.y, p2.y, p3.y]);
+                extent = [
+                    extent[0].min(left),
+                    extent[1].min(top),
+                    extent[2].max(right),
+                    extent[3].max(bottom),
+                ];
+            }
+            extent
+        }
+    };
+    extent
+        .iter()
+        .all(|value| value.is_finite())
+        .then_some(extent)
+}
+
+/// The range one axis of a cubic Bézier covers: its endpoints and the interior roots of its
+/// derivative.
+pub(super) fn cubic_range(points: [f64; 4]) -> (f64, f64) {
+    let [start, _, _, end] = points;
+    let (mut low, mut high) = (start.min(end), start.max(end));
+    // Normalize before forming differences to avoid overflow for large finite handles.
+    let norm = points.iter().copied().map(f64::abs).fold(1.0, f64::max);
+    let [p, q, r, s] = points.map(|value| value / norm);
+    let (first, middle, last) = (q - p, r - q, s - r);
+    let (a, b, c) = (first - 2.0 * middle + last, 2.0 * (middle - first), first);
+    let mut roots = [f64::NAN; 2];
+    if a == 0.0 {
+        roots[0] = -c / b;
+    } else {
+        let discriminant = b * b - 4.0 * a * c;
+        if discriminant >= 0.0 {
+            let ratio = -0.5 * (b + discriminant.sqrt().copysign(b));
+            roots = [ratio / a, c / ratio];
+        }
     }
+    for t in roots.into_iter().filter(|t| 0.0 < *t && *t < 1.0) {
+        let u = 1.0 - t;
+        let value =
+            (u * u * u * p + 3.0 * u * u * t * q + 3.0 * u * t * t * r + t * t * t * s) * norm;
+        low = low.min(value);
+        high = high.max(value);
+    }
+    (low, high)
 }
 
 fn fresh_fields(x: f64, y: f64) -> Result<ObjectFields, String> {

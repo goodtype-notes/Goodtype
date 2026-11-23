@@ -17,7 +17,7 @@
         ...object.style,
         strokeColor: object.style.strokeColor ?? color,
         strokeWidthPt: object.style.strokeWidthPt ?? width,
-        fillColor: object.style.fillColor ?? null,
+        fillColor: object.style.fillColor === "pen" ? color : object.style.fillColor ?? null,
         opacity: object.style.opacity ?? 1,
       }}
       <path d={shapePath(object.geometry)} transform={`translate(${object.x} ${object.y})`}

@@ -35,8 +35,8 @@ impl VerifiedUpdate {
 #[serde(rename_all = "camelCase")]
 struct Descriptor {
     version: String,
-    protocol_version: u64,
-    notebook_schema_version: u32,
+    protocol_version: Option<u64>,
+    notebook_schema_version: Option<u32>,
     target: String,
     source_dirty: bool,
     source_commit: String,
@@ -116,7 +116,11 @@ fn verify(
     stable_version(&descriptor.version)?;
     if descriptor.source_dirty
         || !is_hash(&descriptor.source_commit, 40)
-        || !is_hash(&descriptor.decoder_commit, 40)
+        || if tool.is_content() {
+            !descriptor.decoder_commit.is_empty()
+        } else {
+            !is_hash(&descriptor.decoder_commit, 40)
+        }
         || !is_hash(&descriptor.archive.sha256, 64)
     {
         return Err("importer update is not a clean, identified release".into());
@@ -132,8 +136,15 @@ fn verify(
     } else {
         SCHEMA_VERSION
     };
-    if descriptor.protocol_version != PROTOCOL_VERSION
-        || descriptor.notebook_schema_version != schema
+    let versions = if tool.is_content() {
+        (None, None)
+    } else {
+        (Some(PROTOCOL_VERSION), Some(schema))
+    };
+    if (
+        descriptor.protocol_version,
+        descriptor.notebook_schema_version,
+    ) != versions
         || descriptor.target != TARGET
     {
         return Err("the newest importer requires a different Goodtype version; the installed version was kept".into());
@@ -182,13 +193,14 @@ pub(super) fn descriptor_for(
         .rsplit_once('/')
         .ok_or("invalid addon asset URL")?;
     let allowed = |url: &str, redirected| super::download_url_allowed(tool, url, redirected);
-    let bytes = fetch(
-        &format!("{folder}/importer-update.json"),
-        MAX_DESCRIPTOR,
-        allowed,
-    )
-    .map_err(|problem| format!("cannot read the addon descriptor ({problem:?})"))?;
-    let signature = fetch(&format!("{folder}/importer-update.json.sig"), 64, allowed)
+    let name = if tool.is_content() {
+        "content-update.json"
+    } else {
+        "importer-update.json"
+    };
+    let bytes = fetch(&format!("{folder}/{name}"), MAX_DESCRIPTOR, allowed)
+        .map_err(|problem| format!("cannot read the addon descriptor ({problem:?})"))?;
+    let signature = fetch(&format!("{folder}/{name}.sig"), 64, allowed)
         .map_err(|problem| format!("cannot read the addon signature ({problem:?})"))?;
     let verified = verify(
         tool,
@@ -277,6 +289,34 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn content_descriptors_omit_importer_fields() {
+        use super::super::catalog::ENGINEERING;
+        let key = SigningKey::from_bytes(&[42; 32]);
+        let check = |tool: &Addon, value: &serde_json::Value| {
+            let bytes = serde_json::to_vec(value).unwrap();
+            verify(
+                tool,
+                &bytes,
+                &key.sign(&bytes).to_bytes(),
+                key.verifying_key().as_bytes(),
+            )
+        };
+        // The shape the content packs' sign_release.py writes.
+        let mut value = descriptor(&ENGINEERING);
+        let object = value.as_object_mut().unwrap();
+        object.remove("protocolVersion");
+        object.remove("notebookSchemaVersion");
+        value["decoderCommit"] = json!("");
+        assert_eq!(check(&ENGINEERING, &value).unwrap().version, "0.1.1");
+        assert!(check(&ENGINEERING, &descriptor(&ENGINEERING)).is_err());
+        value["decoderCommit"] = json!("2".repeat(40));
+        assert!(check(&ENGINEERING, &value).is_err());
+        let mut importer = descriptor(&GOODNOTES);
+        importer.as_object_mut().unwrap().remove("protocolVersion");
+        assert!(check(&GOODNOTES, &importer).is_err());
     }
 
     #[test]

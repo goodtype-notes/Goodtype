@@ -117,7 +117,7 @@ fn contribution_validation_checks_structure_labels_and_caps() {
             json!({"x":10,"y":0,"unknown":false}),
         ),
         ("/items/0/objects/2/source", json!("a".repeat(2049))),
-        ("/items/0/objects/2/y", json!(-9)),
+        ("/items/0/objects/2/y", json!(-25)),
     ] {
         let mut value = valid.clone();
         *value.pointer_mut(change.0).unwrap() = change.1;
@@ -429,7 +429,162 @@ fn content_archive_limits_apply_during_expansion() {
 
 #[test]
 fn spline_bounds_measure_the_curve_instead_of_its_handles() {
-    assert!(cubic_inside([0.0, 12.0, 12.0, 0.0], 10.0));
-    assert!(!cubic_inside([0.0, 16.0, 16.0, 0.0], 10.0));
-    assert!(!cubic_inside([1.0, -100.0, 12.0, 1.0], 10.0));
+    let inside = |points| {
+        let (low, high) = super::batch::cubic_range(points);
+        (0.0..=10.0).contains(&low) && (0.0..=10.0).contains(&high)
+    };
+    assert!(inside([0.0, 12.0, 12.0, 0.0]));
+    assert!(!inside([0.0, 16.0, 16.0, 0.0]));
+    assert!(!inside([1.0, -100.0, 12.0, 1.0]));
+    let empty = goodtype_core::ShapeGeometry::Spline {
+        nodes: vec![],
+        closed: true,
+    };
+    assert!(!super::batch::shape_within(
+        0.0,
+        0.0,
+        &empty,
+        (10.0, 10.0, 0.0)
+    ));
+}
+
+#[test]
+fn real_packs_install_from_checkout_and_insert_each_shape_library() {
+    let parent = Path::new(r"C:\Users\jugri\Documents\Programieren\Goodtype");
+    let folders = [
+        parent.join("Goodtype-Engineering-Shapes"),
+        parent.join("Goodtype-Study-Templates"),
+    ];
+    if folders.iter().any(|folder| !folder.is_dir()) {
+        eprintln!(
+            "Skipping real content packs test: expected both pack folders under {}",
+            parent.display()
+        );
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/notebooks/minimal");
+    let notebook = temp.path().join("book");
+    let reference = "references/lecture.pdf";
+    write(
+        &notebook,
+        reference,
+        &fs::read(fixture.join(reference)).unwrap(),
+    );
+    storage::create_notebook(&notebook, &storage::open_notebook(&fixture).unwrap()).unwrap();
+    let mut history = storage::NotebookHistory::default();
+    for folder in folders {
+        let (addon, version, archive) = sideload_archive(&folder).unwrap();
+        let hash = sha256_file(&archive).unwrap();
+        let release = PinnedRelease {
+            version: &version,
+            url: "",
+            size: fs::metadata(&archive).unwrap().len(),
+            sha256: &hash,
+            decoder_commit: "",
+        };
+        let dir = InstallDir(temp.path().join(addon.id), addon);
+        install_archive(&dir, &archive, &release, &|_| {
+            panic!("unexpected content probe")
+        })
+        .unwrap_or_else(|error| panic!("{}: {error}", folder.display()));
+        // The ZIP the pack's package.py builds must be what the host expects for a release.
+        let packaged = folder.join(format!(
+            "target/package/{}.zip",
+            super::package_folder(addon, &version)
+        ));
+        if packaged.is_file() {
+            let hash = sha256_file(&packaged).unwrap();
+            let release = PinnedRelease {
+                sha256: &hash,
+                size: fs::metadata(&packaged).unwrap().len(),
+                ..release
+            };
+            let zipped = InstallDir(temp.path().join(format!("{}-zip", addon.id)), addon);
+            install_archive(&zipped, &packaged, &release, &|_| {
+                panic!("unexpected content probe")
+            })
+            .unwrap_or_else(|error| panic!("{}: {error}", packaged.display()));
+        } else {
+            eprintln!(
+                "Skipping packaged ZIP check: run scripts/package.py in {}",
+                folder.display()
+            );
+        }
+        let (_, path) = dir.active().unwrap();
+        let declaration = manager::installed(addon, &path, &version, true).unwrap();
+        let pack = load(
+            addon,
+            &path,
+            &declaration.strings,
+            declaration.contents.as_ref().unwrap(),
+        )
+        .unwrap();
+        if addon.id == "study-templates" {
+            assert_eq!((pack.templates.len(), pack.palettes.len()), (6, 3));
+        } else {
+            assert_eq!(pack.shapes.len(), 5);
+            assert_eq!(
+                pack.shapes
+                    .iter()
+                    .map(|library| library.items.len())
+                    .sum::<usize>(),
+                60
+            );
+        }
+        for library in &pack.shapes {
+            let item = library
+                .items
+                .iter()
+                .find(|item| item.id == "junction")
+                .unwrap_or(&library.items[0]);
+            let page = storage::create_page(
+                &notebook,
+                "2026-11-23T00:00:00Z",
+                &storage::PagePosition::Last,
+                None,
+                None,
+            )
+            .unwrap();
+            storage::observe_page(&notebook, &page.page.id, &mut history).unwrap();
+            let request = ShapeInsertion {
+                addon_id: addon.id.into(),
+                library_id: library.id.clone(),
+                item_id: item.id.clone(),
+                revision: page.page.revision,
+                point: None,
+                scale: None,
+                pen_color: "#223344".into(),
+                pen_width_pt: 2.5,
+            };
+            let inserted = commit_shape(
+                &notebook,
+                &page.page.id,
+                &mut history,
+                &request,
+                item,
+                |source, width_pt| {
+                    let result = goodtype_typst::compile_block_granted(
+                        &notebook,
+                        &goodtype_typst::CompileRequest {
+                            source: source.into(),
+                            width_pt,
+                            generation: 0,
+                            allow_remote_packages: false,
+                        },
+                        &goodtype_typst::GrantedFiles::new(),
+                    )
+                    .unwrap();
+                    result.width_pt.zip(result.height_pt)
+                },
+            )
+            .unwrap_or_else(|error| panic!("{}/{}: {error}", library.id, item.id));
+            assert_eq!(inserted.selected_ids.len(), item.objects.len());
+            if item.id == "junction" {
+                assert!(inserted.result.snapshot.page.objects.iter().any(|object| matches!(
+                    object, PageObject::Shape { style, .. } if style.fill_color.as_deref() == Some("#223344")
+                )));
+            }
+        }
+    }
 }

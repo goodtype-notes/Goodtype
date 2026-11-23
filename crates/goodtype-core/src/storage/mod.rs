@@ -23,7 +23,6 @@ mod proposal;
 mod recovery;
 mod search;
 mod validate;
-pub use validate::raise_schema_version;
 mod write;
 
 #[cfg(test)]

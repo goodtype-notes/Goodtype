@@ -111,6 +111,7 @@ pub(super) static ENGINEERING: Addon = Addon {
     repository: "/Just8it/Goodtype-Engineering-Shapes",
     public_key: None,
     pinned: None,
+    contribution_surfaces: &[],
     kind: Kind::Content,
 };
 
@@ -125,5 +126,6 @@ pub(super) static STUDY: Addon = Addon {
     repository: "/Just8it/Goodtype-Study-Templates",
     public_key: None,
     pinned: None,
+    contribution_surfaces: &[],
     kind: Kind::Content,
 };

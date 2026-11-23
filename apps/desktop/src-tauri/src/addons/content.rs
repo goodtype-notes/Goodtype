@@ -175,45 +175,16 @@ impl Style {
         ShapeStyle {
             stroke_color: self.stroke_color.as_deref().unwrap_or(color).into(),
             stroke_width_pt: self.stroke_width_pt.unwrap_or(width),
-            fill_color: self.fill_color.clone(),
+            fill_color: self
+                .fill_color
+                .as_deref()
+                .map(|fill| if fill == "pen" { color } else { fill }.into()),
             opacity: self.opacity.unwrap_or(1.0),
             pattern: self.pattern.unwrap_or(StrokePattern::Solid),
             pattern_spacing: self.pattern_spacing.unwrap_or(1.0),
             pattern_offset_pt: self.pattern_offset_pt.unwrap_or(0.0),
         }
     }
-}
-
-// A Bezier handle may lie outside the item even when the curve stays inside. Check
-// the endpoints and the roots of its derivative on each axis.
-fn cubic_inside(points: [f64; 4], limit: f64) -> bool {
-    let within = |value| (0.0..=limit).contains(&value);
-    let [start, _, _, end] = points;
-    if points.into_iter().all(within) {
-        return true;
-    }
-    if !within(start) || !within(end) || points.iter().any(|value| !value.is_finite()) {
-        return false;
-    }
-    // Normalize before forming differences to avoid overflow for large finite handles.
-    let norm = points.iter().copied().map(f64::abs).fold(limit, f64::max);
-    let [p, q, r, s] = points.map(|value| value / norm);
-    let (first, middle, last) = (q - p, r - q, s - r);
-    let (a, b, c) = (first - 2.0 * middle + last, 2.0 * (middle - first), first);
-    let mut roots = [f64::NAN; 2];
-    if a == 0.0 {
-        roots[0] = -c / b;
-    } else {
-        let discriminant = b * b - 4.0 * a * c;
-        if discriminant >= 0.0 {
-            let ratio = -0.5 * (b + discriminant.sqrt().copysign(b));
-            roots = [ratio / a, c / ratio];
-        }
-    }
-    roots.into_iter().filter(|t| 0.0 < *t && *t < 1.0).all(|t| {
-        let u = 1.0 - t;
-        within((u * u * u * p + 3.0 * u * u * t * q + 3.0 * u * t * t * r + t * t * t * s) * norm)
-    })
 }
 
 impl Item {
@@ -225,8 +196,6 @@ impl Item {
             return Err("invalid content item dimensions or object count");
         }
         for object in &self.objects {
-            let inside =
-                |x, y| (0.0..=self.width_pt).contains(&x) && (0.0..=self.height_pt).contains(&y);
             let valid = match object {
                 ContentObject::Shape {
                     x,
@@ -234,37 +203,14 @@ impl Item {
                     geometry,
                     style,
                 } => {
-                    geometry.validate()?;
-                    style.resolve("#000000", 1.0).validate()?;
-                    match geometry {
-                        ShapeGeometry::Line { start, end } => {
-                            inside(x + start.x, y + start.y) && inside(x + end.x, y + end.y)
-                        }
-                        ShapeGeometry::Rectangle {
-                            width_pt,
-                            height_pt,
-                            ..
-                        }
-                        | ShapeGeometry::Ellipse {
-                            width_pt,
-                            height_pt,
-                        } => inside(*x, *y) && inside(x + width_pt, y + height_pt),
-                        ShapeGeometry::Spline { nodes, closed } => nodes
-                            .iter()
-                            .zip(nodes.iter().skip(1).chain(closed.then(|| &nodes[0])))
-                            .all(|(from, to)| {
-                                let (x0, y0) = (x + from.point.x, y + from.point.y);
-                                let (x3, y3) = (x + to.point.x, y + to.point.y);
-                                let (x1, y1) = from
-                                    .handle_out
-                                    .map_or((x0, y0), |handle| (x0 + handle.x, y0 + handle.y));
-                                let (x2, y2) = to
-                                    .handle_in
-                                    .map_or((x3, y3), |handle| (x3 + handle.x, y3 + handle.y));
-                                cubic_inside([x0, x1, x2, x3], self.width_pt)
-                                    && cubic_inside([y0, y1, y2, y3], self.height_pt)
-                            }),
-                    }
+                    // Strokes may extend past the item edge; the outline itself may not.
+                    super::batch::validate_shape(geometry, &style.resolve("#000000", 1.0))?;
+                    super::batch::shape_within(
+                        *x,
+                        *y,
+                        geometry,
+                        (self.width_pt, self.height_pt, 0.0),
+                    )
                 }
                 ContentObject::Typst {
                     x,
@@ -273,15 +219,16 @@ impl Item {
                     layout_width_pt,
                     scale,
                 } => {
+                    let overhang = self.width_pt.max(self.height_pt) / 2.0;
                     !source.is_empty()
                         && source.len() <= 2048
                         && (0.0 < *layout_width_pt
                             && *layout_width_pt <= goodtype_typst::MAX_BLOCK_WIDTH_PT)
                         && scale.is_finite()
                         && *scale > 0.0
-                        && (-self.width_pt / 2.0..=self.width_pt * 1.5).contains(x)
-                        && x + layout_width_pt * scale <= self.width_pt * 1.5
-                        && (-self.height_pt / 2.0..=self.height_pt * 1.5).contains(y)
+                        && (-overhang..=self.width_pt + overhang).contains(x)
+                        && x + layout_width_pt * scale <= self.width_pt + overhang
+                        && (-overhang..=self.height_pt + overhang).contains(y)
                 }
             };
             if !valid {
@@ -412,7 +359,7 @@ pub(super) fn load(
                     .template
                     .id
                     .strip_prefix(&prefix)
-                    .is_some_and(|id| !id.is_empty())
+                    .is_some_and(manifest::identifier)
                 || goodtype_core::template::validate(&item.template).is_err()
         })
     {
@@ -784,17 +731,18 @@ fn commit_shape(
                 y,
                 geometry,
                 style,
-            } => PageObject::Shape {
-                fields: next_fields(
+            } => super::batch::shape_object(
+                next_fields(
                     id.clone(),
                     left + x * scale,
                     top + y * scale,
                     scale,
                     group_id.clone(),
                 )?,
-                geometry: geometry.clone(),
-                style: style.resolve(&request.pen_color, request.pen_width_pt),
-            },
+                geometry.clone(),
+                style.resolve(&request.pen_color, request.pen_width_pt),
+            )
+            .map_err(invalid)?,
             ContentObject::Typst {
                 x,
                 y,
@@ -804,8 +752,9 @@ fn commit_shape(
             } => {
                 let (width, height) = compile_label(source, *layout_width_pt)
                     .ok_or_else(|| invalid("addon-compile-failed"))?;
-                if x + width * label_scale > item.width_pt * 1.5
-                    || y + height * label_scale > item.height_pt * 1.5
+                let overhang = item.width_pt.max(item.height_pt) / 2.0;
+                if x + width * label_scale > item.width_pt + overhang
+                    || y + height * label_scale > item.height_pt + overhang
                 {
                     return Err(invalid("content shape label exceeds bounds"));
                 }
@@ -889,8 +838,8 @@ pub async fn addon_sideload_content(
     Ok(true)
 }
 
-#[cfg(debug_assertions)]
-fn sideload(app: &tauri::AppHandle, folder: &Path) -> Result<(), String> {
+#[cfg(any(debug_assertions, test))]
+fn sideload_archive(folder: &Path) -> Result<(&'static Addon, String, tempfile::TempPath), String> {
     if !folder.is_absolute() {
         return Err("invalid content folder".into());
     }
@@ -899,20 +848,30 @@ fn sideload(app: &tauri::AppHandle, folder: &Path) -> Result<(), String> {
             return Err("content folder contains a link".into());
         }
     }
+    let manifest_file = folder.join(manifest::FILE);
+    let metadata = fs::symlink_metadata(&manifest_file).map_err(|err| err.to_string())?;
+    if is_package_link(&metadata) || !metadata.is_file() {
+        return Err("invalid content manifest file".into());
+    }
     let session::Strict(declaration) =
-        serde_json::from_slice(&read_bounded(&folder.join(manifest::FILE), 64 * 1024)?)
+        serde_json::from_slice(&read_bounded(&manifest_file, 64 * 1024)?)
             .map_err(|err| err.to_string())?;
     let id = declaration["id"].as_str().ok_or("invalid-manifest")?;
     let version = declaration["version"]
         .as_str()
         .filter(|s| manifest::release_version(s))
         .ok_or("invalid-manifest")?;
-    let importers = app.state::<Importers>();
-    let (job, addon) = importers.get(id)?;
-    if !addon.is_content() {
-        return Err("invalid-manifest".into());
-    }
-    let files = package_files(folder)?;
+    let addon = catalog::CATALOG
+        .iter()
+        .copied()
+        .find(|addon| addon.id == id && addon.is_content())
+        .ok_or("invalid-manifest")?;
+    let mut files = vec![manifest::FILE.to_string()];
+    files.extend(
+        package_files(&folder.join("content"))?
+            .into_iter()
+            .map(|path| format!("content/{path}")),
+    );
     if files.len() > MAX_ARCHIVE_ENTRIES {
         return Err("content folder has too many files".into());
     }
@@ -930,11 +889,20 @@ fn sideload(app: &tauri::AppHandle, folder: &Path) -> Result<(), String> {
         .map_err(|err| err.to_string())?;
         zip.write_all(&bytes).map_err(|err| err.to_string())?;
     }
-    let file = zip.finish().map_err(|err| err.to_string())?;
-    let size = file.metadata().map_err(|err| err.to_string())?.len();
-    let hash = sha256_file(temp.path())?;
+    zip.finish().map_err(|err| err.to_string())?;
+    // Close every handle: installation opens the archive without write sharing.
+    Ok((addon, version.into(), temp.into_temp_path()))
+}
+
+#[cfg(debug_assertions)]
+fn sideload(app: &tauri::AppHandle, folder: &Path) -> Result<(), String> {
+    let (addon, version, temp) = sideload_archive(folder)?;
+    let importers = app.state::<Importers>();
+    let (job, _) = importers.get(addon.id)?;
+    let size = fs::metadata(&temp).map_err(|err| err.to_string())?.len();
+    let hash = sha256_file(&temp)?;
     let release = PinnedRelease {
-        version,
+        version: &version,
         url: "",
         size,
         sha256: &hash,
@@ -944,11 +912,11 @@ fn sideload(app: &tauri::AppHandle, folder: &Path) -> Result<(), String> {
     job.begin(Activity::Installing).map_err(|_| "busy")?;
     let result = install_with_policy(
         &dir,
-        temp.path(),
+        &temp,
         &release,
         &|_| unreachable!("content packs never probe"),
         |_| Ok(()),
-        |manifest| manager::activate(app, &dir, (false, None), version, manifest, true),
+        |manifest| manager::activate(app, &dir, (false, None), &version, manifest, true),
     );
     let mut state = job.state.lock().unwrap();
     state.activity = Some(Activity::Idle);

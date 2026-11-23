@@ -91,7 +91,7 @@ or environment.
 
 Session manifests may declare up to 16 settings using `type: "toggle"` or
 `type: "choice"`. Each setting has an `id`, a `label` key, optional `hint` and
-`search` keys, and a required `default`. A choice supplies 2?8 entries with
+`search` keys, and a required `default`. A choice supplies 2–8 entries with
 unique kebab-case `value` tokens and localized `label` keys. The default must
 be one of the values. A toggle defaults to a Boolean. These are device-local
 preferences and do not grant capabilities. CLI importers retain empty settings.
@@ -361,20 +361,22 @@ or a change of notebook or grant.
 
 `insert-form` and `page-generator` require `add-page-objects` and a `form` array
 of up to 12 fields. A form supports the settings field types plus single-line
-`text` (`maxLength` 1?512 Unicode characters, optional `default`, optional
+`text` (`maxLength` 1–512 Unicode characters, optional `default`, optional
 `pattern` of `any`, `number` or `identifier`) and `number` (finite `min`,
 `max`, positive `step`, and an aligned `default`). The host sends
 `{command, form, settings, page: {widthPt, heightPt}, anchor: {x, y}}` with
 exactly the declared field values and no notebook content.
 
-Insert and generator results use `{batch: {operations: [?]}}`. The host
+Insert and generator results use `{batch: {operations: […]}}`. The host
 limits the total to 32 object operations, including group children, and accepts:
 
 - `{op: "addTypstBlock", source, xPt, yPt, layoutWidthPt}`.
 - `{op: "addShape", x, y, geometry, style}` using canonical shape geometry and style.
+  The drawn outline, measured by its Bézier extrema rather than its handles,
+  must stay half the stroke width inside the page.
 - `{op: "addGroup", children}` with one or more blocks or shapes and no nested group.
 - `{op: "addPage", template, ops}` exclusively for a generator. Each result
-  has 1?16 such operations. A null template means plain paper. Its `ops`,
+  has 1–16 such operations. A null template means plain paper. Its `ops`,
   which may be empty, contain objects and groups on the requested page size.
 
 Rust assigns IDs and validates the entire proposal before it can be published.
@@ -383,7 +385,7 @@ Insert proposals may skip review only when both direct-apply settings permit it.
 
 An `export` command requires `read-pages` and a
 `format: {extension, label, assets?}` descriptor. The lowercase alphanumeric
-extension is 1?8 characters and cannot be `goodtype`. After the user selects
+extension is 1–8 characters and cannot be `goodtype`. After the user selects
 current page or all pages and chooses a destination, the host sends
 `{command, settings, pages}`. Each page is canonical JSON with inline ink
 layers and Typst `source` replacing `sourcePath`. Image and PDF content is
@@ -467,7 +469,10 @@ can retain valid completed results after cancellation.
 Content packs use the same signed ZIP, staged install, activation and rollback as
 other addons. They omit `entrypoint` and supply empty `permissions`, `commands`
 and `settings`. No executable probe or addon process runs. Debug builds can
-load a local folder for a catalog-known content addon.
+load a local folder for a catalog-known content addon. Registry releases use
+`content-update.json` and `content-update.json.sig` beside the ZIP. The
+descriptor uses the release archive and source fields without importer version
+fields and with an empty `decoderCommit`.
 
 `contents` is an object with optional `shapes`, `templates`, `palettes`,
 `themes` and `typstPackages` arrays. At least one must be nonempty. JSON
@@ -481,12 +486,15 @@ manifest's English and German string tables.
   object supplies `type: "shape"`, local `x` and `y`, core `geometry` and
   partial `style`. A label supplies `type: "typst"`, local `x` and `y`,
   `source` (up to 2 KiB), `layoutWidthPt` and `scale`. The host bounds shapes
-  to the item and allows Typst labels to overhang each edge by half the
-  corresponding dimension. A pack may contain up to 512 items. Inserted
+  by their geometry, including the actual Bézier extrema. Strokes may
+  extend beyond the item. Typst labels may overhang each edge by half
+  the larger item dimension. Use `fillColor: "pen"` to inherit the active pen
+  colour, `null` for no fill, or a hex colour for a fixed fill. Shape files
+  sit directly in `content/shapes/`. A pack may contain up to 512 items. Inserted
   geometry, source and pen defaults become ordinary notebook objects.
 - Template files contain a `templates` array of `{label, template}` entries.
-  Definitions are ordinary page templates with IDs starting with the addon ID
-  and a period. A pack may contain up to 32 templates.
+  Definitions are ordinary page templates whose IDs are the addon ID, a period
+  and a kebab-case identifier. A pack may contain up to 32 templates.
 - Palette files contain a `palettes` array of `{id, label, colors}` entries,
   each with 2–24 unique six-digit hex colours. A pack may contain up to 16 palettes.
 - Theme files contain a `themes` array of `{id, label, tokens}` entries. Only
@@ -535,3 +543,7 @@ process manifests and the API version are unchanged.
 Step 4 activates session settings and adds insert forms, page generators and
 export formats, the `read-pages` permission and the three page-batch operations
 above. These changes are additive within `goodtype-api 0.1`.
+
+The Step 4/5 integration validates `addShape` objects and content-pack shapes
+through one host path. Content-pack descriptors omit `protocolVersion` and
+`notebookSchemaVersion` and carry an empty `decoderCommit`. No wire change.

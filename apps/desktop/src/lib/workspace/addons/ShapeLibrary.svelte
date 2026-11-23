@@ -120,7 +120,7 @@
   .library, aside { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
   aside { border-left: 1px solid var(--edge-soft); }
   .chips, .grid { display: flex; flex-wrap: wrap; gap: 6px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); align-content: start; min-height: min(210px, 40dvh); max-height: min(360px, 48dvh); overflow: auto; padding: 2px; margin: -2px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); grid-auto-rows: max-content; align-content: start; min-height: min(210px, 40dvh); max-height: min(360px, 48dvh); overflow: auto; padding: 2px; margin: -2px; }
   .shape { display: grid; gap: 6px; grid-template-rows: 54px auto; padding: 7px; background: var(--fill-soft); text-align: left; overflow-wrap: anywhere; }
   .thumbnail, .preview { display: block; padding: 6px; background: var(--paper); border-radius: var(--radius); }
   .preview { height: 110px; }
