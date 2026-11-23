@@ -268,7 +268,7 @@ export function createSelection(env: SelectionEnvironment) {
     // the press to the page and deselect the very shape about to be restyled.
     if (
       event.target instanceof Element &&
-      event.target.closest(".selection-actions, .instrument-palette, .palette-editor, .editor-dock")
+      event.target.closest(".selection-actions, .instrument-palette, .palette-editor, .editor-dock, .shape-panel")
     ) {
       return;
     }

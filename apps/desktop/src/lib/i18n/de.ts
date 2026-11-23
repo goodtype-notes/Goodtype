@@ -2,14 +2,13 @@ import type { Catalog } from "./en";
 
 export const de = {
   contentPacks: {
-    insertShape: "Form einfügen",
+    shapes: "Formen",
+    closeShapes: "Formen schließen",
     search: "Formen suchen",
-    all: "Alle Bibliotheken",
-    noShapesFound: "Keine Formen entsprechen der Suche.",
-    noShapes: "Installiere ein Formenpaket unter Addons, um diese Bibliothek zu füllen.",
-    preview: "Vorschau",
-    scale: "Maßstab",
-    insert: "Einfügen",
+    recent: "Zuletzt verwendet",
+    placeHint: "Ziehe eine Form auf die Seite oder tippe sie an, um Kopien zu platzieren.",
+    stampHint: "Tippe auf die Seite, um zu platzieren. Esc beendet.",
+    noShapesMatch: "Keine Formen passen zu „{{query}}“.",
     insertFailed: "Goodtype konnte die Form nicht einfügen.",
     theme: "Design",
     defaultTheme: "Standard",

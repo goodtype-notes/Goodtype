@@ -172,7 +172,7 @@ export function createNavigation(env: NavigationEnvironment) {
     // one-finger canvas pan captures the pointer before a reorder button can receive its click.
     if (
       event.target instanceof Element &&
-      event.target.closest(".selection-actions, .page-number button, .editor-dock")
+      event.target.closest(".selection-actions, .page-number button, .editor-dock, .shape-panel")
     ) {
       if (event.pointerType === "touch") touchTaps.cancel();
       return;

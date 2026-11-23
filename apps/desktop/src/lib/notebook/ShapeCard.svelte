@@ -30,7 +30,6 @@
     onPatternChange,
     onSpacingChange,
     onClose,
-    onInsertShape,
   }: {
     dock: PaletteDock;
     kind: ShapeKind;
@@ -52,7 +51,6 @@
     onPatternChange: (pattern: StrokePattern) => void;
     onSpacingChange: (spacing: number) => void;
     onClose: () => void;
-    onInsertShape?: () => void;
   } = $props();
 
   const PATTERNS: { id: StrokePattern; label: string; dasharray: number[] | null }[] = $derived([
@@ -226,9 +224,6 @@
       {/if}
     </section>
   </div>
-  {#if onInsertShape}
-    <button type="button" class="insert-shape" onclick={onInsertShape}>{$t("contentPacks.insertShape")}</button>
-  {/if}
 </div>
 
 <style>
@@ -299,7 +294,4 @@
   @media (prefers-reduced-motion: reduce) {
     .shape-grid button, .toggle span { transition: none; }
   }
-  .insert-shape { width: 100%; min-height: var(--control); background: var(--wash); color: var(--text); border: 0; border-radius: var(--radius); font: inherit; cursor: pointer; }
-  .insert-shape:hover { background: var(--wash-strong); }
-  .insert-shape:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 </style>

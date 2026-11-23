@@ -83,8 +83,10 @@
   import ConflictDialog from "../workspace/ConflictDialog.svelte";
   import RecoveryDialog from "../workspace/RecoveryDialog.svelte";
   import SearchOverlay from "../workspace/SearchOverlay.svelte";
-  import ShapeLibrary from "../workspace/addons/ShapeLibrary.svelte";
-  import { applyTheme, contentPacks, installedThemes, packText, type ContentPack, type ShapeChoice } from "../workspace/addons/content";
+  import ShapePanel from "../workspace/addons/ShapePanel.svelte";
+  import PackShapePreview from "../workspace/addons/PackShapePreview.svelte";
+  import { applyTheme, contentPacks, installedThemes, packText, shapeLibraries, type ContentPack, type PackShape, type ShapeChoice } from "../workspace/addons/content";
+  import { createTapTracker, dropPoint, loadRecent, nextStamp, previewMargin, rememberShape, saveRecent, sameShape, type ShapeDrag } from "../workspace/addons/shapePanel";
   import AddonStore from "../workspace/addons/AddonStore.svelte";
   import SettingsPanel from "../workspace/SettingsPanel.svelte";
   import LibrarySurface from "../library/LibrarySurface.svelte";
@@ -333,7 +335,8 @@
     get pageViewport() { return pageViewport; },
     set pageViewport(value) { pageViewport = value; },
     get routeHistory() { return session.routeHistory; },
-    get routeObjectPointer() { return selection.routeObjectPointer; },
+    // While stamping, a navigating finger pans or places; it never grabs the object under it.
+    get routeObjectPointer() { return shapeStamp ? () => {} : selection.routeObjectPointer; },
     get scheduleFocus() { return session.scheduleFocus; },
     get scheduleResidency() { return session.scheduleResidency; },
     get settings() { return settings; },
@@ -369,7 +372,7 @@
   let addonRun = $state<{ key: number; pageId: string; strokeIds: string[]; command: SelectionCommand } | null>(null);
   let addonRuns = 0;
   let contributions = $state.raw<AddonContribution[]>([]);
-  let moreTrigger: HTMLButtonElement;
+  let moreTrigger = $state<HTMLButtonElement>();
   let formRun = $state<{ entries: ContributionEntry[]; position?: PagePosition; pageId: string; root: string }>();
   $effect(() => {
     if (formRun && (formRun.pageId !== session.activePageId || formRun.root !== session.root)) formRun = undefined;
@@ -691,7 +694,15 @@
 
   /// First press selects the tool; pressing the one already held opens its card — the same
   /// select-then-edit gesture the swatches use. Nothing opens by accident mid-sentence.
+  /// Picking any tool, even the one already in hand, ends stamping.
+  function stopStamp() {
+    if (!shapeStamp) return;
+    shapeStamp = nextStamp(shapeStamp, { type: "tool" });
+    hideShapeGhost();
+  }
+
   function selectOrOpenTool(kind: "pen" | "highlighter", slot: number, tile: HTMLElement) {
+    stopStamp();
     const alreadyActive =
       kind === "highlighter" ? tool === "highlighter" : tool === "pen" && penPreset === slot;
     if (!alreadyActive) {
@@ -705,6 +716,7 @@
   }
 
   function selectEraser(tile: HTMLElement) {
+    stopStamp();
     if (tool !== "eraser") {
       closeToolCard();
       activateTool("eraser");
@@ -716,6 +728,7 @@
   }
 
   function selectLasso(tile: HTMLElement) {
+    stopStamp();
     if (!keepsSelection(tool)) { closeToolCard(); activateTool("lasso"); return; }
     const alreadyOpen = lassoEditor === tile;
     closeToolCard();
@@ -729,6 +742,7 @@
   }
 
   function selectOrOpenShape(tile: HTMLElement) {
+    stopStamp();
     paletteEditor = null;
     if (tool !== "shape") {
       closeToolCard();
@@ -740,6 +754,7 @@
   }
 
   function selectPlainTool(activate: () => void) {
+    stopStamp();
     closeToolCard();
     activate();
   }
@@ -837,8 +852,12 @@
       });
   }
   let addonsOpen = $state(false);
-  let shapeLibraryOpen = $state(false);
-  let shapeLibraryTrigger: HTMLElement | undefined;
+  let shapePanelOpen = $state(false);
+  let shapePanelTrigger = $state<HTMLButtonElement>();
+  /** The tile being stamped: every tap on a page places one copy until this is cleared. */
+  let shapeStamp = $state<ShapeChoice | null>(null);
+  let shapeRecent = $state<string[]>(loadRecent());
+  let shapeFailure = $state<UiText | null>(null);
   let packs = $state.raw<ContentPack[]>([]);
   let packsLoaded = $state(false);
   let packRequest = 0;
@@ -867,30 +886,165 @@
     }
   });
 
-  function openShapeLibrary() {
-    shapeLibraryTrigger = shapeCard?.trigger ?? addPageTrigger;
+  const shapeShelves = $derived(shapeLibraries(packs, $locale));
+  const shapePanelAvailable = $derived(shapeShelves.length > 0 && session.pageOpen && Boolean(session.root));
+  const shapePen = () => settings.penPresets[penPreset - 1] ?? DEFAULT_SETTINGS.penPresets[0];
+  const stampItem = $derived(shapeStamp
+    ? shapeShelves.flatMap(shelf => shelf.items).find(row => sameShape(row.choice, shapeStamp))?.item ?? null
+    : null);
+
+  function toggleShapePanel() {
+    if (shapePanelOpen) { closeShapePanel(); return; }
     addPageOpen = false;
     closeToolCard();
-    shapeLibraryOpen = true;
+    shapeFailure = null;
+    shapePanelOpen = true;
   }
 
-  function closeShapeLibrary() {
-    shapeLibraryOpen = false;
-    void tick().then(() => shapeLibraryTrigger?.focus());
+  function closeShapePanel() {
+    shapePanelOpen = false;
+    shapeStamp = nextStamp(shapeStamp, { type: "close" });
+    hideShapeGhost();
+    void tick().then(() => shapePanelTrigger?.focus());
   }
 
-  async function insertPackShape(choice: ShapeChoice, scale: number) {
+  $effect(() => {
+    if (!shapePanelAvailable && shapePanelOpen) { shapePanelOpen = false; shapeStamp = null; hideShapeGhost(); }
+  });
+  $effect(() => { if (session.activeCalculation || (shapeStamp && !stampItem)) shapeStamp = null; });
+
+  /// Docked above or below the palette's band, never over the palette itself.
+  let shapePanelInset = $state({ top: 12, bottom: 12 });
+  function measureShapePanelInset() {
+    const area = workspace?.getBoundingClientRect();
+    const bar = paletteElement?.getBoundingClientRect();
+    if (!area || !bar || paletteDock === "left" || paletteDock === "right") shapePanelInset = { top: 12, bottom: 12 };
+    else if (paletteDock === "bottom") shapePanelInset = { top: 12, bottom: Math.max(12, area.bottom - bar.top + 12) };
+    else shapePanelInset = { top: Math.max(12, bar.bottom - area.top + 12), bottom: 12 };
+  }
+  $effect(() => {
+    if (!shapePanelOpen || paletteDragging) return;
+    void paletteDock;
+    void session.activeCalculation;
+    void tick().then(measureShapePanelInset);
+    window.addEventListener("resize", measureShapePanelInset);
+    return () => window.removeEventListener("resize", measureShapePanelInset);
+  });
+
+  /// The visible part of the active page, for a placement made from the keyboard.
+  function visiblePageCentre() {
     const view = pageViewport?.getBoundingClientRect();
     const frame = pageFrame?.getBoundingClientRect();
     const left = view && frame ? Math.max(view.left, frame.left) : 0;
     const right = view && frame ? Math.min(view.right, frame.right) : 0;
     const top = view && frame ? Math.max(view.top, frame.top) : 0;
     const bottom = view && frame ? Math.min(view.bottom, frame.bottom) : 0;
-    const point = right > left && bottom > top
-      ? navigation.pagePointAt((left + right) / 2, (top + bottom) / 2) ?? undefined
-      : undefined;
-    const pen = settings.penPresets[penPreset - 1] ?? DEFAULT_SETTINGS.penPresets[0];
-    await session.insertContentShape({ ...choice, scale, point, penColor: pen.color, penWidthPt: pen.widthPt });
+    return right > left && bottom > top ? navigation.pagePointAt((left + right) / 2, (top + bottom) / 2) : null;
+  }
+
+  /// One placement is one Rust insertion and one undo step. `at` is a client point on page
+  /// `pageId`; without it the item lands in the middle of what is visible.
+  async function placePackShape(choice: ShapeChoice, at: { x: number; y: number; pageId: string } | null, select: boolean) {
+    if (session.pageInputLocked || !session.root) return;
+    shapeFailure = null;
+    try {
+      if (at && at.pageId !== session.activePageId) {
+        await session.activatePage(at.pageId);
+        await tick();
+        if (session.activePageId !== at.pageId) return;
+      }
+      if (session.activeCalculation) return;
+      const point = at ? dropPoint(navigation, pageFrame?.getBoundingClientRect(), at.x, at.y) : visiblePageCentre();
+      if (at && !point) return;
+      const pen = shapePen();
+      await session.insertContentShape({ ...choice, scale: 1, point: point ?? undefined, penColor: pen.color, penWidthPt: pen.widthPt }, select);
+      shapeRecent = rememberShape(shapeRecent, choice);
+      saveRecent(shapeRecent);
+    } catch {
+      shapeFailure = notice("contentPacks.insertFailed");
+    }
+  }
+
+  // The ghost follows hover and drags through its style directly, so moving the pointer never
+  // touches reactive state or IPC; only which item it shows is state.
+  let shapeGhost = $state.raw<PackShape | null>(null);
+  let shapeGhostElement = $state<HTMLElement>();
+  let shapeGhostAt = { x: 0, y: 0 };
+  let shapeDragging = false;
+  const placeGhost = (element: HTMLElement | undefined) => {
+    if (element) element.style.transform = `translate(${shapeGhostAt.x}px, ${shapeGhostAt.y}px) translate(-50%, -50%)`;
+  };
+  function showShapeGhost(item: PackShape, x: number, y: number) {
+    shapeGhostAt = { x, y };
+    if (shapeGhost !== item) shapeGhost = item;
+    placeGhost(shapeGhostElement);
+  }
+  function hideShapeGhost() {
+    if (shapeGhost) shapeGhost = null;
+  }
+
+  /// The page a stamp press lands on, or null when it is on chrome, a control or a cell page.
+  function stampPage(target: EventTarget | null): string | null {
+    if (!(target instanceof Element) || !target.closest(".page-frame")) return null;
+    if (target.closest(".shape-panel, .selection-actions, .page-number, .calculation-stack-item, button, input, textarea, [contenteditable=true], .cm-editor")) return null;
+    return target.closest<HTMLElement>("[data-page-id]")?.dataset.pageId ?? null;
+  }
+  const stampTaps = createTapTracker();
+  let stampPointer: number | null = null;
+
+  function surroundPointerDown(event: PointerEvent) {
+    const pageId = shapeStamp ? stampPage(event.target) : null;
+    if (pageId && (event.pointerType !== "mouse" || event.button === 0)) {
+      stampTaps.down(event.pointerId, event.clientX, event.clientY, event.timeStamp, pageId);
+      // Pen, mouse and a drawing finger would otherwise write or grab objects. A finger that only
+      // navigates keeps its pan, pinch and history taps; it places on lift if it stayed put.
+      if (event.pointerType !== "touch" || navigation.fingerDraws(event)) {
+        stampPointer = event.pointerId;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+    } else if (shapeStamp && event.pointerType === "touch") stampTaps.cancel();
+    navigation.workspacePointerDown(event);
+  }
+
+  function surroundPointerMove(event: PointerEvent) {
+    if (shapeStamp) {
+      stampTaps.move(event.pointerId, event.clientX, event.clientY);
+      if (!shapeDragging) {
+        if (stampItem && event.pointerType !== "touch" && stampPage(event.target)) showShapeGhost(stampItem, event.clientX, event.clientY);
+        else hideShapeGhost();
+      }
+      if (stampPointer === event.pointerId) { event.stopPropagation(); return; }
+    }
+    navigation.workspacePointerMove(event);
+  }
+
+  function surroundPointerEnd(event: PointerEvent) {
+    if (stampTaps.owns(event.pointerId)) {
+      const tap = stampTaps.up(event.pointerId, event.clientX, event.clientY, event.timeStamp, event.type !== "pointerup");
+      if (tap && shapeStamp) void placePackShape(shapeStamp, tap, false);
+    }
+    if (stampPointer === event.pointerId) {
+      stampPointer = null;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    navigation.workspacePointerEnd(event);
+  }
+
+  function dragPackShape(drag: ShapeDrag) {
+    if (drag.phase === "move") {
+      shapeDragging = true;
+      showShapeGhost(drag.row.item, drag.x, drag.y);
+      return;
+    }
+    shapeDragging = false;
+    hideShapeGhost();
+    if (drag.phase !== "drop") return;
+    const pageId = stampPage(document.elementFromPoint(drag.x, drag.y));
+    if (pageId) void placePackShape(drag.row.choice, { x: drag.x, y: drag.y, pageId }, true);
   }
   let addonReturn: HTMLElement | null = null;
   let workspaceElement: HTMLElement;
@@ -1312,6 +1466,7 @@
   }
 
   function activateTool(next: InkTool, preset?: 1 | 2) {
+    stopStamp();
     if (next === "eraser" && tool !== "eraser") toolBeforeEraser = { tool, preset: penPreset };
     if (next !== tool || (next === "pen" && preset !== undefined && preset !== penPreset)) {
       closeToolCard();
@@ -1704,7 +1859,13 @@
   });
 
   function historyShortcut(event: KeyboardEvent) {
-    if (formRun || event.defaultPrevented || addonsOpen || shapeLibraryOpen) return;
+    if (formRun || event.defaultPrevented || addonsOpen) return;
+    if (event.key === "Escape" && shapeStamp) {
+      event.preventDefault();
+      shapeStamp = nextStamp(shapeStamp, { type: "escape" });
+      hideShapeGhost();
+      return;
+    }
     // Every shortcut below edits, navigates or replaces the page; none may race a replacing reply.
     if (session.pageInputLocked) return;
     if (event.ctrlKey || event.metaKey) {
@@ -2057,6 +2218,13 @@
       {:else}
         <button class="text-action" type="button" onclick={session.reopen} disabled={session.busy}>{$t("workspace.reopenNotebook")}</button>
       {/if}
+      {#if shapePanelAvailable}
+        <button bind:this={shapePanelTrigger} class="icon-button" class:active={shapePanelOpen} type="button"
+          aria-label={$t("contentPacks.shapes")} aria-pressed={shapePanelOpen} title={$t("contentPacks.shapes")}
+          disabled={session.busy} onclick={toggleShapePanel}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="7.5" r="3.5" /><path d="M13.5 4h6.5v6.5h-6.5z" /><path d="m7.5 13.5 4 6.5h-8z" /><path d="M14 17h6M17 14v6" /></svg>
+        </button>
+      {/if}
       {#if session.pageOpen}
         <div class="add-page-anchor">
           <button bind:this={addPageTrigger} class="icon-button" class:active={addPageOpen} type="button" aria-label={$t("workspace.addPage")} aria-expanded={addPageOpen} title={$t("workspace.addPage")} disabled={session.busy} onclick={() => (addPageOpen = !addPageOpen)}>
@@ -2081,7 +2249,6 @@
               onToneChange={(next) => (addPageToneId = next)}
               onSizeChange={(next) => (addPageSizeId = next)}
               onOrientationChange={(next) => (addPageOrientation = next)}
-              onInsertShape={session.activeCalculation || !session.root ? undefined : openShapeLibrary}
               onClose={() => (addPageOpen = false)}
               generators={entries("page-generator").length ? generatorButtons : undefined}
             />
@@ -2175,11 +2342,12 @@
       class="workspace-surround"
       bind:this={workspace}
       aria-label={$t("workspace.fixedPageWorkspace")}
-      onpointerdowncapture={navigation.workspacePointerDown}
+      onpointerdowncapture={surroundPointerDown}
       oncontextmenu={selection.canvasContextMenu}
-      onpointermovecapture={navigation.workspacePointerMove}
-      onpointerupcapture={navigation.workspacePointerEnd}
-      onpointercancelcapture={navigation.workspacePointerEnd}
+      onpointermovecapture={surroundPointerMove}
+      onpointerupcapture={surroundPointerEnd}
+      onpointercancelcapture={surroundPointerEnd}
+      onpointerleave={() => { if (!shapeDragging) hideShapeGhost(); }}
       onlostpointercapture={navigation.releasePagePointer}
     >
       <div class="page-scroll-content" bind:this={pageViewport} onscroll={() => { session.lastScrollAt = performance.now(); selection.scheduleSelectionToolbar(); session.scheduleFocus(session.FOCUS_SETTLE_MS); }}>
@@ -2445,6 +2613,15 @@
         </div>
       {/if}
 
+      {#if shapePanelOpen && !session.activeCalculation}
+        <ShapePanel libraries={shapeShelves} recent={shapeRecent} stamp={shapeStamp} failure={shapeFailure}
+          dock={paletteDock === "right" ? "left" : "right"}
+          --shape-panel-top={`${shapePanelInset.top}px`} --shape-panel-bottom={`${shapePanelInset.bottom}px`}
+          onStamp={choice => { shapeFailure = null; shapeStamp = nextStamp(shapeStamp, { type: "tile", choice }); if (!shapeStamp) hideShapeGhost(); }}
+          onPlace={choice => void placePackShape(choice, null, true)}
+          onDrag={dragPackShape} onClose={closeShapePanel} />
+      {/if}
+
       {#if !session.activeCalculation}
       <NotebookPalette {workspace} {settings} {changeSettings} onStatus={next => { session.status = next; }}
         bind:paletteDock bind:paletteElement bind:paletteDragging {closeToolCard}
@@ -2504,7 +2681,6 @@
           <div class="palette-panel-anchor card" style:--anchor={`${shapeCard.anchor}px`}>
             <ShapeCard
               dock={paletteDock}
-              onInsertShape={session.activeCalculation || !session.root ? undefined : openShapeLibrary}
               kind={settings.shapeKind}
               fill={settings.shapeFill}
               constrain={settings.shapeConstrain}
@@ -2852,9 +3028,13 @@
   {/each}
 {/snippet}
 {#if addonsOpen}<AddonStore onClose={closeAddons} />{/if}
-{#if shapeLibraryOpen}
-  {@const pen = settings.penPresets[penPreset - 1] ?? DEFAULT_SETTINGS.penPresets[0]}
-  <ShapeLibrary {packs} color={pen.color} width={pen.widthPt} onInsert={insertPackShape} onClose={closeShapeLibrary} />
+{#if shapeGhost}
+  {@const pen = shapePen()}
+  {@const margin = previewMargin(shapeGhost, pen.widthPt)}
+  <div class="shape-ghost" aria-hidden="true" bind:this={shapeGhostElement} use:placeGhost
+    style:width={`${(shapeGhost.widthPt + 2 * margin) * zoom}px`} style:height={`${(shapeGhost.heightPt + 2 * margin) * zoom}px`}>
+    <PackShapePreview item={shapeGhost} color={pen.color} width={pen.widthPt} />
+  </div>
 {/if}
 
 <style>
@@ -2947,6 +3127,15 @@
 
   .workspace-split.panel-right {
     flex-direction: row-reverse;
+  }
+
+  .shape-ghost {
+    position: fixed;
+    z-index: 60;
+    top: 0;
+    left: 0;
+    opacity: 0.5;
+    pointer-events: none;
   }
 
   .workspace-surround {

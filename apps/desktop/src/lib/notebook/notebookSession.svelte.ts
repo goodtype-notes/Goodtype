@@ -1625,7 +1625,8 @@ export function createSession(env: SessionEnvironment) {
     return inserted;
   }
 
-  async function insertContentShape(request: ShapePlacement) {
+  /** `select: false` leaves nothing selected, so stamping can keep placing copies. */
+  async function insertContentShape(request: ShapePlacement, select = true) {
     const requestRoot = root, pageId = activePageId, generation = notebookGeneration;
     if (!requestRoot || !await persist()) throw new Error("flush_failed");
     replacingPageCount += 1;
@@ -1646,7 +1647,7 @@ export function createSession(env: SessionEnvironment) {
         canUndo = result.canUndo;
         canRedo = result.canRedo;
         env.selection.updateInkSelection([]);
-        env.selection.lassoObjectIds = result.selectedIds;
+        env.selection.lassoObjectIds = select ? result.selectedIds : [];
       } catch (error) { failure = error; }
     }).finally(() => { pendingTransactions -= 1; replacingPageCount -= 1; });
     await transactionQueue;

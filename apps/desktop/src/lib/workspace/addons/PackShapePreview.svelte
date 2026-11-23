@@ -1,13 +1,14 @@
 ﻿<script lang="ts">
   import { shapeDashArray, shapePath } from "../../shape/geometry";
   import type { PackShape } from "./content";
+  import { previewMargin } from "./shapePanel";
 
   let { item, color = "#1e232b", width = 1.6 }: {
     item: PackShape;
     color?: string;
     width?: number;
   } = $props();
-  const margin = $derived(Math.max(item.widthPt, item.heightPt) * 0.12 + width);
+  const margin = $derived(previewMargin(item, width));
 </script>
 
 <svg aria-hidden="true" viewBox={`${-margin} ${-margin} ${item.widthPt + 2 * margin} ${item.heightPt + 2 * margin}`}>
