@@ -71,7 +71,7 @@ JSON keys and duplicate declaration IDs within each declaration list.
 | `entrypoint` | Forward-slash relative path to the catalog-approved `.exe` inside the verified package. |
 | `transport` | Catalog-approved `legacy-import-cli` or `stdio-jsonrpc`. |
 | `permissions` | Unique array of catalog-approved literals from the vocabulary below. |
-| `commands` | 1–16 catalog-approved commands, each with `id`, `label` and `surface` (`library-import` or `ink-selection`). |
+| `commands` | 1–16 catalog-approved commands, each with `id`, `label` and `surface` (`library-import`, `ink-selection`, `insert-form`, `page-generator`, or `export`). |
 | `settings` | 0–16 descriptors, each with `id`, `label`, `type`, `default` and optional `hint` and `search` keys. |
 | `strings` | Exactly `en` and `de` string tables with identical key sets and at most 128 keys per table. |
 
@@ -88,9 +88,12 @@ unique and the default MUST equal one of them. Settings values MUST NOT
 denote paths, commands or secrets. The manifest supplies no launch arguments
 or environment.
 
-In `goodtype-api 0.1` settings descriptors are reserved: a host MUST reject a
-manifest whose `settings` array is not empty. A later beta API version enables
-them together with host rendering (rollout Step 4).
+Session manifests may declare up to 16 settings using `type: "toggle"` or
+`type: "choice"`. Each setting has an `id`, a `label` key, optional `hint` and
+`search` keys, and a required `default`. A choice supplies 2?8 entries with
+unique kebab-case `value` tokens and localized `label` keys. The default must
+be one of the values. A toggle defaults to a Boolean. These are device-local
+preferences and do not grant capabilities. CLI importers retain empty settings.
 
 Illustrative manifest for a future repackaged OneNote release.
 
@@ -144,6 +147,7 @@ dispatch, obtain the relevant grant and supply only granted data.
 | `derived-import-artwork` | Produce derived artwork from that file with separate user consent. |
 | `publish-import-batch` | Return staged ordinary notebooks for Rust to validate and publish in the Library. |
 | `selected-ink` | Read a scoped snapshot of the committed selection and page dimensions. |
+| `read-pages` | Read the selected pages for an explicit export. |
 | `add-page-objects` | Propose supported ordinary objects on the granted page, subject to host validation and commit policy. |
 
 A Windows Job Object bounds process resources and lifetime. Filesystem and
@@ -352,6 +356,41 @@ MUST NOT extend deadlines. A warm process MUST be restricted to one verified
 version and authorization context. End it on disable, remove, update, shutdown
 or a change of notebook or grant.
 
+### Declarative session contributions
+
+`insert-form` and `page-generator` require `add-page-objects` and a `form` array
+of up to 12 fields. A form supports the settings field types plus single-line
+`text` (`maxLength` 1?512 Unicode characters, optional `default`, optional
+`pattern` of `any`, `number` or `identifier`) and `number` (finite `min`,
+`max`, positive `step`, and an aligned `default`). The host sends
+`{command, form, settings, page: {widthPt, heightPt}, anchor: {x, y}}` with
+exactly the declared field values and no notebook content.
+
+Insert and generator results use `{batch: {operations: [?]}}`. The host
+limits the total to 32 object operations, including group children, and accepts:
+
+- `{op: "addTypstBlock", source, xPt, yPt, layoutWidthPt}`.
+- `{op: "addShape", x, y, geometry, style}` using canonical shape geometry and style.
+- `{op: "addGroup", children}` with one or more blocks or shapes and no nested group.
+- `{op: "addPage", template, ops}` exclusively for a generator. Each result
+  has 1?16 such operations. A null template means plain paper. Its `ops`,
+  which may be empty, contain objects and groups on the requested page size.
+
+Rust assigns IDs and validates the entire proposal before it can be published.
+A generated batch is reviewed and committed together at the selected position.
+Insert proposals may skip review only when both direct-apply settings permit it.
+
+An `export` command requires `read-pages` and a
+`format: {extension, label, assets?}` descriptor. The lowercase alphanumeric
+extension is 1?8 characters and cannot be `goodtype`. After the user selects
+current page or all pages and chooses a destination, the host sends
+`{command, settings, pages}`. Each page is canonical JSON with inline ink
+layers and Typst `source` replacing `sourcePath`. Image and PDF content is
+omitted unless `assets` is true, in which case the referenced assets are
+included in a path-keyed base64 map. The result is `{bytes: "<base64>"}`.
+Both directions remain within the session frame budget. A successful reply
+is decoded and atomically written to the single chosen destination.
+
 ## Installation security notes
 
 The host checks the archive against the built-in pin or verified release
@@ -452,3 +491,7 @@ one-time tree grant and added the host-side `addon-storage-exceeded` problem
 for the 256 MiB scratch cap. The wire contract is unchanged.
 
 Math catalog: Ed25519 key from `Just8it/Goodtype-ink-recognition` (0.1.0), no bootstrap pin; math installs from the signed index (index-3 onward, now also the bundled snapshot). Math sessions hold `registryRead` only (user-approved 2026-11-21). No wire change.
+
+Step 4 activates session settings and adds insert forms, page generators and
+export formats, the `read-pages` permission and the three page-batch operations
+above. These changes are additive within `goodtype-api 0.1`.

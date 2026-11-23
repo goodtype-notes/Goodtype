@@ -229,7 +229,7 @@ pub(crate) async fn on_notebook<T: Send + 'static>(
 
 /// As [`on_notebook`], for the operations scoped to one page: resolves the `(root, page)` history
 /// entry so that keying stays in one place.
-async fn on_page<T: Send + 'static>(
+pub(crate) async fn on_page<T: Send + 'static>(
     roots: &tauri::State<'_, AllowedRoots>,
     histories: &tauri::State<'_, NotebookHistories>,
     root: String,

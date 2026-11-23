@@ -1163,6 +1163,7 @@ fn legacy_fallback_requires_host_provenance_matching_the_pin_and_inventory() {
         i18n_prefix: GOODNOTES.i18n_prefix,
         en: GOODNOTES.en,
         de: GOODNOTES.de,
+        contribution_surfaces: &[],
         kind: Kind::Import {
             filter: "fixture",
             extensions: &["zip"],

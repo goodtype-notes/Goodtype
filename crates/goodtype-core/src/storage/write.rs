@@ -440,6 +440,14 @@ pub fn store_pdf_reference(
 }
 
 pub fn read_pdf_reference(selected_root: &Path, relative: &str) -> Result<Vec<u8>, StorageError> {
+    read_pdf_reference_bounded(selected_root, relative, crate::object::MAX_PDF_BYTES)
+}
+
+pub fn read_pdf_reference_bounded(
+    selected_root: &Path,
+    relative: &str,
+    maximum: usize,
+) -> Result<Vec<u8>, StorageError> {
     if !relative.to_ascii_lowercase().ends_with(".pdf") {
         return Err(StorageError::InvalidPath(relative.into()));
     }
@@ -447,7 +455,7 @@ pub fn read_pdf_reference(selected_root: &Path, relative: &str) -> Result<Vec<u8
     validate_stored_path(relative, SourceRole::Reference)?;
     read_limited(
         resolve_existing(&root, relative)?,
-        crate::object::MAX_PDF_BYTES,
+        maximum.min(crate::object::MAX_PDF_BYTES),
     )
 }
 

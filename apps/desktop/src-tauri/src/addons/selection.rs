@@ -64,8 +64,8 @@ pub(crate) async fn addon_selection_commands(
 
 #[derive(Clone, PartialEq)]
 pub(super) struct Authorization {
-    version: String,
-    path: PathBuf,
+    pub(super) version: String,
+    pub(super) path: PathBuf,
     epoch: u64,
 }
 
@@ -78,7 +78,7 @@ pub(super) fn authorization(
     authorized(app, addon, &state)
 }
 
-fn authorized(
+pub(super) fn authorized(
     app: &tauri::AppHandle,
     addon: &'static Addon,
     state: &State,
@@ -101,7 +101,7 @@ fn authorized(
 
 /// In memory only, so a run can poll it every 20 ms: disable, remove, update and rollback reserve
 /// the job and bump the epoch. Policy and install are read from disk at invocation and commit.
-fn revoked(job: &Importer, original: &Authorization) -> bool {
+pub(super) fn revoked(job: &Importer, original: &Authorization) -> bool {
     let state = job.state.lock().unwrap();
     state.busy() || state.authorization_epoch != original.epoch
 }
@@ -311,7 +311,7 @@ pub(super) fn items(
         .collect()
 }
 
-fn compile(
+pub(super) fn compile(
     root: &Path,
     geometry: &PageGeometry,
     id: String,
@@ -446,7 +446,7 @@ pub(crate) fn invoke(
                 app,
                 addon,
                 command,
-                capture.scope.clone(),
+                super::contributions::Invocation::Selection(capture.scope.clone()),
                 Some(&context),
                 cancelled,
             )
@@ -579,7 +579,7 @@ pub(crate) fn session_math(
             app,
             addon,
             "recognize-math",
-            scope,
+            super::contributions::Invocation::Selection(scope),
             Some(&context),
             cancelled,
         )

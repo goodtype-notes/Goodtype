@@ -31,6 +31,7 @@ fn main() {
         .manage(recognition::math_process::MathProcess::default())
         .manage(addons::session::Runtime::default())
         .manage(addons::selection::Proposals::default())
+        .manage(addons::contributions::PendingForms::default())
         .setup(|app| {
             let handle = app.handle().clone();
             if let Err(error) = addons::manager::startup(&handle) {
@@ -71,6 +72,13 @@ fn main() {
             notebook::invoke_addon_selection,
             notebook::insert_addon_proposal,
             addons::selection::addon_selection_commands,
+            addons::manager::addon_set_field,
+            addons::contributions::addon_contributions,
+            addons::export::addon_export,
+            addons::contributions::addon_form_preview,
+            addons::contributions::addon_form_insert,
+            addons::contributions::addon_form_add_pages,
+            addons::contributions::addon_form_dismiss,
             addons::selection::addon_cancel,
             addons::selection::addon_edit,
             addons::selection::addon_dismiss,
