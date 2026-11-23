@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { locale, t } from "../../i18n";
+  import { displayLocale, formatNumber, locale, t } from "../../i18n";
   import PackShapePreview from "./PackShapePreview.svelte";
   import { searchShapes, shapeLibraries, type ContentPack, type ShapeChoice } from "./content";
 
@@ -93,7 +93,7 @@
           {$t("contentPacks.scale")}
           <select bind:value={scale} disabled={busy}>
             {#each [0.25, 0.5, 1, 1.5, 2, 3, 4, 6, 8] as size}
-              <option value={size}>{new Intl.NumberFormat($locale, { style: "percent" }).format(size)}</option>
+              <option value={size}>{formatNumber(size, { style: "percent" }, $displayLocale)}</option>
             {/each}
           </select>
         </label>
