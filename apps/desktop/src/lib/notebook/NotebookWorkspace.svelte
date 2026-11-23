@@ -2585,8 +2585,10 @@
                         objects={session.activeSnapshot?.page.objects ?? []}
                         pointAt={navigation.pagePointAt}
                         onApply={(points) => {
-                          if (!session.pageInputLocked) void session.applyAddonObjectAction(activeTool.addon.addonId,
-                            { kind: "tool", id: activeTool.tool.id, points }, label);
+                          if (session.pageInputLocked) return;
+                          const pen = shapePen();
+                          void session.applyAddonObjectAction(activeTool.addon.addonId,
+                            { kind: "tool", id: activeTool.tool.id, points, pen: { strokeColor: pen.color, strokeWidthPt: pen.widthPt } }, label);
                         }} />
                     {/key}
                   {/if}

@@ -23,8 +23,21 @@ pub(crate) struct Request {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 enum Action {
-    Tool { id: String, points: Vec<Point> },
+    Tool {
+        id: String,
+        points: Vec<Point>,
+        #[serde(default)]
+        pen: Option<Pen>,
+    },
     Command { id: String, selected: Vec<String> },
+}
+
+/// The active pen, so a tool's new objects can match it (the addon decides whether to use it).
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Pen {
+    stroke_color: String,
+    stroke_width_pt: f64,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -189,7 +202,18 @@ fn capture(
     let objects = &page.objects;
     let find = |id: &str| objects.iter().find(|obj| obj.fields().id == id);
     match action {
-        Action::Tool { id, mut points } => {
+        Action::Tool {
+            id,
+            mut points,
+            pen,
+        } => {
+            if let Some(pen) = &pen
+                && (!goodtype_core::valid_hex_color(&pen.stroke_color)
+                    || !pen.stroke_width_pt.is_finite()
+                    || !(0.05..=64.0).contains(&pen.stroke_width_pt))
+            {
+                return Err("addon-invalid-response".into());
+            }
             if !(1..=2).contains(&points.len()) {
                 return Err("addon-invalid-response".into());
             }
@@ -218,7 +242,13 @@ fn capture(
                 Invocation::Tool {
                     points: points.len(),
                     snapped: !attached.is_empty(),
-                    params: json!({"page":geometry_value(page), "points":points, "objects":attached}),
+                    params: {
+                        let mut params = json!({"page":geometry_value(page), "points":points, "objects":attached});
+                        if let Some(pen) = pen {
+                            params["pen"] = json!(pen);
+                        }
+                        params
+                    },
                 },
                 None,
             ))
@@ -727,12 +757,17 @@ mod tests {
                 Action::Tool {
                     id: "fixture".into(),
                     points,
+                    pen: Some(Pen {
+                        stroke_color: "#123abc".into(),
+                        stroke_width_pt: 1.5,
+                    }),
                 },
             )
             .unwrap() else {
                 panic!("tool scope");
             };
             assert_eq!(points, count);
+            assert_eq!(params["pen"], json!({"strokeColor": "#123abc", "strokeWidthPt": 1.5}));
             if count == 2 {
                 assert_eq!(params["points"][0]["x"], 40.0);
                 assert_eq!(params["points"][0]["y"], 25.0);
@@ -741,6 +776,22 @@ mod tests {
                 assert_eq!(objects[0]["id"], "left");
                 assert!(objects[0].get("style").is_none());
             }
+        }
+    }
+
+    #[test]
+    fn tool_capture_rejects_an_invalid_pen() {
+        let snapshot = fixture();
+        for pen in [("red", 1.0), ("#123abc", f64::NAN), ("#123abc", 0.0)] {
+            let action = Action::Tool {
+                id: "fixture".into(),
+                points: vec![Point { x: 1.0, y: 2.0, attach: None }],
+                pen: Some(Pen {
+                    stroke_color: pen.0.into(),
+                    stroke_width_pt: pen.1,
+                }),
+            };
+            assert!(capture(&snapshot, "connectors", action).is_err());
         }
     }
 

@@ -197,7 +197,7 @@ export type AddonTool = {
 };
 export type AddonPoint = { x: number; y: number; attach: { objectId: string; port: number } | null };
 export type AddonObjectAction =
-  | { kind: "tool"; id: string; points: AddonPoint[] }
+  | { kind: "tool"; id: string; points: AddonPoint[]; pen?: { strokeColor: string; strokeWidthPt: number } }
   | { kind: "command"; id: string; selected: string[] };
 export const addonObjectAction = (root: string, pageId: string, revision: number, addonId: string, action: AddonObjectAction) =>
   invoke<import("./types").HistoryResult | null>("addon_object_action", { request: { root, pageId, revision, addonId, action } });
