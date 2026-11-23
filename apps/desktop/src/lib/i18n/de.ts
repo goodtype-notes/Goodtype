@@ -21,6 +21,11 @@ export const de = {
     loadFailed: "Goodtype konnte das lokale Inhaltspaket nicht laden.",
   },
   addons: {
+    objectActionApplied: "{{label}} angewendet",
+    objectActionFailed: "{{label}} konnte nicht ausgeführt werden",
+    detach: "Von {{addon}} lösen",
+    detached: "Von {{addon}} gelöst",
+    connectors: { label: "Verbinder", description: "Bauteile auf einer Seite verbinden." },
     engineeringShapes: { label: "Technische Formen", description: "Wiederverwendbare Symbole für technische Zeichnungen." },
     studyTemplates: { label: "Lernvorlagen", description: "Seitenlayouts zum Lernen und Mitschreiben." },
     contributions: {
@@ -155,6 +160,8 @@ export const de = {
         "derived-import-artwork": "Beim Import abgeleitete Grafiken erstellen",
         "publish-import-batch": "Neu importierte Notizbücher in die Bibliothek übernehmen",
         "selected-ink": "Die ausgewählten Stiftstriche lesen",
+        "own-objects": "Eigene Objekte erstellen und bearbeiten",
+        "react-to-changes": "Auf Änderungen an verknüpften Objekten reagieren",
         "read-pages": "Die zum Export ausgew?hlten Seiten lesen",
         "add-page-objects": "Vorschlagen, Objekte zu einer Seite hinzuzufügen"
       },

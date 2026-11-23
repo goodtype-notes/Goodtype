@@ -314,6 +314,8 @@ describe("schema version follows content, not the act of saving", () => {
       line("lead-a", 0, "resistor"), line("lead-b", 1, "resistor"), group("resistor", 2, ["lead-a", "lead-b"]),
       line("only", 3, "dot"), group("dot", 4, ["only"]),
     ];
+    objects[0].addonData = { connectors: { refs: ["lead-b", "dot"], data: { route: "straight" } } };
+    objects[0].ports = [{ x: 5, y: 0 }];
     const base: NotebookSnapshot = {
       manifest: { schemaVersion: 2, id: "notebook", title: "Notebook",
         pages: [{ id: "page-a", path: "pages/page-a.json", geometry: { widthPt: 595, heightPt: 842 } }],
@@ -342,5 +344,11 @@ describe("schema version follows content, not the act of saving", () => {
     expect(ids).toEqual(["lead-a", "resistor"]);
     expect(projected.page.objects.find(({ id }) => id === "resistor")).toMatchObject({ childIds: ["lead-a"] });
     expect(projected.page.readingOrder).toEqual(["resistor"]);
+    expect(projected.page.schemaVersion).toBe(5);
+    expect(projected.page.objects[0]).toMatchObject({
+      addonData: { connectors: { refs: [], data: { route: "straight" } } },
+      ports: [{ x: 5, y: 0 }],
+    });
+    expect(objects[0].addonData.connectors.refs).toEqual(["lead-b", "dot"]);
   });
 });

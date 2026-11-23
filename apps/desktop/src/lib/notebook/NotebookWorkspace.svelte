@@ -77,7 +77,10 @@
   import TranscriptionPanel from "./TranscriptionPanel.svelte";
   import AddonForm from "../workspace/addons/AddonForm.svelte";
   import AddonCommandPanel from "./AddonCommandPanel.svelte";
-  import { ADDON_AVAILABILITY_CHANGED, addonContributions, addonSelectionCommands, addonText, contributionText, type AddonContribution, type ContributionEntry, type SelectionCommand } from "../ipc/addons";
+  import { completeSelectedGroups } from "./clipboard";
+  import AddonToolSurface from "./AddonToolSurface.svelte";
+  import AddonSettings from "../workspace/addons/AddonSettings.svelte";
+  import { ADDON_AVAILABILITY_CHANGED, addonContributions, addonSelectionCommands, addonText, contributionText, type AddonContribution, type AddonTool, type ContributionEntry, type SelectionCommand } from "../ipc/addons";
   import { recognitionCapabilities, type InkPolylines, type RecognitionCapabilities } from "../ipc/recognition";
   import { inkPolylines, polylineBounds, shapePolylines, transcriptionPlacement } from "./transcription";
   import ConflictDialog from "../workspace/ConflictDialog.svelte";
@@ -281,6 +284,7 @@
     set activeInkLayerPath(value) { session.activeInkLayerPath = value; },
     get activePageId() { return session.activePageId; },
     get activeSnapshot() { return session.activeSnapshot; },
+    addCopiedGroups: (groups) => session.addCopiedGroups(groups),
     set activeSnapshot(value) { session.activeSnapshot = value; },
     get changeStrokes() { return session.changeStrokes; },
     get closeToolCard() { return closeToolCard; },
@@ -393,6 +397,28 @@
   };
   let zoom = $state(1);
   let tool = $state<InkTool>("pen");
+  let activeAddonTool = $state<{ addonId: string; toolId: string } | null>(null);
+  const addonTools = $derived(contributions.filter((addon) => addon.enabled)
+    .flatMap((addon) => (addon.tools ?? []).map((tool) => ({ addon, tool }))));
+  const selectedAddonTool = $derived(addonTools.find(({ addon, tool }) =>
+    addon.addonId === activeAddonTool?.addonId && tool.id === activeAddonTool.toolId));
+  const toolSettings = $derived(selectedAddonTool && {
+    ...selectedAddonTool.addon,
+    settings: selectedAddonTool.addon.settings.filter((field) => selectedAddonTool.tool.settings.includes(field.id)),
+  });
+  $effect(() => {
+    if (activeAddonTool && (!selectedAddonTool || session.activeCalculation)) activeAddonTool = null;
+  });
+
+  function selectAddonTool(addon: AddonContribution, chosen: AddonTool) {
+    const previous = activeAddonTool;
+    activateTool("pen");
+    closeToolCard();
+    if (previous?.addonId !== addon.addonId || previous.toolId !== chosen.id) {
+      activeAddonTool = { addonId: addon.addonId, toolId: chosen.id };
+      session.status = notice("workspace.active", { value1: contributionText(addon, chosen.label, $locale) });
+    }
+  }
   let strokeMetrics = $state<StrokePerformance[]>([]);
   let compileMs = $state<number | null>(null);
   let zoomFrameMs = $state<number | null>(null);
@@ -1466,6 +1492,7 @@
   }
 
   function activateTool(next: InkTool, preset?: 1 | 2) {
+    activeAddonTool = null;
     stopStamp();
     if (next === "eraser" && tool !== "eraser") toolBeforeEraser = { tool, preset: penPreset };
     if (next !== tool || (next === "pen" && preset !== undefined && preset !== penPreset)) {
@@ -1831,7 +1858,27 @@
 
   /** Ink-only selections on a canvas page; lassoed objects are never sent to an addon. */
   function selectionAddonCommands() {
-    if (!tauriAvailable || session.activeCalculation || !selection.selectedStrokeIds.length || selection.lassoObjectIds.length) return [];
+    if (!tauriAvailable || session.activeCalculation) return [];
+    const ids = [...selection.lassoObjectIds, selection.selectedShapeId, selection.selectedImageId, selection.selectedTypstId]
+      .filter((id): id is string => id !== null);
+    const objects = session.activeSnapshot?.page.objects ?? [];
+    ids.push(...completeSelectedGroups(objects, new Set(ids)).map(({ id }) => id));
+    const selected = new Set(ids);
+    const owners = new Set(session.activeSnapshot?.page.objects
+      .filter((object) => selected.has(object.id))
+      .flatMap((object) => Object.keys(object.addonData ?? {})));
+    if (owners.size) return [...contributions.filter((addon) => addon.enabled && owners.has(addon.addonId))
+      .flatMap((addon) => addon.commands.filter((command) => command.surface === "own-object").map((command) => {
+        const label = contributionText(addon, command.label, $locale);
+        return { id: `${addon.addonId}-${command.id}`, label,
+          onSelect: () => void session.applyAddonObjectAction(addon.addonId,
+            { kind: "command", id: command.id, selected: ids }, label) };
+      })), ...[...owners].map((addon) => ({
+      id: `detach-${addon}`,
+      label: $t("addons.detach", { addon }),
+      onSelect: () => void session.detachAddon(addon, ids),
+    }))];
+    if (!selection.selectedStrokeIds.length || ids.length) return [];
     return addonCommands.map(command => ({
       id: `${command.addonId}-${command.command}`,
       label: addonText(command.label, $locale),
@@ -1860,6 +1907,11 @@
 
   function historyShortcut(event: KeyboardEvent) {
     if (formRun || event.defaultPrevented || addonsOpen) return;
+    if (event.key === "Escape" && activeAddonTool) {
+      activateTool(tool);
+      event.preventDefault();
+      return;
+    }
     if (event.key === "Escape" && shapeStamp) {
       event.preventDefault();
       shapeStamp = nextStamp(shapeStamp, { type: "escape" });
@@ -2018,6 +2070,7 @@
   const ZOOM_STEP = 1.4;
 
   function currentToolLabel() {
+    if (selectedAddonTool) return contributionText(selectedAddonTool.addon, selectedAddonTool.tool.label, $locale);
     if (tool === "pen") return $t("workspace.pen2", { "penPreset": penPreset });
     if (tool === "select") return $t("workspace.inkSelection");
     return toolLabel(tool, $t);
@@ -2032,6 +2085,7 @@
   }
 
   function currentToolDetail() {
+    if (selectedAddonTool) return "";
     if (tool === "pen") return nibDetail(settings.penPresets[penPreset - 1]);
     if (tool === "highlighter") return nibDetail(settings.highlighter);
     if (tool === "eraser") return $t(settings.eraserMode === "precise" ? "workspace.preciseErasing" : "workspace.wholeStrokes");
@@ -2431,7 +2485,7 @@
                     pageWidthPt={box.widthPt}
                     pageHeightPt={box.heightPt}
                     {zoom}
-                    interactive={active}
+                    interactive={active && !activeAddonTool}
                     root={session.root}
                     sharedStyle={session.sharedStyleSource}
                     pageTextBaselineGrid={settings.pageTextBaselineGrid}
@@ -2523,6 +2577,19 @@
                         }
                       : undefined}
                   />
+                  {#if active && selectedAddonTool}
+                    {@const activeTool = selectedAddonTool}
+                    {@const label = contributionText(activeTool.addon, activeTool.tool.label, $locale)}
+                    {#key `${entry.id}/${activeTool.addon.addonId}/${activeTool.tool.id}`}
+                      <AddonToolSurface tool={activeTool.tool} {label} {zoom}
+                        objects={session.activeSnapshot?.page.objects ?? []}
+                        pointAt={navigation.pagePointAt}
+                        onApply={(points) => {
+                          if (!session.pageInputLocked) void session.applyAddonObjectAction(activeTool.addon.addonId,
+                            { kind: "tool", id: activeTool.tool.id, points }, label);
+                        }} />
+                    {/key}
+                  {/if}
                   {#if active && (region || (aiPanelOpen && codexSelection?.share.root === session.root && codexSelection.share.pageId === session.activePageId && !summaryDraft && !editorEntry))}
                     <HelperCrop crop={aiPanelOpen && codexSelection ? codexSelection.share.cropPt : region!} page={session.activeGeometry} {zoom} editable={aiPanelOpen}
                       onCommit={crop => { if (codexSelection) codexSelection = {...codexSelection, share: {...codexSelection.share, cropPt:crop}}; if(region) region=crop; cropVersion++; }} />
@@ -2740,10 +2807,15 @@
             activeCommands={activePaletteCommands}
             expandedCommand={expandedPaletteCommand}
             horizontal={paletteDock === "top" || paletteDock === "bottom"}
-            onActivate={(command, tile) => paletteCommands[command](tile)}
+            onActivate={(command, tile) => { activeAddonTool = null; paletteCommands[command](tile); }}
+            {addonTools} {activeAddonTool} onAddonTool={selectAddonTool}
           />
 
-          {#if paletteContext}
+          {#if toolSettings?.settings.length}
+            {#key toolSettings.addonId}
+              <div class="addon-tool-pocket"><AddonSettings addon={toolSettings} compact /></div>
+            {/key}
+          {:else if !activeAddonTool && paletteContext}
             <PalettePocket
               kind={paletteContext}
               horizontal={paletteDock === "top" || paletteDock === "bottom"}
@@ -2773,6 +2845,7 @@
             />
           {/if}        {/snippet}
 
+      {#if !activeAddonTool}
       {#if selection.contextMenu}
         <div class="context-actions" use:dismissable={{ onClose: () => (selection.contextMenu = null), swallow: true }}>
           {#if selection.selectedStrokeIds.length > 0 || selection.groupedStrokeIds.length > 0 || selection.lassoObjectIds.length > 0}
@@ -2820,6 +2893,7 @@
               pasteDisabled={!selection.clipboard}
               onDuplicate={selection.fromContext(selection.duplicateSelection)}
               onDelete={selection.fromContext(() => selection.deleteSelection())}
+              addonCommands={selectionAddonCommands().map(command => ({ ...command, onSelect: selection.fromContext(command.onSelect) }))}
             />
           {:else}
             <SelectionActions
@@ -2881,9 +2955,11 @@
           onCopy={() => void selection.copySelection()}
           onDuplicate={() => void selection.duplicateSelection()}
           onDelete={() => void selection.deleteSelection()}
+          addonCommands={selectionAddonCommands()}
         />
       {/if}
 
+      {/if}
       </NotebookPalette>
       {/if}
     </section>
@@ -3281,6 +3357,11 @@
 
   /* Where a popout from the bar hangs. `--anchor` is the tapped tile's centre within the bar;
      this knows only the four docks, and the thing it holds knows only its own contents. */
+  .addon-tool-pocket {
+    padding: 0 8px;
+    max-width: 180px;
+    overflow: auto;
+  }
   .palette-panel-anchor {
     position: absolute;
     bottom: calc(100% + 10px);

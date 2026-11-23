@@ -20,7 +20,7 @@ export type RecognitionAddon = {
   i18nPrefix: PrefixWith<"label">;
 };
 
-type Addon = ImportAddon | RecognitionAddon | { id: string; kind: "content"; i18nPrefix: PrefixWith<"label"> };
+type Addon = ImportAddon | RecognitionAddon | { id: string; kind: "content" | "objects"; i18nPrefix: PrefixWith<"label"> };
 
 let catalog: Promise<Addon[]> | undefined;
 
@@ -43,7 +43,7 @@ export async function mathRecognitionAddon(): Promise<RecognitionAddon | undefin
 
 export type AddonPermission =
   | "picked-import-file" | "derived-import-artwork" | "publish-import-batch"
-  | "selected-ink" | "add-page-objects" | "read-pages";
+  | "selected-ink" | "add-page-objects" | "read-pages" | "own-objects" | "react-to-changes";
 
 type Release = { version: string; sizeBytes: number };
 
@@ -191,17 +191,35 @@ export type AddonField = FieldLabel & (
   | { type: "text"; default: string; maxLength: number; pattern?: "any" | "number" | "identifier" | null }
   | { type: "number"; default: number; min: number; max: number; step: number }
 );
+export type AddonTool = {
+  id: string; label: string; icon: { paths: string[] };
+  kind: "place" | "connect" | "frame"; snap: "ports" | "none"; settings: string[];
+};
+export type AddonPoint = { x: number; y: number; attach: { objectId: string; port: number } | null };
+export type AddonObjectAction =
+  | { kind: "tool"; id: string; points: AddonPoint[] }
+  | { kind: "command"; id: string; selected: string[] };
+export const addonObjectAction = (root: string, pageId: string, revision: number, addonId: string, action: AddonObjectAction) =>
+  invoke<import("./types").HistoryResult | null>("addon_object_action", { request: { root, pageId, revision, addonId, action } });
+
+export const prepareAddonReactions = (root: string, pageId: string, revision: number, baseRevision: number, retry: boolean) =>
+  invoke<{ token: string | null; retry: boolean }>("addon_react", { root, pageId, revision, baseRevision, retry });
+export const applyAddonReaction = (token: string) =>
+  invoke<[import("./types").HistoryResult | null, boolean]>("addon_apply_reaction", { token });
+
 export type AddonContribution = {
   addonId: string;
   enabled: boolean;
   directApply?: boolean;
   commands: ContributionCommand[];
+  tools?: AddonTool[];
   strings: Record<"en" | "de", Record<string, string>>;
   settings: AddonField[];
   values: AddonValues;
 };
 export type ContributionCommand = { id: string; label: string } & (
   | { surface: "insert-form" | "page-generator"; form: AddonField[] }
+  | { surface: "own-object" }
   | { surface: "export"; format: { extension: string; label: string; assets: boolean } }
 );
 export type ContributionEntry = { addon: AddonContribution; command: ContributionCommand };

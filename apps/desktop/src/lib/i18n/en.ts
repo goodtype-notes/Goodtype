@@ -19,6 +19,11 @@ export const en = {
     loadFailed: "Goodtype could not load the local content pack.",
   },
   addons: {
+    objectActionApplied: "{{label}} applied",
+    objectActionFailed: "{{label}} could not be applied",
+    detach: "Detach from {{addon}}",
+    detached: "Detached from {{addon}}",
+    connectors: { label: "Connectors", description: "Connect parts on a page." },
     engineeringShapes: { label: "Engineering Shapes", description: "Reusable technical drawing symbols." },
     studyTemplates: { label: "Study Templates", description: "Page layouts for studying and taking notes." },
     contributions: {
@@ -153,6 +158,8 @@ export const en = {
         "derived-import-artwork": "Create derived artwork during import",
         "publish-import-batch": "Publish newly imported notebooks",
         "selected-ink": "Read the selected ink",
+        "own-objects": "Create and edit objects owned by this addon",
+        "react-to-changes": "Respond when objects this addon depends on change",
         "read-pages": "Read the pages you choose to export",
         "add-page-objects": "Propose adding objects to a page"
       },

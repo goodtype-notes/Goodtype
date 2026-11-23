@@ -84,6 +84,7 @@
     !prompt?.update || !prompt.addon.permissions.includes(permission)) ?? []);
   const summaryKeys = {
     goodnotes: "addons.goodnotes.description", onenote: "addons.onenote.description", math: "addons.math.description",
+    connectors: "addons.connectors.description",
     "engineering-shapes": "addons.engineeringShapes.description", "study-templates": "addons.studyTemplates.description",
   } as const;
 
@@ -105,6 +106,10 @@
         return previous && (previous.installed !== addon.installed || previous.status !== addon.status);
       });
       manager = next;
+      if (sideloadPending) {
+        const approval = next.addons.find((addon) => addon.approval);
+        if (approval && selected !== approval.id) void openDetail(approval);
+      }
       if (changed) {
         void refreshPacks();
         window.dispatchEvent(new Event(ADDON_AVAILABILITY_CHANGED));

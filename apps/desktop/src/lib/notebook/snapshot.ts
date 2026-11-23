@@ -9,6 +9,7 @@ import {
   type PageObject,
   type Stroke,
 } from "../model";
+import { rotatedVector } from "../geometry/coordinates";
 import type { NotebookSnapshot } from "../ipc/types";
 import type { BlockView, ImageView, PageTypstView, ShapeView } from "./pageView";
 import { inkLayersWithStrokes } from "./pageView";
@@ -43,6 +44,7 @@ type Projection = {
   pageTypst: EditablePageTypst | null;
   images: EditableImage[];
   shapes: ShapeView[];
+  copiedGroups?: Extract<PageObject, { type: "group" }>[];
   sharedStyle: { path: string; source: string } | null;
   mixedGroup: ManagedMixedGroup | null;
   groupedStrokeIds: string[];
@@ -176,7 +178,22 @@ export function projectSnapshot(input: Projection): NotebookSnapshot {
     });
   }
 
+  for (const group of input.copiedGroups ?? []) {
+    if (!emitted.has(group.id)) objects.push(group);
+  }
   reconcileGroups(objects, input.mixedGroup?.groupId, input.now);
+
+  moveGroupPorts(objects, oldById, input.now);
+
+  const present = new Set(objects.map((object) => object.id));
+  const deleted = new Set(oldObjects.filter((object) => !present.has(object.id)).map((object) => object.id));
+  for (const [index, object] of objects.entries()) {
+    if (!object.addonData || !Object.values(object.addonData).some(({ refs }) => refs.some((id) => deleted.has(id)))) continue;
+    const addonData = Object.fromEntries(Object.entries(object.addonData).map(([addon, entry]) =>
+      [addon, { ...entry, refs: entry.refs.filter((id) => !deleted.has(id)) }],
+    ));
+    objects[index] = { ...object, addonData };
+  }
 
   const topLevelIds = new Set(
     objects.filter((object) => object.groupId === null).map((object) => object.id),
@@ -385,10 +402,11 @@ function newTypst(
       block.id,
       block.readingOrder,
       block.zIndex,
-      mixedGroup?.active && mixedGroup.typstId === block.id ? mixedGroup.groupId : null,
+      mixedGroup?.active && mixedGroup.typstId === block.id ? mixedGroup.groupId : block.groupId ?? null,
       now,
     ),
     type: "typst",
+    ...(block.addonData !== undefined ? { addonData: block.addonData } : {}),
     x: block.x,
     y: block.y,
     rotation: block.rotation ?? 0,
@@ -420,8 +438,9 @@ function newImage(
   now: string,
 ): Extract<PageObject, { type: "image" }> {
   return {
-    ...newFields(image.id, image.readingOrder, image.zIndex, null, now),
+    ...newFields(image.id, image.readingOrder, image.zIndex, image.groupId ?? null, now),
     type: "image",
+    ...(image.addonData !== undefined ? { addonData: image.addonData } : {}),
     x: image.x,
     y: image.y,
     rotation: image.rotation ?? 0,
@@ -461,10 +480,44 @@ function reconcileGroups(objects: PageObject[], managedGroupId: string | undefin
   }
 }
 
+/**
+ * A pack's children render in page coordinates. When they all move by the same transform,
+ * carry the group's local port origin with them.
+ */
+function moveGroupPorts(objects: PageObject[], previous: ReadonlyMap<string, PageObject>, now: string) {
+  const next = new Map(objects.map((object) => [object.id, object]));
+  for (const [index, group] of objects.entries()) {
+    if (group.type !== "group" || group.ports === undefined) continue;
+    const childId = group.childIds[0];
+    const before = previous.get(childId);
+    const after = next.get(childId);
+    if (!before || !after) continue;
+    const scale = after.scale / before.scale;
+    const rotation = after.rotation - before.rotation;
+    const origin = (object: Pick<PageObject, "x" | "y">) => {
+      const offset = rotatedVector({ x: (object.x - before.x) * scale, y: (object.y - before.y) * scale }, rotation);
+      return { x: after.x + offset.x, y: after.y + offset.y };
+    };
+    if (scale === 1 && rotation === 0 && before.x === after.x && before.y === after.y) continue;
+    const close = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+    if (!group.childIds.every((id) => {
+      const old = previous.get(id), current = next.get(id);
+      if (!old || !current) return false;
+      const target = origin(old);
+      return close(target.x, current.x) && close(target.y, current.y)
+        && close(old.scale * scale, current.scale) && close(old.rotation + rotation, current.rotation);
+    })) continue;
+    objects[index] = { ...group, ...origin(group), scale: group.scale * scale,
+      rotation: group.rotation + rotation, modifiedAt: now };
+  }
+}
+
 function newShape(shape: ShapeView, now: string): Extract<PageObject, { type: "shape" }> {
   return {
-    ...newFields(shape.id, shape.readingOrder, shape.zIndex, null, now),
+    ...newFields(shape.id, shape.readingOrder, shape.zIndex, shape.groupId ?? null, now),
     type: "shape",
+    ...(shape.addonData !== undefined ? { addonData: shape.addonData } : {}),
+    ...(shape.ports !== undefined ? { ports: shape.ports } : {}),
     x: shape.x,
     y: shape.y,
     rotation: shape.rotation,

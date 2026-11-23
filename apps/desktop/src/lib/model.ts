@@ -101,7 +101,8 @@ export const MIN_SUPPORTED_SCHEMA_VERSION = 1;
 export const SHAPE_SCHEMA_VERSION = 2;
 export const BINARY_INK_SCHEMA_VERSION = 3;
 export const CALCULATION_SCHEMA_VERSION = 4;
-export const SCHEMA_VERSION = CALCULATION_SCHEMA_VERSION;
+export const ADDON_DATA_SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = ADDON_DATA_SCHEMA_VERSION;
 
 /**
  * The version a page's content obliges its notebook to be written at.
@@ -110,6 +111,9 @@ export const SCHEMA_VERSION = CALCULATION_SCHEMA_VERSION;
  * notebook-wide maximum. Rust additionally upgrades a confirmed legacy page to binary ink.
  */
 export function requiredSchemaVersion(objects: readonly PageObject[]): number {
+  if (objects.some((object) => object.addonData !== undefined || object.ports !== undefined)) {
+    return ADDON_DATA_SCHEMA_VERSION;
+  }
   return objects.some((object) => object.type === "shape")
     ? SHAPE_SCHEMA_VERSION
     : MIN_SUPPORTED_SCHEMA_VERSION;
@@ -118,7 +122,11 @@ export const DEFAULT_INK_Z_INDEX = 1_000_000;
 
 export type InkLayerReference = { id: string; path: string };
 
+export type AddonData = Record<string, { refs: string[]; data: unknown }>;
+
 export type ObjectFields = {
+  addonData?: AddonData;
+  ports?: ShapePoint[];
   id: string;
   x: number;
   y: number;

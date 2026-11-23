@@ -23,7 +23,7 @@
   let selected = $state(0);
   const entry = $derived(entries[selected]);
   const skipReview = $derived(!generator && entry?.addon.directApply === true);
-  const fields = $derived(entry && entry.command.surface !== "export" ? entry.command.form : []);
+  const fields = $derived(entry && (entry.command.surface === "insert-form" || entry.command.surface === "page-generator") ? entry.command.form : []);
   let values = $state<AddonValues>({});
   let preview = $state<FormPreview>();
   let pending = $state(false);

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from "../i18n";
+  import { t, locale } from "../i18n";
   import { centredDash } from "./dash";
   import type { StrokePattern } from "../model";
   import type { AppSettings, PenPreset } from "../settings";
@@ -11,7 +11,12 @@
   } from "./instruments";
   import { visiblePaletteTools, type PaletteCommand } from "./palette";
 
+  import { contributionText, type AddonContribution, type AddonTool } from "../ipc/addons";
+
   type Props = {
+    addonTools?: { addon: AddonContribution; tool: AddonTool }[];
+    activeAddonTool?: { addonId: string; toolId: string } | null;
+    onAddonTool?: (addon: AddonContribution, tool: AddonTool) => void;
     settings: AppSettings;
     activeCommands: readonly PaletteCommand[];
     expandedCommand: PaletteCommand | null;
@@ -20,7 +25,7 @@
     onActivate: (command: PaletteCommand, tile: HTMLElement) => void;
   };
 
-  let { settings, activeCommands, expandedCommand, horizontal, onActivate }: Props = $props();
+  let { settings, activeCommands, expandedCommand, horizontal, onActivate, addonTools = [], activeAddonTool, onAddonTool }: Props = $props();
 
   // The mark under each instrument is the line it will actually lay down: the pen's colour,
   // thickness and pattern, the highlighter's translucent band. That, more than the silhouette,
@@ -44,7 +49,7 @@
   {#if dividerBefore}
     <span class:horizontal class="palette-divider"></span>
   {/if}
-  {@const active = activeCommands.includes(definition.id)}
+  {@const active = !activeAddonTool && activeCommands.includes(definition.id)}
   <button
     class:active
     class="tool-tile"
@@ -92,6 +97,20 @@
     {:else}
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5V6h11v1.5M9.5 6v13M7 19h5"></path><path d="M18.5 4.5v6M15.5 7.5h6"></path></svg>
     {/if}
+  </button>
+{/each}
+
+{#each addonTools as { addon, tool } (`${addon.addonId}/${tool.id}`)}
+  {@const label = contributionText(addon, tool.label, $locale)}
+  {@const selected = activeAddonTool?.addonId === addon.addonId && activeAddonTool.toolId === tool.id}
+  <button class="tool-tile" class:active={selected} type="button"
+    aria-label={label} aria-pressed={selected} title={label}
+    onclick={() => onAddonTool?.(addon, tool)}>
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      {#each tool.icon.paths as path}
+        <path d={path} />
+      {/each}
+    </svg>
   </button>
 {/each}
 

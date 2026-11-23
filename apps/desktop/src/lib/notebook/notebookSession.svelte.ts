@@ -4,7 +4,7 @@ import { acceptProposal, validateProposalPlacement } from "../helper/proposal";
 import { helperInsertProposal, helperCreatePage } from "../ipc/helper";
 import type { Proposal } from "../ipc/helper";
 import { insertContentShape as saveContentShape, type ShapePlacement } from "../workspace/addons/content";
-import { addGeneratedPages, exportWithAddon, insertAddonForm, type ContributionEntry, addonText, insertAddonProposal as addonInsertProposal, type AddonReview } from "../ipc/addons";
+import { ADDON_AVAILABILITY_CHANGED, addonObjectAction, applyAddonReaction, prepareAddonReactions, type AddonObjectAction, addGeneratedPages, exportWithAddon, insertAddonForm, type ContributionEntry, addonText, insertAddonProposal as addonInsertProposal, type AddonReview } from "../ipc/addons";
 import type { createSelection } from "./selectionEditing.svelte";
 import type { createNavigation } from "./viewportNavigation.svelte";
 import { shapeMessage } from "../i18n/labels";
@@ -146,6 +146,7 @@ export function createSession(env: SessionEnvironment) {
   let presetRevision = $state(0);
 
   let activeSnapshot = $state.raw<NotebookSnapshot | null>(null);
+  let copiedGroups: Extract<PageObject, { type: "group" }>[] = [];
 
   let activePageId = $state("page-001");
 
@@ -503,6 +504,8 @@ export function createSession(env: SessionEnvironment) {
           id: block.id,
           path: block.path,
           source: block.source,
+          addonData: block.addonData,
+          groupId: block.groupId,
           x: block.transform.x,
           y: block.transform.y,
           layoutWidthPt: block.transform.layoutWidthPt,
@@ -525,6 +528,7 @@ export function createSession(env: SessionEnvironment) {
         : null,
       images,
       shapes,
+      copiedGroups,
       sharedStyle: manifest.sharedStylePath
         ? { path: manifest.sharedStylePath, source: sharedStyleSource }
         : null,
@@ -535,6 +539,7 @@ export function createSession(env: SessionEnvironment) {
   }
 
   function applySnapshot(snapshot: NotebookSnapshot) {
+    copiedGroups = [];
     pageSession += 1;
     if (activeSnapshot) notePageSaved(activeSnapshot, snapshot);
     const previousEntry = pageEntries.find(entry => entry.id === snapshot.page.id);
@@ -1625,6 +1630,80 @@ export function createSession(env: SessionEnvironment) {
     return inserted;
   }
 
+  async function applyAddonObjectAction(addonId: string, action: AddonObjectAction, label: string) {
+    const requestRoot = root, pageId = activePageId, generation = notebookGeneration;
+    if (!requestRoot || !await persist()) return;
+    replacingPageCount += 1;
+    pendingTransactions += 1;
+    transactionQueue = transactionQueue.then(async () => {
+      if (root !== requestRoot || pageId !== activePageId || generation !== notebookGeneration || transactionFailed) return;
+      try {
+        const result = await addonObjectAction(requestRoot, pageId, revision, addonId, action);
+        if (!result || root !== requestRoot || generation !== notebookGeneration) return;
+        recordNotebookAction(pageId);
+        editGeneration += 1;
+        if (activePageId !== pageId) return;
+        applySnapshot(result.snapshot);
+        revision = result.snapshot.page.revision;
+        canUndo = result.canUndo;
+        canRedo = result.canRedo;
+        status = notice("addons.objectActionApplied", { label });
+      } catch (error) {
+        if (error && typeof error === "object" && "message" in error && error.message === "addon-needs-update") {
+          window.dispatchEvent(new Event(ADDON_AVAILABILITY_CHANGED));
+        }
+        if (root === requestRoot && activePageId === pageId && generation === notebookGeneration) {
+          status = notice("addons.objectActionFailed", { label });
+        }
+      }
+    }).finally(() => {
+      pendingTransactions -= 1;
+      replacingPageCount -= 1;
+    });
+    await transactionQueue;
+  }
+
+  async function detachAddon(addon: string, ids: string[]) {
+    const requestRoot = root, pageId = activePageId, generation = notebookGeneration;
+    if (!requestRoot || !await persist()) return;
+    const selected = new Set(ids);
+    const label = notice("addons.detached", { addon });
+    replacingPageCount += 1;
+    pendingTransactions += 1;
+    transactionQueue = transactionQueue.then(async () => {
+      if (root !== requestRoot || pageId !== activePageId || generation !== notebookGeneration || transactionFailed) return;
+      const before = activeSnapshot;
+      if (!before) return;
+      let changed = false;
+      const objects = before.page.objects.map((object) => {
+        if (!selected.has(object.id) || !object.addonData || !Object.hasOwn(object.addonData, addon)) return object;
+        const { [addon]: _, ...remaining } = object.addonData;
+        const { addonData: _previous, ...fields } = object;
+        changed = true;
+        return Object.keys(remaining).length ? { ...fields, addonData: remaining } : fields;
+      });
+      if (!changed) return;
+      try {
+        const result = await commitNotebook(requestRoot, { ...before, page: { ...before.page, objects } }, before);
+        if (root !== requestRoot || generation !== notebookGeneration) return;
+        recordNotebookAction(pageId);
+        editGeneration += 1;
+        if (activePageId !== pageId) return;
+        applySnapshot(result.snapshot);
+        revision = result.snapshot.page.revision;
+        canUndo = result.canUndo;
+        canRedo = result.canRedo;
+        status = label;
+      } catch (error) {
+        reportCommitFailure(label, error);
+      }
+    }).finally(() => {
+      pendingTransactions -= 1;
+      replacingPageCount -= 1;
+    });
+    await transactionQueue;
+  }
+
   /** `select: false` leaves nothing selected, so stamping can keep placing copies. */
   async function insertContentShape(request: ShapePlacement, select = true) {
     const requestRoot = root, pageId = activePageId, generation = notebookGeneration;
@@ -1800,6 +1879,10 @@ export function createSession(env: SessionEnvironment) {
           const result = await commitNotebook(requestRoot, snapshot, activeSnapshot);
           if (root !== requestRoot || notebookGeneration !== generation) return;
           activeSnapshot = result.snapshot;
+          if (copiedGroups.length) {
+            const savedIds = new Set(result.snapshot.page.objects.map(({ id }) => id));
+            copiedGroups = copiedGroups.filter(({ id }) => !savedIds.has(id));
+          }
           notebookManifest = result.snapshot.manifest;
           replacePageSnapshot(result.snapshot.page.id, result.snapshot);
           revision = result.snapshot.page.revision;
@@ -1833,12 +1916,71 @@ export function createSession(env: SessionEnvironment) {
     }
   }
 
+  let reactionTimer: ReturnType<typeof setTimeout> | undefined;
+  let reactionGeneration = 0;
+  let reactionBase: { root: string; pageId: string; revision: number } | undefined;
+
+  function scheduleAddonReactions(pageId: string) {
+    if (!env.tauriAvailable || pageId !== activePageId) return;
+    clearTimeout(reactionTimer);
+    const serial = ++reactionGeneration;
+    const context = editContext();
+    const committedEdit = editVersion;
+    const committedRevision = revision;
+    const baseRevision = reactionBase?.root === context.root && reactionBase.pageId === pageId
+      ? reactionBase.revision : committedRevision - 1;
+    reactionBase = { root: context.root, pageId, revision: baseRevision };
+    const isCurrent = () => serial === reactionGeneration && context.current() &&
+      editVersion === committedEdit && revision === committedRevision && !transactionFailed;
+
+    async function run(retry: boolean) {
+      if (!isCurrent() || pendingTransactions > 0) return;
+      if (!activeSnapshot?.page.objects.some((object) => object.addonData !== undefined)) {
+        reactionBase = undefined;
+        return;
+      }
+      try {
+        const prepared = await prepareAddonReactions(context.root, pageId, committedRevision, baseRevision, retry);
+        if (!isCurrent() || pendingTransactions > 0) return;
+        let retryNeeded = prepared.retry;
+        if (prepared.token) {
+          const token = prepared.token;
+          replacingPageCount += 1;
+          pendingTransactions += 1;
+          transactionQueue = transactionQueue.then(async () => {
+            if (!isCurrent()) return;
+            const [result, late] = await applyAddonReaction(token);
+            retryNeeded ||= late;
+            if (!result || !context.current()) return;
+            applySnapshot(result.snapshot);
+            revision = result.snapshot.page.revision;
+            canUndo = result.canUndo;
+            canRedo = result.canRedo;
+            editGeneration += 1;
+          }).catch(() => {}).finally(() => {
+            pendingTransactions -= 1;
+            replacingPageCount -= 1;
+          });
+          await transactionQueue;
+        }
+        if (serial !== reactionGeneration) return;
+        if (!retry && retryNeeded && isCurrent()) reactionTimer = setTimeout(() => void run(true), 1050);
+        else reactionBase = undefined;
+      } catch {
+        // The user's commit already succeeded. A failed background response changes nothing.
+      }
+    }
+
+    reactionTimer = setTimeout(() => void run(false), 0);
+  }
+
   function recordNotebookAction(pageId: string) {
     notebookUndoOrder.push({ kind: "page", pageId });
     if (notebookUndoOrder.length > 200) notebookUndoOrder.shift();
     notebookRedoOrder = [];
     canUndo = true;
     canRedo = false;
+    queueMicrotask(() => scheduleAddonReactions(pageId));
   }
 
   function recordStructureAction(resetCalculationId?: string) {
@@ -2365,6 +2507,8 @@ export function createSession(env: SessionEnvironment) {
   }
   /** The close path flushes first. Unmount only releases this instance's resources. */
   function dispose() {
+    clearTimeout(reactionTimer);
+    reactionGeneration += 1;
     disposed = true;
     notebookGeneration += 1;
     pageLoadGeneration += 1;
@@ -2429,6 +2573,9 @@ export function createSession(env: SessionEnvironment) {
     nextReadingOrder,
     scheduleInkCommit,
     queueCommit,
+    addCopiedGroups: (groups: typeof copiedGroups) => { copiedGroups = [...copiedGroups, ...groups]; },
+    detachAddon,
+    applyAddonObjectAction,
     changeStrokes,
     addStroke,
     addShape,

@@ -11,10 +11,14 @@ import { TakenShapes } from "./InkSurface.svelte";
 const ipc = vi.hoisted(() => ({
   open: vi.fn(), page: vi.fn(), focus: vi.fn(), commit: vi.fn(), history: vi.fn(), structure: vi.fn(),
   move: vi.fn(), add: vi.fn(), close: vi.fn(), reorder: vi.fn(), presets: vi.fn(),
+  prepareReaction: vi.fn(), applyReaction: vi.fn(),
 }));
 vi.mock("../ipc/notebook", async original => ({ ...await original<typeof import("../ipc/notebook")>(),
   openNotebook: ipc.open, openPage: ipc.page, focusPage: ipc.focus, commitNotebook: ipc.commit,
   runHistory: ipc.history, runStructureHistory: ipc.structure, createPage: ipc.add, reorderPages: ipc.reorder,
+}));
+vi.mock("../ipc/addons", async original => ({ ...await original<typeof import("../ipc/addons")>(),
+  prepareAddonReactions: ipc.prepareReaction, applyAddonReaction: ipc.applyReaction,
 }));
 vi.mock("../ipc/library", () => ({ moveLibraryEntries: ipc.move }));
 vi.mock("../ipc/workspace", () => ({
@@ -59,6 +63,24 @@ function snapshot(pageId = "page-001"): NotebookSnapshot {
   value.inkLayers.forEach(layer => { layer.pageId = pageId; });
   return value;
 }
+function connectedPage(): NotebookSnapshot {
+  const value = snapshot();
+  const now = value.manifest.createdAt;
+  const shape = (id: string, x: number, readingOrder: number) => ({
+    id, x, y: 30, zIndex: readingOrder, readingOrder, scale: 1, rotation: 0, groupId: null,
+    createdAt: now, modifiedAt: now, type: "shape" as const,
+    geometry: { kind: "line" as const, start: { x: 0, y: 0 }, end: { x: 20, y: 0 } },
+    style: { strokeColor: "#123456", strokeWidthPt: 1, fillColor: null, opacity: 1 },
+  });
+  value.page.objects = [shape("part", 20, 0), {
+    ...shape("connector", 40, 1),
+    addonData: { connectors: { refs: ["part"], data: { route: "straight" } } },
+  }];
+  value.page.readingOrder = ["part", "connector"];
+  value.page.schemaVersion = value.manifest.schemaVersion = 5;
+  return value;
+}
+
 function result(value: NotebookSnapshot) { return { snapshot: value, canUndo: false, canRedo: false }; }
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -94,6 +116,61 @@ describe("notebook session coordination", () => {
     session.addTranscribedBlock("hello", { x: 12, y: 12, layoutWidthPt: 120 }, notice("transcription.inserted"));
     expect(session.typstBlocks).toEqual([]);
     expect(ipc.commit).not.toHaveBeenCalled();
+  });
+
+  it("detaches just the selected entry in one commit even when its addon is unavailable", async () => {
+    const { session } = workspace();
+    const value = connectedPage();
+    value.page.objects[1].addonData!.uninstalled = { refs: [], data: 1 };
+    session.applySnapshot(value);
+
+    await session.detachAddon("uninstalled", ["connector"]);
+
+    expect(ipc.commit).toHaveBeenCalledTimes(1);
+    expect(session.activeSnapshot?.page.objects[1].addonData).toEqual({
+      connectors: { refs: ["part"], data: { route: "straight" } },
+    });
+  });
+
+  it("discards a late response and only re-requests once after idle", async () => {
+    const { session } = workspace();
+    const value = connectedPage();
+    session.applySnapshot(value);
+    ipc.commit.mockImplementation(async (_root, next: NotebookSnapshot) =>
+      result({ ...next, page: { ...next.page, revision: next.page.revision + 1 } }));
+    ipc.prepareReaction.mockResolvedValueOnce({ token: null, retry: true })
+      .mockResolvedValueOnce({ token: "idle", retry: false });
+    ipc.applyReaction.mockResolvedValue([null, false]);
+    session.queueCommit(notice("workspace.updatedShape"));
+    await session.persist();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(ipc.prepareReaction).toHaveBeenCalledTimes(1);
+    expect(ipc.applyReaction).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(ipc.prepareReaction).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(ipc.prepareReaction.mock.calls[1].at(-1)).toBe(true);
+    expect(ipc.applyReaction).toHaveBeenCalledExactlyOnceWith("idle");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(ipc.prepareReaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops a prepared reply when the writer commits another edit", async () => {
+    const { session } = workspace();
+    session.applySnapshot(connectedPage());
+    ipc.commit.mockImplementation(async (_root, next: NotebookSnapshot) =>
+      result({ ...next, page: { ...next.page, revision: next.page.revision + 1 } }));
+    const first = deferred<{token: string; retry: boolean}>();
+    ipc.prepareReaction.mockReturnValueOnce(first.promise).mockResolvedValue({ token: null, retry: false });
+    session.queueCommit(notice("workspace.updatedShape"));
+    await session.persist();
+    await vi.advanceTimersByTimeAsync(1);
+    session.queueCommit(notice("workspace.updatedShape"));
+    await session.persist();
+    first.resolve({ token: "old", retry: false });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(ipc.applyReaction).not.toHaveBeenCalled();
+    expect(ipc.prepareReaction).toHaveBeenCalledTimes(2);
   });
 
   it("ignores late calculation saves and heights from another notebook", () => {

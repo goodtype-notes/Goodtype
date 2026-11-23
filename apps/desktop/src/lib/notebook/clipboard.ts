@@ -9,14 +9,16 @@
 
 import type { Point } from "../geometry/coordinates";
 import { selectionBounds } from "../ink/selection";
-import type { Stroke } from "../model";
+import type { AddonData, PageObject, Stroke } from "../model";
 import { boxOutline, shapeLassoItem } from "./lasso";
 import type { ShapeView } from "./pageView";
 
 /** How far a paste moves its contents, in page points. */
 export type PasteShift = { dx: number; dy: number };
 
-export type ClipboardBlock = {
+type CopiedObject = { id?: string; addonData?: AddonData };
+
+export type ClipboardBlock = CopiedObject & {
   source: string;
   x: number;
   y: number;
@@ -27,7 +29,7 @@ export type ClipboardBlock = {
   rotation?: number;
 };
 
-export type ClipboardImage = {
+export type ClipboardImage = CopiedObject & {
   bytes: Uint8Array;
   mime: string;
   alt: string;
@@ -44,11 +46,47 @@ export type ClipboardBundle = {
   token: string;
   /** The page it was copied on; pasting back onto it offsets so the copy does not hide the original. */
   pageId: string;
+  root?: string;
   strokes: Stroke[];
   shapes: ShapeView[];
   blocks: ClipboardBlock[];
   images: ClipboardImage[];
+  groups?: Extract<PageObject, { type: "group" }>[];
 };
+
+/** Include a group only when every child is copied or selected. */
+export function completeSelectedGroups(objects: readonly PageObject[], selected: ReadonlySet<string>) {
+  const pending = objects.filter((object) => object.type === "group");
+  const included = new Set(selected);
+  const groups: typeof pending = [];
+  let found = true;
+  while (found) {
+    found = false;
+    for (const group of pending) {
+      if (included.has(group.id) || !group.childIds.every((id) => included.has(id))) continue;
+      included.add(group.id);
+      groups.push(group);
+      found = true;
+    }
+  }
+  return groups;
+}
+
+/** References can follow a copy or stay on a destination that still has the original. */
+export function pastedAddonData(
+  data: AddonData | undefined,
+  copies: ReadonlyMap<string, string>,
+  destination: ReadonlySet<string>,
+): AddonData | undefined {
+  if (!data) return undefined;
+  return Object.fromEntries(Object.entries(data).map(([addon, entry]) => [
+    addon,
+    { ...entry, refs: entry.refs.flatMap((id) => {
+      const target = copies.get(id);
+      return target ? [target] : destination.has(id) ? [id] : [];
+    }) },
+  ]));
+}
 
 /** How far each paste onto the same page moves, in points: visibly apart, still close by. */
 export const PASTE_STEP_PT = 12;
