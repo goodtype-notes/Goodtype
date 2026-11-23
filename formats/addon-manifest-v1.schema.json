@@ -9,13 +9,27 @@
     "version",
     "apiVersion",
     "target",
-    "entrypoint",
     "transport",
     "permissions",
     "commands",
     "settings",
     "strings"
   ],
+  "if": { "properties": { "transport": { "const": "content" } } },
+  "then": {
+    "required": ["contents"],
+    "not": { "required": ["entrypoint"] },
+    "properties": {
+      "permissions": { "maxItems": 0 },
+      "commands": { "maxItems": 0 },
+      "settings": { "maxItems": 0 }
+    }
+  },
+  "else": {
+    "required": ["entrypoint"],
+    "not": { "required": ["contents"] },
+    "properties": { "commands": { "minItems": 1 } }
+  },
   "properties": {
     "manifestVersion": {
       "const": 1
@@ -41,7 +55,31 @@
     "transport": {
       "enum": [
         "legacy-import-cli",
-        "stdio-jsonrpc"
+        "stdio-jsonrpc",
+        "content"
+      ]
+    },
+    "contents": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shapes": { "allOf": [{ "$ref": "#/$defs/contentFiles" }, { "items": { "pattern": "^content/shapes/" } }] },
+        "templates": { "allOf": [{ "$ref": "#/$defs/contentFiles" }, { "items": { "pattern": "^content/templates/" } }] },
+        "palettes": { "allOf": [{ "$ref": "#/$defs/contentFiles" }, { "items": { "pattern": "^content/palettes/" } }] },
+        "themes": { "allOf": [{ "$ref": "#/$defs/contentFiles" }, { "items": { "pattern": "^content/themes/" } }] },
+        "typstPackages": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^content/typst/preview/[^/]+/[0-9]+[.][0-9]+[.][0-9]+(?![\\s\\S])" }
+        }
+      },
+      "anyOf": [
+        { "required": ["shapes"], "properties": { "shapes": { "minItems": 1 } } },
+        { "required": ["templates"], "properties": { "templates": { "minItems": 1 } } },
+        { "required": ["palettes"], "properties": { "palettes": { "minItems": 1 } } },
+        { "required": ["themes"], "properties": { "themes": { "minItems": 1 } } },
+        { "required": ["typstPackages"], "properties": { "typstPackages": { "minItems": 1 } } }
       ]
     },
     "permissions": {
@@ -82,7 +120,6 @@
           }
         }
       },
-      "minItems": 1,
       "maxItems": 16
     },
     "settings": {
@@ -195,6 +232,12 @@
     }
   },
   "$defs": {
+    "contentFiles": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^content/[a-z]+/[^/]+[.]json(?![\\s\\S])" }
+    },
     "identifier": {
       "type": "string",
       "maxLength": 48,

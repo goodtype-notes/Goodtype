@@ -75,7 +75,7 @@ enum Message {
     Progress,
 }
 
-struct Strict(Value);
+pub(super) struct Strict(pub(super) Value);
 
 impl<'de> Deserialize<'de> for Strict {
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {

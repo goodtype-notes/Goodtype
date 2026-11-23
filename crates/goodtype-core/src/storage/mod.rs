@@ -23,6 +23,7 @@ mod proposal;
 mod recovery;
 mod search;
 mod validate;
+pub use validate::raise_schema_version;
 mod write;
 
 #[cfg(test)]
@@ -35,8 +36,9 @@ pub use calculations::{
 };
 pub use delta::{PageDelta, commit_page_delta, commit_page_delta_with_precondition};
 pub use history::{
-    HistoryResult, NotebookHistory, commit_notebook, commit_notebook_with_precondition, focus_page,
-    history_preflight, observe_notebook, observe_page, redo_notebook, undo_notebook,
+    HistoryResult, NotebookHistory, commit_notebook, commit_notebook_with_precondition,
+    commit_notebook_with_undo, focus_page, history_preflight, observe_notebook, observe_page,
+    redo_notebook, undo_notebook,
 };
 pub use pages::{
     CalculationExecutionPlan, CalculationStep, NotebookStructureHistory, PagePosition,

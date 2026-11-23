@@ -37,6 +37,7 @@
     selectedBlockFont = null,
     onFontChange,
     initialGroup = "appearance",
+    themes = [],
   }: {
     settings: AppSettings;
     /** What the entries that *do* something rather than store something should call. */
@@ -46,6 +47,7 @@
     selectedBlockFont?: string | null;
     onFontChange?: (font: string) => void;
     initialGroup?: string;
+    themes?: { value: string; label: string }[];
   } = $props();
 
   let fonts = $state<string[]>(["DejaVu Sans Mono", "Libertinus Serif", "New Computer Modern"]);
@@ -55,7 +57,7 @@
     void typstFontFamilies().then(value => { fonts = value; }).catch(() => { fontLoadFailed = true; });
   });
   let addonManager = $state.raw<AddonManager>();
-  const groups = $derived(settingGroups($t, [...new Set([...fonts, settings.inlineTextFont, selectedBlockFont].filter((font): font is string => Boolean(font)))], settings.aiHelper.enabled));
+  const groups = $derived(settingGroups($t, [...new Set([...fonts, settings.inlineTextFont, selectedBlockFont].filter((font): font is string => Boolean(font)))], settings.aiHelper.enabled, themes));
   let addonError = $state<"loadFailed" | "policyFailed" | null>(null);
   let confirmReset = $state(false);
   let policyPending = $state(false);

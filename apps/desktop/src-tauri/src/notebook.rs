@@ -707,6 +707,27 @@ pub async fn invoke_addon_selection(
 }
 
 #[tauri::command]
+pub async fn insert_content_shape(
+    roots: tauri::State<'_, AllowedRoots>,
+    histories: tauri::State<'_, NotebookHistories>,
+    app: tauri::AppHandle,
+    root: String,
+    page_id: String,
+    request: crate::addons::content::ShapeInsertion,
+) -> Result<crate::addons::content::InsertedShape, NotebookError> {
+    on_page(
+        &roots,
+        &histories,
+        root,
+        page_id,
+        move |root, page, history| {
+            crate::addons::content::insert(&app, root, page, history, request)
+        },
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn insert_addon_proposal(
     roots: tauri::State<'_, AllowedRoots>,
     histories: tauri::State<'_, NotebookHistories>,

@@ -8,11 +8,11 @@ static POLICY: Mutex<()> = Mutex::new(());
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct Policy {
+pub(super) struct Policy {
     allow_direct_apply: bool,
     #[serde(default = "auto_check_default")]
     auto_check: bool,
-    addons: BTreeMap<String, Preference>,
+    pub(super) addons: BTreeMap<String, Preference>,
     // A persisted record of consent for the current attempt. Never reused on retry or restart.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pending_install_approvals: BTreeMap<String, Vec<Permission>>,
@@ -49,8 +49,8 @@ pub(crate) async fn addon_set_auto_check(
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct Preference {
-    enabled: bool,
+pub(super) struct Preference {
+    pub(super) enabled: bool,
     direct_apply: bool,
 }
 
@@ -100,7 +100,7 @@ fn patch(app: &tauri::AppHandle, update: impl FnOnce(&mut Policy)) -> Result<(),
     patch_file(&crate::settings::config_file(app, CONFIG)?, update)
 }
 
-fn policy(app: &tauri::AppHandle) -> Result<Policy, String> {
+pub(super) fn policy(app: &tauri::AppHandle) -> Result<Policy, String> {
     let _lock = POLICY.lock().unwrap();
     read_policy(&crate::settings::config_file(app, CONFIG)?)
 }
@@ -127,6 +127,9 @@ pub(super) fn installed(
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .ok_or(Error::NeedsReinstall)?;
+    if provenance.sideloaded && !cfg!(debug_assertions) {
+        return Err(Error::NeedsReinstall);
+    }
     if !update::is_hash(&provenance.archive_sha256, 64)
         || installation_digest(path).map_err(|_| Error::Invalid)? != provenance.inventory_sha256
     {
@@ -158,7 +161,11 @@ pub(super) fn installed(
         return Err(Error::Invalid);
     }
     check_contract(addon, &inventory, None, legacy_pin.as_ref()).map_err(|_| Error::Invalid)?;
-    manifest::load(addon, path, version, &inventory, legacy_pin.as_ref())
+    let declaration = manifest::load(addon, path, version, &inventory, legacy_pin.as_ref())?;
+    if verify && let Some(contents) = &declaration.contents {
+        content::load(addon, path, &declaration.strings, contents).map_err(|_| Error::Invalid)?;
+    }
+    Ok(declaration)
 }
 
 pub(crate) fn startup(app: &tauri::AppHandle) -> Result<(), String> {
@@ -373,7 +380,7 @@ pub(super) fn install(
     result
 }
 
-fn activate(
+pub(super) fn activate(
     app: &tauri::AppHandle,
     dir: &InstallDir,
     previous: (bool, Option<&Manifest>),
@@ -384,6 +391,9 @@ fn activate(
     let _lock = POLICY.lock().unwrap();
     let path = crate::settings::config_file(app, CONFIG)?;
     let mut policy = read_policy(&path)?;
+    if let Some(contents) = &candidate.contents {
+        content::retain_packages(app, &dir.version_dir(version)?, contents)?;
+    }
     let prior = policy.addons.get(dir.1.id).copied();
     let next = install_preference(
         prior,
@@ -639,6 +649,7 @@ pub async fn addon_list(
             Activity::ImportFailed { .. } => ("importFailed", None),
         };
         let (formats, memory_bytes, timeout_seconds, output_bytes) = match addon.kind {
+            Kind::Content => (&[][..], 0, 0, 0),
             Kind::Import { extensions, .. } => (
                 extensions,
                 JOB_MEMORY_BYTES,
@@ -654,7 +665,9 @@ pub async fn addon_list(
         };
         // The installed manifest's transport decides: legacy CLIs stay on the Job Object path
         // this beta, sessions run in the AppContainer.
-        let isolation = if declaration.uses_session() {
+        let isolation = if addon.is_content() {
+            "content"
+        } else if declaration.uses_session() {
             "sandbox"
         } else {
             "job"
@@ -721,6 +734,9 @@ fn shutdown(app: &tauri::AppHandle, addon: &Addon) {
         let mut state = job.state.lock().unwrap();
         state.authorization_epoch += 1;
         state.incompatible_session = None;
+    }
+    if addon.is_content() {
+        return;
     }
     app.state::<super::selection::Proposals>()
         .forget_addon(addon.id);

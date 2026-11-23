@@ -82,6 +82,8 @@
   import ConflictDialog from "../workspace/ConflictDialog.svelte";
   import RecoveryDialog from "../workspace/RecoveryDialog.svelte";
   import SearchOverlay from "../workspace/SearchOverlay.svelte";
+  import ShapeLibrary from "../workspace/addons/ShapeLibrary.svelte";
+  import { applyTheme, contentPacks, installedThemes, packText, type ContentPack, type ShapeChoice } from "../workspace/addons/content";
   import AddonStore from "../workspace/addons/AddonStore.svelte";
   import SettingsPanel from "../workspace/SettingsPanel.svelte";
   import LibrarySurface from "../library/LibrarySurface.svelte";
@@ -632,7 +634,7 @@
     slot: number;
     anchor: number;
   } | null>(null);
-  let shapeCard = $state<{ anchor: number } | null>(null);
+  let shapeCard = $state<{ anchor: number; trigger: HTMLElement } | null>(null);
   let eraserEditor = $state<HTMLElement | null>(null);
   let lassoEditor = $state<HTMLElement | null>(null);
   let paletteEditor = $state<{ kind: "width" | "color"; index: number; anchor: HTMLElement; adding?: boolean } | null>(null);
@@ -713,7 +715,7 @@
       activateTool("shape");
       return;
     }
-    shapeCard = shapeCard ? null : { anchor: swatchAnchor(tile) };
+    shapeCard = shapeCard ? null : { anchor: swatchAnchor(tile), trigger: tile };
     toolCard = null;
   }
 
@@ -774,6 +776,7 @@
   }
   let moreOpen = $state(false);
   let addPageOpen = $state(false);
+  let addPageTrigger = $state<HTMLButtonElement>();
   let exportOpen = $state(false);
   let exportTrigger = $state<HTMLButtonElement>();
   // Remembered across openings for the session, so a repeated export is the button plus Enter.
@@ -814,6 +817,61 @@
       });
   }
   let addonsOpen = $state(false);
+  let shapeLibraryOpen = $state(false);
+  let shapeLibraryTrigger: HTMLElement | undefined;
+  let packs = $state.raw<ContentPack[]>([]);
+  let packsLoaded = $state(false);
+  let packRequest = 0;
+  const themes = $derived(installedThemes(packs, $locale));
+  const themeTokens = $derived(themes.find(theme => theme.value === settings.themeId)?.tokens);
+  const packPalettes = $derived(packs.flatMap(pack => pack.palettes.map(palette => ({
+    name: packText(pack, palette.label, $locale), colors: palette.colors,
+  }))));
+
+  async function loadPacks() {
+    const request = ++packRequest;
+    try {
+      const found = await contentPacks();
+      if (request !== packRequest) return;
+      packs = found;
+      packsLoaded = true;
+    } catch { /* Keep the last successful view during a transient IPC failure. */ }
+  }
+
+  $effect(() => {
+    if (themeTokens) return applyTheme(document.documentElement.style, themeTokens);
+  });
+  $effect(() => {
+    if (settingsReady && packsLoaded && settings.themeId && !themeTokens) {
+      changeSettings({ ...settings, themeId: "" });
+    }
+  });
+
+  function openShapeLibrary() {
+    shapeLibraryTrigger = shapeCard?.trigger ?? addPageTrigger;
+    addPageOpen = false;
+    closeToolCard();
+    shapeLibraryOpen = true;
+  }
+
+  function closeShapeLibrary() {
+    shapeLibraryOpen = false;
+    void tick().then(() => shapeLibraryTrigger?.focus());
+  }
+
+  async function insertPackShape(choice: ShapeChoice, scale: number) {
+    const view = pageViewport?.getBoundingClientRect();
+    const frame = pageFrame?.getBoundingClientRect();
+    const left = view && frame ? Math.max(view.left, frame.left) : 0;
+    const right = view && frame ? Math.min(view.right, frame.right) : 0;
+    const top = view && frame ? Math.max(view.top, frame.top) : 0;
+    const bottom = view && frame ? Math.min(view.bottom, frame.bottom) : 0;
+    const point = right > left && bottom > top
+      ? navigation.pagePointAt((left + right) / 2, (top + bottom) / 2) ?? undefined
+      : undefined;
+    const pen = settings.penPresets[penPreset - 1] ?? DEFAULT_SETTINGS.penPresets[0];
+    await session.insertContentShape({ ...choice, scale, point, penColor: pen.color, penWidthPt: pen.widthPt });
+  }
   let addonReturn: HTMLElement | null = null;
   let workspaceElement: HTMLElement;
   function openAddons(fromSettings = false) {
@@ -883,6 +941,8 @@
       void recognitionCapabilities().then(found => (recognition = found)).catch(() => {});
       loadAddonCommands();
       window.addEventListener(ADDON_AVAILABILITY_CHANGED, loadAddonCommands);
+      window.addEventListener(ADDON_AVAILABILITY_CHANGED, loadPacks);
+      void loadPacks();
       const appWindow = getCurrentWindow();
       void appWindow
         .onCloseRequested(windowClose.handle)
@@ -911,6 +971,7 @@
     window.removeEventListener("paste", selection.handlePaste);
     window.removeEventListener("resize", onResizeToolbar);
     window.removeEventListener(ADDON_AVAILABILITY_CHANGED, loadAddonCommands);
+    window.removeEventListener(ADDON_AVAILABILITY_CHANGED, loadPacks);
   });
 
   $effect(() => {
@@ -1188,6 +1249,13 @@
         id: group.id,
         title: group.title,
         sources: group.templates.map(template),
+      })),
+      ...packs.filter(pack => pack.templates.length).map(pack => ({
+        id: pack.id,
+        title: packText(pack, "name", $locale),
+        sources: pack.templates.map(item => ({
+          ...template(item.template), label: packText(pack, item.label, $locale),
+        })),
       })),
     ];
   }
@@ -1611,7 +1679,7 @@
   });
 
   function historyShortcut(event: KeyboardEvent) {
-    if (event.defaultPrevented || addonsOpen) return;
+    if (event.defaultPrevented || addonsOpen || shapeLibraryOpen) return;
     // Every shortcut below edits, navigates or replaces the page; none may race a replacing reply.
     if (session.pageInputLocked) return;
     if (event.ctrlKey || event.metaKey) {
@@ -1964,7 +2032,7 @@
       {/if}
       {#if session.pageOpen}
         <div class="add-page-anchor">
-          <button class="icon-button" class:active={addPageOpen} type="button" aria-label={$t("workspace.addPage")} aria-expanded={addPageOpen} title={$t("workspace.addPage")} disabled={session.busy} onclick={() => (addPageOpen = !addPageOpen)}>
+          <button bind:this={addPageTrigger} class="icon-button" class:active={addPageOpen} type="button" aria-label={$t("workspace.addPage")} aria-expanded={addPageOpen} title={$t("workspace.addPage")} disabled={session.busy} onclick={() => (addPageOpen = !addPageOpen)}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6"></path><path d="M18 9.5v9"></path><path d="M13.5 14h9"></path></svg>
           </button>
           {#if addPageOpen}
@@ -1986,6 +2054,7 @@
               onToneChange={(next) => (addPageToneId = next)}
               onSizeChange={(next) => (addPageSizeId = next)}
               onOrientationChange={(next) => (addPageOrientation = next)}
+              onInsertShape={session.activeCalculation || !session.root ? undefined : openShapeLibrary}
               onClose={() => (addPageOpen = false)}
             />
           {/if}
@@ -2392,7 +2461,7 @@
                   onRemove={() => { if (paletteEditor) removeWidth(paletteEditor.index); closePaletteEditor(); }}
                   onClose={closePaletteEditor} />
               {:else}
-                <ColorPanel embedded value={activeInkColor} recent={settings.recentColors}
+                <ColorPanel embedded value={activeInkColor} recent={settings.recentColors} palettes={packPalettes}
                   mode={paletteEditor.adding ? "add" : "edit"}
                   canRemove={paletteEditor.index >= 0 && activeColorChips.length > 1}
                   onPick={(color) => { if (!paletteEditor) return; if (paletteEditor.adding) addSwatch(color); else if (paletteEditor.index >= 0) editSwatch(paletteEditor.index, color); else setActiveColor(color); closePaletteEditor(); }}
@@ -2407,6 +2476,7 @@
           <div class="palette-panel-anchor card" style:--anchor={`${shapeCard.anchor}px`}>
             <ShapeCard
               dock={paletteDock}
+              onInsertShape={session.activeCalculation || !session.root ? undefined : openShapeLibrary}
               kind={settings.shapeKind}
               fill={settings.shapeFill}
               constrain={settings.shapeConstrain}
@@ -2698,6 +2768,7 @@
   {#if settingsOpen}
     <SettingsPanel
       initialGroup={settingsInitialGroup}
+      {themes}
       selectedBlockFont={selection.selectedTypstId ? blockFont(session.typstBlocks.find(block => block.id === selection.selectedTypstId)?.source ?? "") : null}
       onFontChange={changeInlineFont}
       {settings}
@@ -2733,6 +2804,10 @@
   {/if}
 </main>
 {#if addonsOpen}<AddonStore onClose={closeAddons} />{/if}
+{#if shapeLibraryOpen}
+  {@const pen = settings.penPresets[penPreset - 1] ?? DEFAULT_SETTINGS.penPresets[0]}
+  <ShapeLibrary {packs} color={pen.color} width={pen.widthPt} onInsert={insertPackShape} onClose={closeShapeLibrary} />
+{/if}
 
 <style>
   :global(*) { box-sizing: border-box; }

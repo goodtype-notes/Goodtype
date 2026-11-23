@@ -21,6 +21,7 @@ pub enum Permission {
 enum Transport {
     LegacyImportCli,
     StdioJsonrpc,
+    Content,
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize, PartialEq)]
@@ -81,7 +82,10 @@ pub(super) struct Manifest {
     version: String,
     api_version: String,
     target: String,
-    entrypoint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entrypoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contents: Option<super::content::Contents>,
     transport: Transport,
     pub permissions: Vec<Permission>,
     commands: Vec<Command>,
@@ -141,6 +145,7 @@ impl Addon {
             }
             Kind::Import { .. } => &[PickedImportFile, PublishImportBatch],
             Kind::Recognize { .. } => &[SelectedInk, AddPageObjects],
+            Kind::Content => &[],
         }
     }
 
@@ -159,7 +164,11 @@ impl Addon {
             )
         };
         let strings = |(name, run): (&str, &str)| {
-            [("name".into(), name.into()), ("run".into(), run.into())].into()
+            let mut table = Locale::from([("name".into(), name.into())]);
+            if !self.is_content() {
+                table.insert("run".into(), run.into());
+            }
+            table
         };
         Manifest {
             manifest_version: 1,
@@ -167,14 +176,23 @@ impl Addon {
             version: version.into(),
             api_version: API.into(),
             target: TARGET.into(),
-            entrypoint: self.executable(),
-            transport,
+            entrypoint: (!self.is_content()).then(|| self.executable()),
+            contents: None,
+            transport: if self.is_content() {
+                Transport::Content
+            } else {
+                transport
+            },
             permissions: self.permissions().to_vec(),
-            commands: vec![Command {
-                id: id.into(),
-                label: "run".into(),
-                surface,
-            }],
+            commands: if self.is_content() {
+                vec![]
+            } else {
+                vec![Command {
+                    id: id.into(),
+                    label: "run".into(),
+                    surface,
+                }]
+            },
             settings: vec![],
             strings: Strings {
                 en: strings(self.en),
@@ -233,7 +251,8 @@ pub(super) fn parse(bytes: &[u8], addon: &Addon, version: &str) -> Result<Manife
     if bytes.len() > MAX_BYTES || std::str::from_utf8(bytes).is_err() {
         return Err(Error::Invalid);
     }
-    let shape: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| Error::Invalid)?;
+    let super::session::Strict(shape) =
+        serde_json::from_slice(bytes).map_err(|_| Error::Invalid)?;
     if !shape.is_object()
         || !shape["strings"].is_object()
         || !shape["commands"]
@@ -257,7 +276,16 @@ pub(super) fn parse(bytes: &[u8], addon: &Addon, version: &str) -> Result<Manife
         || manifest.permissions.iter().any(|permission| {
             !ceiling.permissions.contains(permission) || !permissions.insert(permission)
         })
-        || !(1..=16).contains(&manifest.commands.len())
+        || if addon.is_content() {
+            shape.get("entrypoint").is_some()
+                || !manifest.commands.is_empty()
+                || !manifest
+                    .contents
+                    .as_ref()
+                    .is_some_and(super::content::Contents::valid)
+        } else {
+            shape.get("contents").is_some() || !(1..=16).contains(&manifest.commands.len())
+        }
         || manifest.commands.iter().any(|command| {
             !commands.insert(&command.id)
                 || !manifest.strings.en.contains_key(&command.label)
@@ -344,7 +372,7 @@ mod tests {
             serde_json::to_value(parsed).unwrap(),
             serde_json::from_str::<Value>(example).unwrap()
         );
-        for &addon in CATALOG {
+        for &addon in CATALOG.iter().filter(|addon| !addon.is_content()) {
             let bytes = serde_json::to_vec(&addon.declaration("1.2.3")).unwrap();
             let parsed = parse(&bytes, addon, "1.2.3").unwrap();
             assert_eq!(serde_json::to_vec(&parsed).unwrap(), bytes);

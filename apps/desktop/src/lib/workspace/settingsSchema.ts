@@ -75,12 +75,21 @@ export type SettingGroup = {
   items: SettingItem[];
 };
 
-export function settingGroups(t: Translator = translate, fonts: string[] = [], aiEnabled = false): SettingGroup[] { const groups: SettingGroup[] = [
+export function settingGroups(t: Translator = translate, fonts: string[] = [], aiEnabled = false, themes: { value: string; label: string }[] = []): SettingGroup[] { const groups: SettingGroup[] = [
   {
     id: "appearance",
     title: t("workspace.appearance"),
     icon: "M12 3a9 9 0 1 0 0 18h2a2 2 0 0 0 0-4h-1a2 2 0 0 1 0-4h3a5 5 0 0 0 0-10z",
     items: [{
+      id: "theme",
+      label: t("contentPacks.theme"),
+      control: {
+        kind: "select",
+        options: [{ value: "", label: t("contentPacks.defaultTheme") }, ...themes],
+        read: settings => themes.some(theme => theme.value === settings.themeId) ? settings.themeId : "",
+        write: (settings, themeId) => ({ ...settings, themeId }),
+      },
+    }, {
       id: "uiLanguage",
       label: t("language.title"),
       hint: t("language.hint"),

@@ -33,6 +33,9 @@ fn main() {
         .manage(addons::selection::Proposals::default())
         .setup(|app| {
             let handle = app.handle().clone();
+            if let Err(error) = addons::content::setup(&handle) {
+                eprintln!("Content package setup failed: {error}");
+            }
             if let Err(error) = addons::manager::startup(&handle) {
                 eprintln!("Addon startup verification failed: {error}");
             }
@@ -101,6 +104,10 @@ fn main() {
             library::set_library_favourite,
             library::list_library_favourites,
             addons::addon_catalog,
+            addons::content::addon_content,
+            notebook::insert_content_shape,
+            #[cfg(debug_assertions)]
+            addons::content::addon_sideload_content,
             addons::addon_install,
             addons::addon_update,
             addons::details::addon_details,

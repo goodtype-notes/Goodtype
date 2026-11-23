@@ -109,6 +109,7 @@ export type HelperPermission = "allow" | "ask" | "never";
 export type HelperPermissions = { pages: HelperPermission; presets: HelperPermission; pageNames: HelperPermission };
 
 export type AppSettings = {
+  themeId: string;
   aiHelper: { enabled: boolean; usage: "low" | "balanced" | "detailed"; webSearch: boolean; codexPath: string | null; codexModel: string | null; allowedMcpServers: string[]; permissions: HelperPermissions };
   uiLanguage: "en" | "de";
   /** Resolved into ordinary Typst source when a new movable text block is created. */
@@ -186,6 +187,7 @@ export type AppSettings = {
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  themeId: "",
   aiHelper: { enabled: false, usage: "balanced", webSearch: true, codexPath: null, codexModel: null, allowedMcpServers: [], permissions: { pages: "ask", presets: "ask", pageNames: "allow" } },
   uiLanguage: "en",
   inlineTextFont: "",

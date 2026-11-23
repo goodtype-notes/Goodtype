@@ -22,6 +22,7 @@ use tauri::Manager;
 use crate::store::read_bounded;
 
 mod catalog;
+pub(crate) mod content;
 pub(crate) mod details;
 pub(crate) mod import;
 pub(crate) mod manager;
@@ -75,6 +76,7 @@ pub struct Addon {
 
 #[derive(Debug)]
 enum Kind {
+    Content,
     Import {
         filter: &'static str,
         extensions: &'static [&'static str],
@@ -100,6 +102,7 @@ pub struct AddonView {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum CapabilityView {
+    Content,
     Import { artwork: bool },
     Recognize { recognizes: &'static str },
 }
@@ -112,6 +115,7 @@ pub fn addon_catalog() -> Vec<AddonView> {
             id: addon.id,
             i18n_prefix: addon.i18n_prefix,
             capability: match addon.kind {
+                Kind::Content => CapabilityView::Content,
                 Kind::Import { artwork, .. } => CapabilityView::Import { artwork },
                 Kind::Recognize { recognizes, .. } => CapabilityView::Recognize { recognizes },
             },
@@ -124,6 +128,10 @@ impl Addon {
     /// Recognition addons have neither; Goodtype records their file manifest at install.
     fn imports_notebooks(&self) -> bool {
         matches!(self.kind, Kind::Import { .. })
+    }
+
+    fn is_content(&self) -> bool {
+        matches!(self.kind, Kind::Content)
     }
 
     fn executable(&self) -> String {
@@ -373,7 +381,12 @@ fn open_archive(path: &Path) -> io::Result<fs::File> {
 
 /// Unpacks `archive` into `into`, which must not exist yet. Only the expected top folder, no
 /// links, no collisions; sizes are counted as bytes are written, not taken from headers.
+#[cfg(test)]
 fn extract_package(file: &mut fs::File, top: &str, into: &Path) -> Result<(), String> {
+    extract_limited(file, top, into, MAX_UNPACKED_BYTES)
+}
+
+fn extract_limited(file: &mut fs::File, top: &str, into: &Path, limit: u64) -> Result<(), String> {
     let mut zip =
         zip::ZipArchive::new(file).map_err(|error| format!("not a valid ZIP ({error})"))?;
     if zip.len() > MAX_ARCHIVE_ENTRIES {
@@ -414,12 +427,24 @@ fn extract_package(file: &mut fs::File, top: &str, into: &Path) -> Result<(), St
             .create_new(true)
             .open(&target)
             .map_err(|error| format!("cannot write `{name}` ({error})"))?;
-        let budget = MAX_UNPACKED_BYTES - written;
+        let remaining = limit - written;
+        let budget =
+            if limit == content::MAX_PACK_BYTES && name.to_ascii_lowercase().ends_with(".json") {
+                remaining.min(MIB)
+            } else {
+                remaining
+            };
         let copied = io::copy(&mut (&mut entry).take(budget + 1), &mut output)
             .map_err(|error| format!("cannot unpack `{name}` ({error})"))?;
+        if copied > budget && budget < remaining {
+            return Err("content JSON exceeds 1 MiB".into());
+        }
         written += copied;
-        if written > MAX_UNPACKED_BYTES {
-            return Err("the package unpacks to more than 512 MiB".into());
+        if written > limit {
+            return Err(format!(
+                "the package unpacks to more than {} MiB",
+                limit / MIB
+            ));
         }
     }
     Ok(())
@@ -473,10 +498,15 @@ fn package_files(dir: &Path) -> Result<Vec<String>, String> {
     }
     let mut files = Vec::new();
     let mut pending = vec![(dir.to_path_buf(), String::new())];
+    let mut count = 0;
     while let Some((folder, prefix)) = pending.pop() {
         for entry in fs::read_dir(&folder).map_err(|error| error.to_string())? {
+            count += 1;
+            if count > MAX_ARCHIVE_ENTRIES {
+                return Err("the package has too many files".into());
+            }
             let entry = entry.map_err(|error| error.to_string())?;
-            let metadata = entry.metadata().map_err(|error| error.to_string())?;
+            let metadata = fs::symlink_metadata(entry.path()).map_err(|error| error.to_string())?;
             let name = entry
                 .file_name()
                 .into_string()
@@ -491,8 +521,10 @@ fn package_files(dir: &Path) -> Result<Vec<String>, String> {
                 return Err(format!("the package contains a link `{relative}`"));
             } else if metadata.is_dir() {
                 pending.push((entry.path(), relative));
-            } else {
+            } else if metadata.is_file() {
                 files.push(relative);
+            } else {
+                return Err("the package contains a non-regular file".into());
             }
         }
     }
@@ -517,6 +549,8 @@ const PROVENANCE: &str = ".goodtype-provenance.json";
 struct Provenance {
     archive_sha256: String,
     inventory_sha256: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    sideloaded: bool,
 }
 
 fn installation_digest(path: &Path) -> Result<String, String> {
@@ -564,7 +598,7 @@ pub fn verify_package(tool: &Addon, dir: &Path) -> Result<PackageManifest, Strin
         }
         return Err(format!("`{file}` is not listed in the package manifest"));
     }
-    if !listed.contains(&tool.executable()) {
+    if !tool.is_content() && !listed.contains(&tool.executable()) {
         return Err("the package has no importer executable".into());
     }
     Ok(manifest)
@@ -669,9 +703,12 @@ impl InstallDir {
 
     fn installed_version(&self, version: String) -> Option<(String, PathBuf)> {
         let dir = self.version_dir(&version).ok()?;
-        dir.join(self.1.executable())
-            .is_file()
-            .then_some((version, dir))
+        let entry = if self.1.is_content() {
+            manifest::FILE.to_owned()
+        } else {
+            self.1.executable()
+        };
+        dir.join(entry).is_file().then_some((version, dir))
     }
 
     /// The installed version that the pointer names, if its folder still holds the tool.
@@ -759,10 +796,15 @@ fn install_with_policy(
     let mut retired = None;
     let mut installed_target = None;
     let result = (|| {
-        extract_package(
+        extract_limited(
             &mut archive,
             &package_folder(dir.1, release.version),
             &staging,
+            if dir.1.is_content() {
+                content::MAX_PACK_BYTES
+            } else {
+                MAX_UNPACKED_BYTES
+            },
         )?;
         if package_files(&staging)?
             .iter()
@@ -808,12 +850,18 @@ fn install_with_policy(
             &Provenance {
                 archive_sha256: hash,
                 inventory_sha256: installation_digest(&staging)?,
+                sideloaded: dir.1.is_content() && release.url.is_empty(),
             },
             4096,
         )?;
+        if let Some(contents) = &declaration.contents {
+            content::load(dir.1, &staging, &declaration.strings, contents)?;
+        }
         approve(&declaration)?;
-        let tool = probe(&staging)?;
-        check_contract(dir.1, &manifest, Some(&tool), Some(release))?;
+        if declaration.contents.is_none() {
+            let tool = probe(&staging)?;
+            check_contract(dir.1, &manifest, Some(&tool), Some(release))?;
+        }
         let target = dir.version_dir(release.version)?;
         if target.exists() {
             // Same version reinstalled: the verified copy replaces the old one.
@@ -882,6 +930,9 @@ fn prune_versions(dir: &InstallDir, active: &str, previous: Option<&str>) {
 
 /// Asks the installed tool for its contract and runs its own decoder check.
 fn probe_tool(tool: &Addon, dir: &Path) -> Result<ToolVersion, String> {
+    if tool.is_content() {
+        return Err("content packs cannot be launched".into());
+    }
     let executable = dir.join(tool.executable());
     let output = run_contained(
         Command::new(&executable)
@@ -1325,7 +1376,11 @@ pub(crate) fn install_dir(
         .path()
         .app_local_data_dir()
         .map_err(|error| error.to_string())?;
-    let dir = base.join(format!("{}-importer", tool.id));
+    let dir = if cfg!(debug_assertions) && tool.is_content() && tool.public_key.is_none() {
+        base.join(format!("{}-local-content", tool.id))
+    } else {
+        base.join(format!("{}-importer", tool.id))
+    };
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     if is_package_link(&fs::symlink_metadata(&dir).map_err(|error| error.to_string())?) {
         return Err("the addon installation directory is a link".into());

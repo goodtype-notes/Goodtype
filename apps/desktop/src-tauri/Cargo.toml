@@ -37,6 +37,8 @@ tokio = { version = "1", features = ["net", "io-util", "sync", "time", "macros"]
 getrandom = "0.3"
 # Reuse the pinned Typst parser to capture literal transitive grant dependencies.
 typst-syntax = "=0.15.1"
+# Validate the identity and entry point in ordinary Typst package metadata.
+toml = "1"
 
 [dev-dependencies]
 rmcp = { version = "=3.8.0", default-features = false, features = ["client"] }

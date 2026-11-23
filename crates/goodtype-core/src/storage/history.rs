@@ -144,12 +144,31 @@ pub fn commit_notebook(
     commit_notebook_with_precondition(selected_root, history, snapshot, None)
 }
 
+/// Commit a normal page change only if it can be undone.
+pub fn commit_notebook_with_undo(
+    selected_root: &Path,
+    history: &mut NotebookHistory,
+    snapshot: NotebookSnapshot,
+) -> Result<HistoryResult, StorageError> {
+    commit_notebook_inner(selected_root, history, snapshot, None, true)
+}
+
 /// Caller must hold the notebook lock throughout this operation.
 pub fn commit_notebook_with_precondition(
     selected_root: &Path,
     history: &mut NotebookHistory,
     snapshot: NotebookSnapshot,
     precondition: Option<super::ProposalPrecondition>,
+) -> Result<HistoryResult, StorageError> {
+    commit_notebook_inner(selected_root, history, snapshot, precondition, false)
+}
+
+fn commit_notebook_inner(
+    selected_root: &Path,
+    history: &mut NotebookHistory,
+    snapshot: NotebookSnapshot,
+    precondition: Option<super::ProposalPrecondition>,
+    require_undo: bool,
 ) -> Result<HistoryResult, StorageError> {
     let root = canonical_root(selected_root)?;
     let current = open_page(selected_root, &snapshot.page.id)?;
@@ -159,7 +178,14 @@ pub fn commit_notebook_with_precondition(
         ));
     }
     ensure_current(&root, history, &current, snapshot.page.revision)?;
-    commit_current_with_precondition(&root, history, current, snapshot, precondition)
+    commit_current_with_precondition(
+        &root,
+        history,
+        current,
+        snapshot,
+        precondition,
+        require_undo,
+    )
 }
 
 pub(super) fn commit_current_with_precondition(
@@ -168,6 +194,7 @@ pub(super) fn commit_current_with_precondition(
     current: NotebookSnapshot,
     mut snapshot: NotebookSnapshot,
     precondition: Option<super::ProposalPrecondition>,
+    require_undo: bool,
 ) -> Result<HistoryResult, StorageError> {
     if let Some(condition) = &precondition {
         super::check_proposal_base(root, &current, &condition.base)?;
@@ -186,9 +213,10 @@ pub(super) fn commit_current_with_precondition(
     // layers move with it, so a partially upgraded notebook is not representable.
     raise_schema_version(&mut snapshot);
     snapshot.page.revision = next_revision(&current)?;
-    if precondition
-        .as_ref()
-        .is_some_and(|condition| condition.require_retained_history)
+    if (require_undo
+        || precondition
+            .as_ref()
+            .is_some_and(|condition| condition.require_retained_history))
         && !history_preflight(history, &current, &snapshot)
     {
         return Err(StorageError::HistoryNotRetained);

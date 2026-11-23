@@ -9,14 +9,14 @@ pub mod export;
 pub mod page_source;
 
 mod embedded;
-pub use embedded::font_families;
+pub use embedded::{font_families, set_content_package_directory, with_content_package_scope};
 
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
 pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
-const MAX_WIDTH_PT: f64 = 10_000.0;
+pub const MAX_BLOCK_WIDTH_PT: f64 = 10_000.0;
 
 /// The header Goodtype writes above a Page text source when the writer picks a preset.
 ///
@@ -267,7 +267,10 @@ fn compile_block_with(
     packages: &'static typst_kit::packages::SystemPackages,
 ) -> Result<CompileResult, CompileError> {
     let root = checked_root_and_source(notebook_root, &request.source)?;
-    if !request.width_pt.is_finite() || request.width_pt <= 0.0 || request.width_pt > MAX_WIDTH_PT {
+    if !request.width_pt.is_finite()
+        || request.width_pt <= 0.0
+        || request.width_pt > MAX_BLOCK_WIDTH_PT
+    {
         return Err(CompileError::InvalidWidth(request.width_pt));
     }
 

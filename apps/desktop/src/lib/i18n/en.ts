@@ -1,5 +1,27 @@
 export const en = {
+  contentPacks: {
+    insertShape: "Insert shape",
+    search: "Search shapes",
+    all: "All libraries",
+    noShapesFound: "No shapes match your search.",
+    noShapes: "Install a shape pack from Addons to fill this library.",
+    preview: "Preview",
+    scale: "Scale",
+    insert: "Insert",
+    insertFailed: "Goodtype could not insert the shape.",
+    theme: "Theme",
+    defaultTheme: "Default",
+    contents: "Contents",
+    shapeCount_one: "{{count}} shape",
+    shapeCount_other: "{{count}} shapes",
+    typstPackages: "Adds Typst packages: {{names}}",
+    unavailable: "Contents are available after installation.",
+    loadLocal: "Load local pack…",
+    loadFailed: "Goodtype could not load the local content pack.",
+  },
   addons: {
+    engineeringShapes: { label: "Engineering Shapes", description: "Reusable technical drawing symbols." },
+    studyTemplates: { label: "Study Templates", description: "Page layouts for studying and taking notes." },
     store: {
       browse: "Browse addons",
       back: "Back",
@@ -21,7 +43,7 @@ export const en = {
       installPermissions: "It will be able to:",
       source: "From GitHub · {{repository}} · {{reference}}",
       verified: "Pinned by the signed registry",
-      kind: { import: "Import", recognize: "Recognition", theme: "Theme", other: "Addon" },
+      kind: { shapes: "Shapes", templates: "Templates", palettes: "Palette", content: "Content", import: "Import", recognize: "Recognition", theme: "Theme", other: "Addon" },
       installProblem: {
         download: "The addon download failed.",
         verify: "The downloaded package could not be verified.",
@@ -59,6 +81,7 @@ export const en = {
       "noPermissions": "No permissions declared.",
       "network": "Goodtype downloads packages from GitHub.",
       isolation: {
+        content: "Contains no program. Goodtype only reads its shapes, templates and colours.",
         sandbox: "Runs isolated: no network access, and it can read only its own installed files.",
         job: "Runs with your user's file and network access. Goodtype limits only its memory and running time.",
       },
