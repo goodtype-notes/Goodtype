@@ -23,6 +23,8 @@
   let manager = $state.raw<AddonManager>();
   let packs = $state.raw<ContentPack[]>([]);
   let sideloadFailed = $state(false);
+  /** Dev builds only: the raw reason, so a local pack can be fixed. Never shown in a release. */
+  let sideloadReason = $state("");
   let sideloadPending = $state(false);
   const dev = import.meta.env.DEV;
 
@@ -39,8 +41,9 @@
         await refreshPacks();
         window.dispatchEvent(new Event(ADDON_AVAILABILITY_CHANGED));
       }
-    } catch {
+    } catch (error) {
       sideloadFailed = true;
+      sideloadReason = String(error);
     } finally {
       sideloadPending = false;
     }
@@ -333,7 +336,7 @@
 
   <div class="scroll" bind:this={scroller} onscroll={placePrompt}>
     {#if sideloadFailed}
-      <p class="page problem" role="alert">{$t("contentPacks.loadFailed")}</p>
+      <p class="page problem" role="alert">{$t("contentPacks.loadFailed")}{#if dev && sideloadReason} <code>{sideloadReason}</code>{/if}</p>
     {/if}
     {#if listFailed}
       <div class="page problem"><span role="alert">{$t("addons.store.loadFailed")}</span>

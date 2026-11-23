@@ -184,6 +184,17 @@ pub(super) fn fetch(
     Ok(bytes)
 }
 
+/// The signed descriptor each kind of addon release publishes beside its ZIP. Math's published
+/// releases name theirs `recognizer-update.json`; looking for the importer name broke installing it.
+pub(super) fn descriptor_name(tool: &Addon) -> &'static str {
+    match tool.kind {
+        super::Kind::Content => "content-update.json",
+        super::Kind::Import { .. } => "importer-update.json",
+        super::Kind::Recognize { .. } => "recognizer-update.json",
+        super::Kind::Objects { .. } => "addon-update.json",
+    }
+}
+
 pub(super) fn descriptor_for(
     tool: &Addon,
     release: &super::registry::Release,
@@ -193,11 +204,7 @@ pub(super) fn descriptor_for(
         .rsplit_once('/')
         .ok_or("invalid addon asset URL")?;
     let allowed = |url: &str, redirected| super::download_url_allowed(tool, url, redirected);
-    let name = if tool.is_content() {
-        "content-update.json"
-    } else {
-        "importer-update.json"
-    };
+    let name = descriptor_name(tool);
     let bytes = fetch(&format!("{folder}/{name}"), MAX_DESCRIPTOR, allowed)
         .map_err(|problem| format!("cannot read the addon descriptor ({problem:?})"))?;
     let signature = fetch(&format!("{folder}/{name}.sig"), 64, allowed)
@@ -224,6 +231,15 @@ mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
     use serde_json::json;
+
+    #[test]
+    fn each_kind_reads_the_descriptor_its_releases_publish() {
+        use super::super::catalog::{CONNECTORS, ENGINEERING, MATH};
+        assert_eq!(descriptor_name(&GOODNOTES), "importer-update.json");
+        assert_eq!(descriptor_name(&MATH), "recognizer-update.json");
+        assert_eq!(descriptor_name(&ENGINEERING), "content-update.json");
+        assert_eq!(descriptor_name(&CONNECTORS), "addon-update.json");
+    }
 
     fn descriptor(tool: &Addon) -> serde_json::Value {
         let name = format!("{}-0.1.1-windows-x64.zip", tool.package);

@@ -875,7 +875,8 @@ pub async fn addon_sideload_content(
     let folder = folder.into_path().map_err(|error| error.to_string())?;
     tauri::async_runtime::spawn_blocking(move || sideload(&app, &folder))
         .await
-        .map_err(|_| "invalid-manifest")??;
+        .map_err(|_| "invalid-manifest")?
+        .inspect_err(|error| eprintln!("local addon load failed: {error}"))?;
     Ok(true)
 }
 
@@ -890,7 +891,8 @@ fn sideload_archive(folder: &Path) -> Result<(&'static Addon, String, tempfile::
         }
     }
     let manifest_file = folder.join(manifest::FILE);
-    let metadata = fs::symlink_metadata(&manifest_file).map_err(|err| err.to_string())?;
+    let metadata = fs::symlink_metadata(&manifest_file)
+        .map_err(|err| format!("{}: {err}", manifest_file.display()))?;
     if is_package_link(&metadata) || !metadata.is_file() {
         return Err("invalid content manifest file".into());
     }
@@ -912,6 +914,7 @@ fn sideload_archive(folder: &Path) -> Result<(&'static Addon, String, tempfile::
         return Err("invalid-manifest".into());
     }
     let mut files = vec![manifest::FILE.to_string()];
+    let mut sources = std::collections::HashMap::new();
     if addon.is_content() {
         files.extend(
             package_files(&folder.join("content"))?
@@ -920,11 +923,17 @@ fn sideload_archive(folder: &Path) -> Result<(&'static Addon, String, tempfile::
         );
     } else {
         let executable = addon.executable();
-        let metadata =
-            fs::symlink_metadata(folder.join(&executable)).map_err(|error| error.to_string())?;
+        // A package folder holds the executable beside the manifest; a source checkout holds it
+        // in its release build output.
+        let path = [folder.join(&executable), folder.join("target/release").join(&executable)]
+            .into_iter()
+            .find(|path| path.is_file())
+            .ok_or_else(|| format!("{}: not found (also looked in target\release)", folder.join(&executable).display()))?;
+        let metadata = fs::symlink_metadata(&path).map_err(|error| format!("{}: {error}", path.display()))?;
         if !metadata.is_file() || is_package_link(&metadata) {
             return Err("invalid local addon executable".into());
         }
+        sources.insert(executable.clone(), path);
         files.push(executable);
     }
     if files.len() > MAX_ARCHIVE_ENTRIES {
@@ -939,7 +948,8 @@ fn sideload_archive(folder: &Path) -> Result<(&'static Addon, String, tempfile::
         MAX_UNPACKED_BYTES
     } as usize;
     for relative in files {
-        let bytes = read_bounded(&folder.join(&relative), budget)?;
+        let source = sources.get(&relative).cloned().unwrap_or_else(|| folder.join(&relative));
+        let bytes = read_bounded(&source, budget)?;
         budget -= bytes.len();
         zip.start_file(
             format!("{top}/{relative}"),
