@@ -26,6 +26,8 @@ mod validate;
 mod write;
 
 #[cfg(test)]
+mod addon_data_tests;
+#[cfg(test)]
 mod fixtures;
 
 pub use crate::object::{MAX_IMAGE_BYTES, MAX_PDF_BYTES};
@@ -35,9 +37,9 @@ pub use calculations::{
 };
 pub use delta::{PageDelta, commit_page_delta, commit_page_delta_with_precondition};
 pub use history::{
-    HistoryResult, NotebookHistory, commit_notebook, commit_notebook_with_precondition,
-    commit_notebook_with_undo, focus_page, history_preflight, observe_notebook, observe_page,
-    redo_notebook, undo_notebook,
+    HistoryResult, NotebookHistory, amend_notebook, commit_notebook,
+    commit_notebook_with_precondition, commit_notebook_with_undo, focus_page, history_preflight,
+    observe_notebook, observe_page, redo_notebook, undo_notebook,
 };
 pub use pages::{
     CalculationExecutionPlan, CalculationStep, GeneratedPage, NotebookStructureHistory,

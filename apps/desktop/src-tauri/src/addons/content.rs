@@ -720,6 +720,8 @@ fn commit_shape(
             group_id,
             created_at: stamp.clone(),
             modified_at: stamp.clone(),
+            addon_data: None,
+            ports: None,
         })
     };
     let mut child_ids = Vec::new();

@@ -40,7 +40,7 @@ pub(crate) fn required_schema_version(page: &Page) -> u32 {
     } else {
         MIN_SUPPORTED_SCHEMA_VERSION
     };
-    if page
+    let version = if page
         .ink_layers
         .iter()
         .any(|reference| reference.path.ends_with(".ink"))
@@ -48,6 +48,15 @@ pub(crate) fn required_schema_version(page: &Page) -> u32 {
         object_version.max(BINARY_INK_SCHEMA_VERSION)
     } else {
         object_version
+    };
+    if page
+        .objects
+        .iter()
+        .any(|object| crate::addon_data::uses_addon_fields(object.fields()))
+    {
+        version.max(crate::ADDON_DATA_SCHEMA_VERSION)
+    } else {
+        version
     }
 }
 
@@ -392,6 +401,11 @@ fn validate_page_content(snapshot: &NotebookSnapshot) -> Result<(), StorageError
         if objects[id.as_str()].fields().reading_order != index as u32 {
             return invalid("object reading-order values must match the page reading order");
         }
+    }
+
+    let ids = objects.keys().copied().collect::<HashSet<_>>();
+    for object in &page.objects {
+        crate::addon_data::validate_object(object, &ids).map_err(invalid_error)?;
     }
 
     validate_groups(&objects)?;

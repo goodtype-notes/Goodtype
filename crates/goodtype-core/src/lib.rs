@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+pub mod addon_data;
 pub mod calculation;
 pub mod ink_codec;
 pub mod layout;
@@ -22,7 +23,9 @@ pub const SHAPE_SCHEMA_VERSION: u32 = 2;
 /// Binary ink layer files are what version 3 added.
 pub const BINARY_INK_SCHEMA_VERSION: u32 = 3;
 pub const CALCULATION_SCHEMA_VERSION: u32 = 4;
-pub const SCHEMA_VERSION: u32 = CALCULATION_SCHEMA_VERSION;
+/// `addonData` and `ports` on page objects (ADR 0046). Pages without them keep their version.
+pub const ADDON_DATA_SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = ADDON_DATA_SCHEMA_VERSION;
 /// Legacy strokes painted above movable objects. Missing version-1 values keep that look.
 pub const DEFAULT_INK_Z_INDEX: i32 = 1_000_000;
 

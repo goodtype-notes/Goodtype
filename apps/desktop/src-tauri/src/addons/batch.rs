@@ -339,6 +339,8 @@ fn fresh_fields(x: f64, y: f64) -> Result<ObjectFields, String> {
         group_id: None,
         created_at: timestamp.clone(),
         modified_at: timestamp,
+        addon_data: None,
+        ports: None,
     })
 }
 

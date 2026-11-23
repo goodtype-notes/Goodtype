@@ -398,6 +398,8 @@ fn create_page_inner(
                 group_id: None,
                 created_at: modified_at.into(),
                 modified_at: modified_at.into(),
+                addon_data: None,
+                ports: None,
             },
             source_path: path.clone(),
         });
@@ -523,7 +525,11 @@ fn create_calculation_page_inner(
         width_pt: A4_WIDTH_PT,
         height_pt: 84.0,
     };
-    guard.manifest.schema_version = crate::CALCULATION_SCHEMA_VERSION;
+    // Never lower: a notebook that already uses addon data stays at its newer version.
+    guard.manifest.schema_version = guard
+        .manifest
+        .schema_version
+        .max(crate::CALCULATION_SCHEMA_VERSION);
     guard.manifest.modified_at = modified_at.to_owned();
     guard.manifest.pages.insert(
         insert_at,

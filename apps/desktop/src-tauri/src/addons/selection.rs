@@ -365,6 +365,8 @@ pub(super) fn compile(
             group_id: None,
             created_at: timestamp.clone(),
             modified_at: timestamp,
+            addon_data: None,
+            ports: None,
         },
         layout_width_pt,
         measured_width_pt: w,
