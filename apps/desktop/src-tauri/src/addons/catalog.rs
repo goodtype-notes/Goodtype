@@ -27,6 +27,7 @@ pub static GOODNOTES: Addon = Addon {
         sha256: "ef8bfd150626eab885cf1479131e5945fcfd2a9da4152aab3a03311507db5742",
         decoder_commit: "66028455fd7fc61b7931679915d811a25485e3ad",
     }),
+    contribution_surfaces: &[],
     kind: Kind::Import {
         filter: "Goodnotes",
         extensions: &["goodnotes", "zip"],
@@ -61,6 +62,7 @@ pub static ONENOTE: Addon = Addon {
         sha256: "a09f7899eef1280819a7da0b12e1355a76e2a71c774e738b0945e07bac9a63dc",
         decoder_commit: "727389a674665dc07e0c31818cd4b54b64b9c684",
     }),
+    contribution_surfaces: &[],
     kind: Kind::Import {
         filter: "OneNote",
         extensions: &["one", "onetoc2", "onepkg", "zip"],
@@ -86,6 +88,10 @@ pub static MATH: Addon = Addon {
         0x55, 0x81,
     ]),
     pinned: None,
+    contribution_surfaces: &[
+        super::manifest::Surface::InsertForm,
+        super::manifest::Surface::PageGenerator,
+    ],
     kind: Kind::Recognize {
         recognizes: "math",
         check_failure: "math recognizer self-check failed",

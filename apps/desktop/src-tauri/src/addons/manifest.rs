@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    contributions::{Field, Format, valid_fields},
+    *,
+};
 use serde::de::{MapAccess, Visitor};
 use std::collections::BTreeMap;
 
@@ -14,6 +17,7 @@ pub enum Permission {
     PublishImportBatch,
     SelectedInk,
     AddPageObjects,
+    ReadPages,
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize, PartialEq)]
@@ -24,19 +28,40 @@ enum Transport {
     Content,
 }
 
-#[derive(Clone, Copy, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-enum Surface {
+pub(super) enum Surface {
     LibraryImport,
     InkSelection,
+    InsertForm,
+    PageGenerator,
+    Export,
 }
 
 #[derive(Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-struct Command {
-    id: String,
-    label: String,
-    surface: Surface,
+pub(super) struct Command {
+    pub id: String,
+    pub label: String,
+    pub surface: Surface,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional"
+    )]
+    pub form: Option<Vec<Field>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional"
+    )]
+    pub format: Option<Format>,
+}
+
+fn optional<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    input: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(input).map(Some)
 }
 
 type Locale = BTreeMap<String, String>;
@@ -88,8 +113,8 @@ pub(super) struct Manifest {
     pub contents: Option<super::content::Contents>,
     transport: Transport,
     pub permissions: Vec<Permission>,
-    commands: Vec<Command>,
-    settings: Vec<serde_json::Value>,
+    pub commands: Vec<Command>,
+    pub settings: Vec<Field>,
     pub strings: Strings,
 }
 
@@ -144,8 +169,19 @@ impl Addon {
                 &[PickedImportFile, DerivedImportArtwork, PublishImportBatch]
             }
             Kind::Import { .. } => &[PickedImportFile, PublishImportBatch],
+            Kind::Recognize { .. } if self.contribution_surfaces.contains(&Surface::Export) => {
+                &[SelectedInk, AddPageObjects, ReadPages]
+            }
             Kind::Recognize { .. } => &[SelectedInk, AddPageObjects],
             Kind::Content => &[],
+        }
+    }
+
+    fn allows_command(&self, command: &Command) -> bool {
+        match command.surface {
+            Surface::LibraryImport => self.imports_notebooks() && command.id == "import-notebooks",
+            Surface::InkSelection => !self.imports_notebooks() && command.id == "recognize-math",
+            surface => self.contribution_surfaces.contains(&surface),
         }
     }
 
@@ -191,6 +227,8 @@ impl Addon {
                     id: id.into(),
                     label: "run".into(),
                     surface,
+                    form: None,
+                    format: None,
                 }]
             },
             settings: vec![],
@@ -239,11 +277,20 @@ impl Manifest {
             && self
                 .commands
                 .iter()
-                .map(|command| (&command.id, command.surface))
-                .eq(other
-                    .commands
-                    .iter()
-                    .map(|command| (&command.id, command.surface)))
+                .map(|command| {
+                    (
+                        &command.id,
+                        command.surface,
+                        command.format.as_ref().is_some_and(|f| f.assets),
+                    )
+                })
+                .eq(other.commands.iter().map(|command| {
+                    (
+                        &command.id,
+                        command.surface,
+                        command.format.as_ref().is_some_and(|f| f.assets),
+                    )
+                }))
     }
 }
 
@@ -269,7 +316,8 @@ pub(super) fn parse(bytes: &[u8], addon: &Addon, version: &str) -> Result<Manife
         || manifest.id != addon.id
         || manifest.version != version
         || !release_version(version)
-        || !manifest.settings.is_empty()
+        || (!manifest.uses_session() && !manifest.settings.is_empty())
+        || !valid_fields(&manifest.settings, &manifest.strings.en, true)
         || manifest.target != TARGET
         || manifest.entrypoint != ceiling.entrypoint
         || manifest.transport != ceiling.transport
@@ -289,10 +337,33 @@ pub(super) fn parse(bytes: &[u8], addon: &Addon, version: &str) -> Result<Manife
         || manifest.commands.iter().any(|command| {
             !commands.insert(&command.id)
                 || !manifest.strings.en.contains_key(&command.label)
-                || !ceiling
-                    .commands
-                    .iter()
-                    .any(|allowed| allowed.id == command.id && allowed.surface == command.surface)
+                || !identifier(&command.id)
+                || !addon.allows_command(command)
+                || match command.surface {
+                    Surface::LibraryImport => command.form.is_some() || command.format.is_some(),
+                    Surface::InkSelection => {
+                        command.form.is_some()
+                            || command.format.is_some()
+                            || !permissions.contains(&Permission::SelectedInk)
+                            || !permissions.contains(&Permission::AddPageObjects)
+                    }
+                    Surface::InsertForm | Surface::PageGenerator => {
+                        command.format.is_some()
+                            || !command
+                                .form
+                                .as_ref()
+                                .is_some_and(|form| valid_fields(form, &manifest.strings.en, false))
+                            || !permissions.contains(&Permission::AddPageObjects)
+                    }
+                    Surface::Export => {
+                        command.form.is_some()
+                            || !command
+                                .format
+                                .as_ref()
+                                .is_some_and(|format| format.valid(&manifest.strings.en))
+                            || !permissions.contains(&Permission::ReadPages)
+                    }
+                }
         })
         || !manifest.strings.en.contains_key("name")
         || !manifest.strings.en.keys().eq(manifest.strings.de.keys())

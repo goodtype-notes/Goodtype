@@ -90,7 +90,8 @@
           "derived-import-artwork",
           "publish-import-batch",
           "selected-ink",
-          "add-page-objects"
+          "add-page-objects",
+          "read-pages"
         ]
       },
       "uniqueItems": true
@@ -115,10 +116,104 @@
           "surface": {
             "enum": [
               "library-import",
-              "ink-selection"
+              "ink-selection",
+              "insert-form",
+              "page-generator",
+              "export"
             ]
+          },
+          "form": {
+            "type": "array",
+            "maxItems": 12,
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/toggle"
+                },
+                {
+                  "$ref": "#/$defs/choice"
+                },
+                {
+                  "$ref": "#/$defs/text"
+                },
+                {
+                  "$ref": "#/$defs/number"
+                }
+              ]
+            }
+          },
+          "format": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "extension",
+              "label"
+            ],
+            "properties": {
+              "extension": {
+                "type": "string",
+                "pattern": "^[a-z0-9]{1,8}(?![\\s\\S])",
+                "not": {
+                  "const": "goodtype"
+                }
+              },
+              "label": {
+                "$ref": "#/$defs/identifier"
+              },
+              "assets": {
+                "type": "boolean",
+                "default": false
+              }
+            }
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "surface": {
+                  "enum": [
+                    "insert-form",
+                    "page-generator"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "form"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "form"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "surface": {
+                  "const": "export"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "format"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "format"
+                ]
+              }
+            }
+          }
+        ]
       },
       "maxItems": 16
     },
@@ -127,88 +222,10 @@
       "items": {
         "oneOf": [
           {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "id",
-              "label",
-              "type",
-              "default"
-            ],
-            "properties": {
-              "id": {
-                "$ref": "#/$defs/identifier"
-              },
-              "label": {
-                "$ref": "#/$defs/identifier"
-              },
-              "hint": {
-                "$ref": "#/$defs/identifier"
-              },
-              "search": {
-                "$ref": "#/$defs/identifier"
-              },
-              "type": {
-                "const": "toggle"
-              },
-              "default": {
-                "type": "boolean"
-              }
-            }
+            "$ref": "#/$defs/toggle"
           },
           {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "id",
-              "label",
-              "type",
-              "default",
-              "choices"
-            ],
-            "properties": {
-              "id": {
-                "$ref": "#/$defs/identifier"
-              },
-              "label": {
-                "$ref": "#/$defs/identifier"
-              },
-              "hint": {
-                "$ref": "#/$defs/identifier"
-              },
-              "search": {
-                "$ref": "#/$defs/identifier"
-              },
-              "type": {
-                "const": "choice"
-              },
-              "default": {
-                "type": "string",
-                "minLength": 1
-              },
-              "choices": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "value",
-                    "label"
-                  ],
-                  "properties": {
-                    "value": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "label": {
-                      "$ref": "#/$defs/identifier"
-                    }
-                  }
-                },
-                "minItems": 2,
-                "maxItems": 8
-              }
-            }
+            "$ref": "#/$defs/choice"
           }
         ]
       },
@@ -264,6 +281,282 @@
         }
       },
       "additionalProperties": false
+    },
+    "toggle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "type",
+        "default"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "label": {
+          "$ref": "#/$defs/identifier"
+        },
+        "hint": {
+          "$ref": "#/$defs/identifier"
+        },
+        "search": {
+          "$ref": "#/$defs/identifier"
+        },
+        "type": {
+          "const": "toggle"
+        },
+        "default": {
+          "type": "boolean"
+        }
+      }
+    },
+    "choice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "type",
+        "default",
+        "choices"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "label": {
+          "$ref": "#/$defs/identifier"
+        },
+        "hint": {
+          "$ref": "#/$defs/identifier"
+        },
+        "search": {
+          "$ref": "#/$defs/identifier"
+        },
+        "type": {
+          "const": "choice"
+        },
+        "default": {
+          "$ref": "#/$defs/identifier"
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "label"
+            ],
+            "properties": {
+              "value": {
+                "$ref": "#/$defs/identifier"
+              },
+              "label": {
+                "$ref": "#/$defs/identifier"
+              }
+            }
+          },
+          "minItems": 2,
+          "maxItems": 8,
+          "uniqueItems": true
+        }
+      }
+    },
+    "text": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "type",
+        "maxLength"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "label": {
+          "$ref": "#/$defs/identifier"
+        },
+        "hint": {
+          "$ref": "#/$defs/identifier"
+        },
+        "search": {
+          "$ref": "#/$defs/identifier"
+        },
+        "type": {
+          "const": "text"
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 512
+        },
+        "pattern": {
+          "enum": [
+            "any",
+            "number",
+            "identifier"
+          ]
+        },
+        "default": {
+          "type": "string",
+          "maxLength": 512
+        }
+      }
+    },
+    "number": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "type",
+        "min",
+        "max",
+        "step",
+        "default"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "label": {
+          "$ref": "#/$defs/identifier"
+        },
+        "hint": {
+          "$ref": "#/$defs/identifier"
+        },
+        "search": {
+          "$ref": "#/$defs/identifier"
+        },
+        "type": {
+          "const": "number"
+        },
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "step": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "default": {
+          "type": "number"
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "transport": {
+            "const": "legacy-import-cli"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "settings": {
+            "maxItems": 0
+          },
+          "commands": {
+            "items": {
+              "properties": {
+                "surface": {
+                  "const": "library-import"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "commands": {
+            "contains": {
+              "properties": {
+                "surface": {
+                  "enum": [
+                    "insert-form",
+                    "page-generator",
+                    "ink-selection"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "permissions": {
+            "contains": {
+              "const": "add-page-objects"
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "commands": {
+            "contains": {
+              "properties": {
+                "surface": {
+                  "enum": [
+                    "ink-selection"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "permissions": {
+            "contains": {
+              "const": "selected-ink"
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "commands": {
+            "contains": {
+              "properties": {
+                "surface": {
+                  "enum": [
+                    "export"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "permissions": {
+            "contains": {
+              "const": "read-pages"
+            }
+          }
+        }
+      }
+    }
+  ]
 }

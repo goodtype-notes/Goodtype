@@ -21,9 +21,12 @@ use tauri::Manager;
 
 use crate::store::read_bounded;
 
+mod batch;
 mod catalog;
 pub(crate) mod content;
+pub(crate) mod contributions;
 pub(crate) mod details;
+pub(crate) mod export;
 pub(crate) mod import;
 pub(crate) mod manager;
 mod manifest;
@@ -72,6 +75,7 @@ pub struct Addon {
     en: (&'static str, &'static str),
     de: (&'static str, &'static str),
     kind: Kind,
+    contribution_surfaces: &'static [manifest::Surface],
 }
 
 #[derive(Debug)]

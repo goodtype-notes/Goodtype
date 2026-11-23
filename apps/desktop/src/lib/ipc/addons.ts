@@ -43,7 +43,7 @@ export async function mathRecognitionAddon(): Promise<RecognitionAddon | undefin
 
 export type AddonPermission =
   | "picked-import-file" | "derived-import-artwork" | "publish-import-batch"
-  | "selected-ink" | "add-page-objects";
+  | "selected-ink" | "add-page-objects" | "read-pages";
 
 type Release = { version: string; sizeBytes: number };
 
@@ -133,8 +133,10 @@ export async function rollbackAddon(id: string) {
   await invoke<void>("addon_rollback", { id });
   window.dispatchEvent(new Event(ADDON_AVAILABILITY_CHANGED));
 }
-export const setAddonDirectApply = (id: string | null, allowed: boolean) =>
-  invoke<void>("addon_set_direct_apply", { id, allowed });
+export async function setAddonDirectApply(id: string | null, allowed: boolean) {
+  await invoke<void>("addon_set_direct_apply", { id, allowed });
+  window.dispatchEvent(new Event(ADDON_AVAILABILITY_CHANGED));
+}
 
 export const resetAddonPolicy = () => invoke<void>("addon_reset_policy");
 export const approveAddon = (id: string, token: string) => invoke<void>("addon_approve", { id, token });
@@ -179,3 +181,49 @@ export const editAddonProposal = (id: string, version: number, sources: string[]
   invoke<AddonReview>("addon_edit", { id, version, sources });
 export const dismissAddonProposal = (id: string) => invoke<void>("addon_dismiss", { id });
 export const cancelAddonCommand = (requestId: string) => invoke<void>("addon_cancel", { requestId });
+
+export type AddonValue = string | number | boolean;
+export type AddonValues = Record<string, AddonValue>;
+type FieldLabel = { id: string; label: string; hint?: string | null; search?: string | null };
+export type AddonField = FieldLabel & (
+  | { type: "toggle"; default: boolean }
+  | { type: "choice"; default: string; choices: { value: string; label: string }[] }
+  | { type: "text"; default: string; maxLength: number; pattern?: "any" | "number" | "identifier" | null }
+  | { type: "number"; default: number; min: number; max: number; step: number }
+);
+export type AddonContribution = {
+  addonId: string;
+  enabled: boolean;
+  directApply?: boolean;
+  commands: ContributionCommand[];
+  strings: Record<"en" | "de", Record<string, string>>;
+  settings: AddonField[];
+  values: AddonValues;
+};
+export type ContributionCommand = { id: string; label: string } & (
+  | { surface: "insert-form" | "page-generator"; form: AddonField[] }
+  | { surface: "export"; format: { extension: string; label: string; assets: boolean } }
+);
+export type ContributionEntry = { addon: AddonContribution; command: ContributionCommand };
+export const contributionText = (addon: AddonContribution, key: string, language: string) =>
+  addon.strings[language === "de" ? "de" : "en"][key] ?? addon.strings.en[key] ?? "";
+export const addonContributions = () => invoke<AddonContribution[]>("addon_contributions");
+export const setAddonField = (id: string, field: string, value: AddonValue) =>
+  invoke<void>("addon_set_field", { id, field, value });
+
+type FormRequest = {
+  root: string; pageId: string; addonId: string; command: string; requestId: string;
+  form: AddonValues; reviewFirst: boolean; geometry: import("../model").PageGeometry | null; anchor: [number, number];
+};
+export type FormPreview = {
+  id: string; direct: boolean; geometry: import("../model").PageGeometry;
+  pages: { background: import("../model").PageBackground; items: import("./helper").ProposalItem[] }[];
+};
+export const previewAddonForm = (request: FormRequest) => invoke<FormPreview>("addon_form_preview", { request });
+export const dismissAddonForm = (id: string) => invoke<void>("addon_form_dismiss", { id });
+export const insertAddonForm = (root: string, pageId: string, id: string, direct: boolean) =>
+  invoke<import("./types").HistoryResult | null>("addon_form_insert", { root, pageId, id, direct });
+export const addGeneratedPages = (root: string, id: string, position: import("../model").PagePosition) =>
+  invoke<import("./types").StructureHistoryResult>("addon_form_add_pages", { root, id, position });
+export const exportWithAddon = (root: string, pageId: string | null, entry: ContributionEntry, language: string) =>
+  invoke<boolean>("addon_export", { request: { root, pageId, addonId: entry.addon.addonId, command: entry.command.id, language } });

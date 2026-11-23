@@ -5,19 +5,21 @@
   import { contentPacks, packKind, packText, shapeLibraries, type ContentPack } from "./content";
   import { displayLocale, formatNumber, locale, t, type MessageKey } from "../../i18n";
   import {
-    ADDON_AVAILABILITY_CHANGED, addonCatalog, addonDetails, addonText, checkAddonRegistry,
+    ADDON_AVAILABILITY_CHANGED, addonCatalog, addonContributions, addonDetails, addonText, checkAddonRegistry,
     installAddon, listAddons, removeAddon, rollbackAddon, setAddonDirectApply, setAddonEnabled,
-    updateAddon, type AddonDetails, type AddonManager, type ManagedAddon,
+    updateAddon, type AddonContribution, type AddonDetails, type AddonManager, type ManagedAddon,
   } from "../../ipc/addons";
   import { cancelImporter, megabytes } from "../../ipc/importer";
   import AddonApproval from "../AddonApproval.svelte";
   import AddonPermissions from "../AddonPermissions.svelte";
   import ConfirmDialog from "../ConfirmDialog.svelte";
+  import AddonSettings from "./AddonSettings.svelte";
   import AddonPreview from "./AddonPreview.svelte";
   import ReadmeView from "./ReadmeView.svelte";
   import { addonAction, downloadPercent, matchesAddon } from "./storeModel";
 
   let { onClose }: { onClose: () => void } = $props();
+  let contributions = $state.raw<AddonContribution[]>([]);
   let manager = $state.raw<AddonManager>();
   let packs = $state.raw<ContentPack[]>([]);
   let sideloadFailed = $state(false);
@@ -106,6 +108,7 @@
       if (changed) {
         void refreshPacks();
         window.dispatchEvent(new Event(ADDON_AVAILABILITY_CHANGED));
+        void loadFields();
       }
       listFailed = false;
     } catch {
@@ -139,10 +142,16 @@
     return (addon.summary && addonText(addon.summary, language)) || (key ? $t(key) : "");
   }
 
+  async function loadFields() {
+    try { contributions = await addonContributions(); }
+    catch { contributions = []; }
+  }
+
   async function openDetail(addon: ManagedAddon) {
     gridScroll = scroller.scrollTop;
     selected = addon.id;
     void loadDetails(addon.id);
+    void loadFields();
     await tick();
     scroller.scrollTop = 0;
     detailHeading?.focus();
@@ -424,6 +433,12 @@
             <p class="muted">{$t("addons.manager.network")}</p>
           </section>
           {#if adjustable}
+            {@const contribution = contributions.find(entry => entry.addonId === active.id)}
+            {#if contribution}
+              {#key active.id + "/" + active.installed}
+                <AddonSettings addon={contribution} disabled={locked || manager?.recovery} />
+              {/key}
+            {/if}
             <section class="switches">
               <button type="button" class="switch-row" role="switch" aria-checked={active.status === "enabled"} disabled={locked || manager?.recovery}
                 onclick={() => void run(active, () => setAddonEnabled(active.id, active.status !== "enabled"))}>

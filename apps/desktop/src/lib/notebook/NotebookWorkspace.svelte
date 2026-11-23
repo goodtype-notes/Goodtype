@@ -75,8 +75,9 @@
   import { addWidth as addRowWidth, canRemoveWidth, editWidth as editRowWidth, movePattern, moveSpacing, patternForWidth, prunePatterns, pruneSpacings, removeWidth as removeRowWidth, spacingForWidth, withWidthPattern, withWidthSpacing, widthTaken, WIDTH_BOUNDS_MM } from "./widths";
   import ConfirmDialog from "../workspace/ConfirmDialog.svelte";
   import TranscriptionPanel from "./TranscriptionPanel.svelte";
+  import AddonForm from "../workspace/addons/AddonForm.svelte";
   import AddonCommandPanel from "./AddonCommandPanel.svelte";
-  import { ADDON_AVAILABILITY_CHANGED, addonSelectionCommands, addonText, type SelectionCommand } from "../ipc/addons";
+  import { ADDON_AVAILABILITY_CHANGED, addonContributions, addonSelectionCommands, addonText, contributionText, type AddonContribution, type ContributionEntry, type SelectionCommand } from "../ipc/addons";
   import { recognitionCapabilities, type InkPolylines, type RecognitionCapabilities } from "../ipc/recognition";
   import { inkPolylines, polylineBounds, shapePolylines, transcriptionPlacement } from "./transcription";
   import ConflictDialog from "../workspace/ConflictDialog.svelte";
@@ -367,7 +368,27 @@
   /** One explicit addon run, pinned to the page and committed strokes it was started on. */
   let addonRun = $state<{ key: number; pageId: string; strokeIds: string[]; command: SelectionCommand } | null>(null);
   let addonRuns = 0;
-  const loadAddonCommands = () => { void addonSelectionCommands().then(found => (addonCommands = found)).catch(() => (addonCommands = [])); };
+  let contributions = $state.raw<AddonContribution[]>([]);
+  let addPageTrigger: HTMLButtonElement;
+  let moreTrigger: HTMLButtonElement;
+  let formRun = $state<{ entries: ContributionEntry[]; position?: PagePosition; pageId: string; root: string }>();
+  $effect(() => {
+    if (formRun && (formRun.pageId !== session.activePageId || formRun.root !== session.root)) formRun = undefined;
+  });
+  async function closeAddonForm() {
+    const trigger = formRun?.position ? addPageTrigger : moreTrigger;
+    formRun = undefined;
+    await tick();
+    trigger?.focus();
+  }
+
+  const entries = (surface: ContributionEntry["command"]["surface"]) =>
+    contributions.filter(addon => addon.enabled).flatMap(addon =>
+      addon.commands.filter(command => command.surface === surface).map(command => ({ addon, command })));
+  const loadAddonCommands = () => {
+    void addonSelectionCommands().then(found => (addonCommands = found)).catch(() => (addonCommands = []));
+    void addonContributions().then(found => (contributions = found)).catch(() => (contributions = []));
+  };
   let zoom = $state(1);
   let tool = $state<InkTool>("pen");
   let strokeMetrics = $state<StrokePerformance[]>([]);
@@ -1137,6 +1158,11 @@
         // status bar and the tab.
         entries: [
           ...($helper?.enabled ? [{ kind: "action" as const, id: "ask-ai", icon: "M5 5h14v10H10l-5 4Z", label: $t("helper.askAboutPage"), onSelect: $codexStatus?.available ? askAboutPage : explainAISetup }] : []),
+          ...(entries("insert-form").length && !session.activeSnapshot?.page.calculation ? [{
+            kind: "action" as const, id: "addon-insert", label: $t("addons.contributions.insertTitle"),
+            icon: "M12 5v14M5 12h14",
+            onSelect: () => { formRun = { entries: entries("insert-form"), pageId: session.activePageId, root: session.root }; },
+          }] : []),
           { kind: "action", id: "duplicate", label: $t("workspace.duplicatePage"), icon: "M9 9h10v12H9zM5 15V3h10v2", onSelect: session.duplicateActivePage },
         ],
       },
@@ -1679,7 +1705,7 @@
   });
 
   function historyShortcut(event: KeyboardEvent) {
-    if (event.defaultPrevented || addonsOpen || shapeLibraryOpen) return;
+    if (formRun || event.defaultPrevented || addonsOpen || shapeLibraryOpen) return;
     // Every shortcut below edits, navigates or replaces the page; none may race a replacing reply.
     if (session.pageInputLocked) return;
     if (event.ctrlKey || event.metaKey) {
@@ -2017,6 +2043,8 @@
           </button>
           {#if exportOpen}
             <ExportMenu
+              formats={entries("export")}
+              onAddonExport={(entry, current) => void session.exportAddon(entry, current)}
               choice={exportChoice}
               pageNumber={session.pageNumber}
               pageCount={session.pageCount}
@@ -2056,6 +2084,7 @@
               onOrientationChange={(next) => (addPageOrientation = next)}
               onInsertShape={session.activeCalculation || !session.root ? undefined : openShapeLibrary}
               onClose={() => (addPageOpen = false)}
+              generators={entries("page-generator").length ? generatorButtons : undefined}
             />
           {/if}
         </div>
@@ -2066,7 +2095,7 @@
       <button class="icon-button" class:active={sideEditorOpen} type="button" aria-label={$t("workspace.pageTextAndTypstSourceView")} aria-pressed={sideEditorOpen} title={$t("workspace.editorViewCtrlShiftE")} onclick={toggleSideEditor}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"></rect><path d="M10 4.5v15"></path></svg>
       </button>
-      <button class="icon-button" class:active={moreOpen} type="button" aria-label={$t("workspace.moreNotebookActions")} aria-expanded={moreOpen} data-preserve-selection data-helper-activity-trigger onclick={() => (moreOpen = !moreOpen)}>
+      <button class="icon-button" class:active={moreOpen} bind:this={moreTrigger} type="button" aria-label={$t("workspace.moreNotebookActions")} aria-expanded={moreOpen} data-preserve-selection data-helper-activity-trigger onclick={() => (moreOpen = !moreOpen)}>
         <svg class="solid-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="19" cy="12" r="1.7"></circle></svg>
       </button>
     </div>
@@ -2729,6 +2758,13 @@
       onClose={() => (transcribing = null)}
     />
   {/if}
+  {#if formRun && formRun.pageId === session.activePageId && formRun.root === session.root}
+    {@const run = formRun}
+    <AddonForm entries={run.entries} root={run.root} pageId={run.pageId}
+      geometry={run.position ? addPageGeometry : null} flush={session.persist}
+      commit={(preview, direct) => session.commitAddonForm(preview.id, direct, run.position)}
+      onClose={closeAddonForm} />
+  {/if}
   {#if addonRun && addonRun.pageId === session.activePageId}
     {#key addonRun.key}
       <AddonCommandPanel
@@ -2803,6 +2839,19 @@
   <p class="screen-reader-status" aria-live="polite">{renderMessage(session.status, $t)}</p>
   {/if}
 </main>
+{#snippet generatorButtons(position: PagePosition)}
+  {#each contributions.filter(addon => addon.enabled && addon.commands.some(command => command.surface === "page-generator")) as addon (addon.addonId)}
+    <div class="generator-group" role="group" aria-label={contributionText(addon, "name", $locale)}>
+      <span>{contributionText(addon, "name", $locale)}</span>
+      {#each addon.commands.filter(command => command.surface === "page-generator") as command (command.id)}
+        <button type="button" onclick={() => {
+          formRun = { entries: [{ addon, command }], position, pageId: session.activePageId, root: session.root };
+          addPageOpen = false;
+        }}>{contributionText(addon, command.label, $locale)}</button>
+      {/each}
+    </div>
+  {/each}
+{/snippet}
 {#if addonsOpen}<AddonStore onClose={closeAddons} />{/if}
 {#if shapeLibraryOpen}
   {@const pen = settings.penPresets[penPreset - 1] ?? DEFAULT_SETTINGS.penPresets[0]}

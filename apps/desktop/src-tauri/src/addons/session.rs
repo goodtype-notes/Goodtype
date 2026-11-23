@@ -28,6 +28,7 @@ const MAX_REQUESTS: u64 = 65_536;
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Failure {
     Protocol,
+    InvalidForm,
     NeedsUpdate,
     Timeout,
     Cancelled,
@@ -686,7 +687,7 @@ impl Runtime {
         app: &tauri::AppHandle,
         addon: &'static super::Addon,
         command: &str,
-        scope: Value,
+        invocation: super::contributions::Invocation,
         context: Option<&str>,
         cancelled: impl Fn() -> bool,
     ) -> Result<Result<Value, CommandError>, Failure> {
@@ -717,13 +718,20 @@ impl Runtime {
                 _ => Failure::Unavailable,
             },
         )?;
-        if !manifest.supports_selection(command)
-            || !addon
-                .permissions()
-                .iter()
-                .all(|p| manifest.permissions.contains(p))
+        let command = manifest
+            .commands
+            .iter()
+            .find(|entry| entry.id == command && entry.surface == invocation.surface())
+            .ok_or(Failure::Unavailable)?;
+        let settings = super::manager::settings(app, addon.id, &manifest.settings)
+            .map_err(|_| Failure::Unavailable)?;
+        let params = invocation.params(command, settings)?;
+        if serde_json::to_vec(&params)
+            .map_err(|_| Failure::Protocol)?
+            .len()
+            > MAX_SCOPE
         {
-            return Err(Failure::Unavailable);
+            return Err(Failure::Protocol);
         }
         let fingerprint = format!(
             "{}:{}:{}",
@@ -772,11 +780,7 @@ impl Runtime {
                 }
             }
         };
-        // Manifest v1 currently admits only empty settings descriptors.
-        let reply = worker.invoke(
-            json!({"command":command,"scope":scope,"settings":{}}),
-            cancelled,
-        )?;
+        let reply = worker.invoke(params, cancelled)?;
         if let Some(context) = context {
             *slot = Some((fingerprint, context.into(), worker));
         }
@@ -805,6 +809,7 @@ impl Failure {
             Self::Unavailable => "addon-unavailable",
             Self::Sandbox => "addon-sandbox-failed",
             Self::StorageExceeded => "addon-storage-exceeded",
+            Self::InvalidForm => "addon-invalid-form",
             Self::Protocol => "addon-invalid-response",
         }
     }

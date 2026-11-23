@@ -1213,6 +1213,114 @@ fn structure_result(
     }
 }
 
+/// Validated content for a new ordinary page. IDs and block paths are assigned by the host.
+pub struct GeneratedPage {
+    pub background: PageBackground,
+    pub objects: Vec<crate::PageObject>,
+    pub blocks: Vec<StoredFile>,
+}
+
+/// Publish the generated pages together by switching the manifest only after all files exist.
+pub fn add_generated_pages(
+    root: &Path,
+    modified_at: &str,
+    position: &PagePosition,
+    geometry: &PageGeometry,
+    pages: Vec<GeneratedPage>,
+) -> Result<NotebookSnapshot, StorageError> {
+    if !(1..=16).contains(&pages.len()) {
+        return invalid("a generated batch must contain between 1 and 16 pages");
+    }
+    let mut guard = ManifestGuard::open_resolved(root, modified_at)?;
+    let root = guard.root().to_path_buf();
+    let schema_version = guard.manifest.schema_version;
+    let insert_at = match position {
+        PagePosition::Last => guard.manifest.pages.len(),
+        PagePosition::Before { page_id } => neighbour_index(&guard.manifest, page_id)?,
+        PagePosition::After { page_id } => neighbour_index(&guard.manifest, page_id)? + 1,
+    };
+    let mut snapshots = Vec::with_capacity(pages.len());
+    for (index, generated) in pages.into_iter().enumerate() {
+        let FreshPage {
+            id,
+            page_path,
+            ink_id,
+            ink_path,
+        } = fresh_page_identifiers(&root, &guard.manifest, schema_version);
+        guard.manifest.pages.insert(
+            insert_at + index,
+            PageReference {
+                id: id.clone(),
+                path: page_path,
+                geometry: geometry.clone(),
+            },
+        );
+        let reading_order = generated
+            .objects
+            .iter()
+            .filter(|obj| obj.fields().group_id.is_none())
+            .map(|obj| obj.fields().id.clone())
+            .collect();
+        let page = Page {
+            calculation: None,
+            schema_version,
+            id: id.clone(),
+            revision: 1,
+            geometry: geometry.clone(),
+            background: generated.background,
+            objects: generated.objects,
+            reading_order,
+            ink_layers: vec![InkLayerReference {
+                id: ink_id.clone(),
+                path: ink_path,
+            }],
+        };
+        snapshots.push(NotebookSnapshot {
+            calculations: Vec::new(),
+            manifest: guard.manifest.clone(),
+            page,
+            blocks: generated.blocks,
+            assets: Vec::new(),
+            ink_layers: vec![InkLayer {
+                schema_version,
+                id: ink_id,
+                page_id: id,
+                strokes: Vec::new(),
+            }],
+        });
+    }
+    guard.manifest.modified_at = modified_at.to_owned();
+    for snapshot in &snapshots {
+        guard.manifest.schema_version = guard
+            .manifest
+            .schema_version
+            .max(required_schema_version(&snapshot.page));
+    }
+    for snapshot in &mut snapshots {
+        snapshot.manifest = guard.manifest.clone();
+        raise_schema_version(snapshot);
+        validate_snapshot(&root, snapshot)?;
+    }
+    guard.ensure_unchanged("adding generated pages")?;
+    for snapshot in &snapshots {
+        let reference = &snapshot.page.ink_layers[0];
+        let page_ref = guard
+            .manifest
+            .pages
+            .iter()
+            .find(|page| page.id == snapshot.page.id)
+            .ok_or_else(|| invalid_error("generated page reference is missing"))?;
+        for block in &snapshot.blocks {
+            write_atomic(&root, &block.path, &block.bytes)?;
+        }
+        write_ink(&root, &reference.path, &snapshot.ink_layers[0])?;
+        write_json(&root, &page_ref.path, &snapshot.page)?;
+    }
+    guard.ensure_unchanged("publishing generated pages")?;
+    write_json(&root, layout::MANIFEST, &guard.manifest)?;
+    open_page(&root, &snapshots[0].page.id)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{

@@ -13,6 +13,8 @@ pub(super) struct Policy {
     #[serde(default = "auto_check_default")]
     auto_check: bool,
     pub(super) addons: BTreeMap<String, Preference>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    fields: BTreeMap<String, super::contributions::Values>,
     // A persisted record of consent for the current attempt. Never reused on retry or restart.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pending_install_approvals: BTreeMap<String, Vec<Permission>>,
@@ -28,6 +30,7 @@ impl Default for Policy {
             allow_direct_apply: false,
             auto_check: auto_check_default(),
             addons: BTreeMap::new(),
+            fields: BTreeMap::new(),
             pending_install_approvals: BTreeMap::new(),
         }
     }
@@ -403,12 +406,22 @@ pub(super) fn activate(
         enable_after_install,
     );
     let pending = policy.pending_install_approvals.remove(dir.1.id);
-    if Some(next) == prior && pending.is_none() {
+    let prior_fields = policy.fields.get(dir.1.id).cloned();
+    let reset_fields = prior_fields
+        .as_ref()
+        .is_some_and(|values| !super::contributions::validate_values(&candidate.settings, values));
+    if reset_fields {
+        policy.fields.remove(dir.1.id);
+    }
+    if Some(next) == prior && pending.is_none() && !reset_fields {
         return dir.activate(version);
     }
     policy.addons.insert(dir.1.id.into(), next);
     write_policy(&path, &policy)?;
     if let Err(error) = dir.activate(version) {
+        if let Some(values) = prior_fields {
+            policy.fields.insert(dir.1.id.into(), values);
+        }
         if let Some(pending) = pending {
             policy
                 .pending_install_approvals
@@ -740,6 +753,9 @@ fn shutdown(app: &tauri::AppHandle, addon: &Addon) {
     }
     app.state::<super::selection::Proposals>()
         .forget_addon(addon.id);
+    if let Some(forms) = app.try_state::<super::contributions::PendingForms>() {
+        forms.forget_addon(addon.id);
+    }
     super::session::revoke_grants(app, addon.id);
     if matches!(addon.kind, Kind::Recognize { .. }) {
         app.state::<super::session::Runtime>().shutdown();
@@ -814,6 +830,7 @@ fn remove(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
         fs::rename(&target, &removed).map_err(|e| e.to_string())?;
         if let Err(error) = patch(app, |policy| {
             policy.addons.remove(addon.id);
+            policy.fields.remove(addon.id);
         }) {
             fs::rename(&removed, &target).map_err(|e| e.to_string())?;
             return Err(error);
@@ -857,6 +874,60 @@ pub async fn addon_set_direct_apply(
         policy.allow_direct_apply = allowed;
     })
     .map_err(|_| "policy-write-failed".into())
+}
+
+pub(super) fn settings(
+    app: &tauri::AppHandle,
+    id: &str,
+    fields: &[super::contributions::Field],
+) -> Result<super::contributions::Values, String> {
+    Ok(settings_values(&policy(app)?, id, fields))
+}
+
+fn settings_values(
+    policy: &Policy,
+    id: &str,
+    fields: &[super::contributions::Field],
+) -> super::contributions::Values {
+    use super::contributions::{defaults, validate_values};
+    policy
+        .fields
+        .get(id)
+        .filter(|values| validate_values(fields, values))
+        .cloned()
+        .unwrap_or_else(|| defaults(fields))
+}
+
+#[tauri::command]
+pub(crate) async fn addon_set_field(
+    app: tauri::AppHandle,
+    id: String,
+    field: String,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let importers = app.state::<Importers>();
+        let (job, addon) = importers.get(&id)?;
+        let _idle = job.lock_idle().ok_or("addon-unavailable")?;
+        let (version, path) = install_dir(&app, addon)?
+            .active()
+            .ok_or("addon-unavailable")?;
+        let manifest = installed(addon, &path, &version, true).map_err(manifest_problem)?;
+        if !manifest
+            .settings
+            .iter()
+            .any(|f| f.id() == field && f.accepts(&value))
+        {
+            return Err("addon-invalid-form".into());
+        }
+        patch(&app, |policy| {
+            let mut values = settings_values(policy, &id, &manifest.settings);
+            values.insert(field, value);
+            policy.fields.insert(id, values);
+        })
+    })
+    .await
+    .map_err(|_| "addon-unavailable")?
 }
 
 #[cfg(test)]
@@ -1020,6 +1091,27 @@ mod tests {
             BTreeMap::from([("math".into(), permissions)])
         );
         assert!(saved.addons.is_empty());
+    }
+
+    #[test]
+    fn fixture_fields_restore_persisted_values_and_reset_incompatible_fields() {
+        let fixture = super::super::contributions::fixture();
+        let fields = &fixture.settings;
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join(CONFIG);
+        assert_eq!(
+            settings_values(&read_policy(&path).unwrap(), "fixture", fields)["outline"],
+            false
+        );
+        patch_file(&path, |policy| {
+            let mut values = settings_values(policy, "fixture", fields);
+            values.insert("outline".into(), true.into());
+            policy.fields.insert("fixture".into(), values);
+        })
+        .unwrap();
+        let policy = read_policy(&path).unwrap();
+        assert_eq!(settings_values(&policy, "fixture", fields)["outline"], true);
+        assert!(settings_values(&policy, "fixture", &[]).is_empty());
     }
 
     #[test]

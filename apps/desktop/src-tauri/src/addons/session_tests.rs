@@ -32,7 +32,7 @@ impl Fake {
         assert_eq!(request["params"]["apiVersion"], API);
         self.reply(
             &request["id"],
-            json!({"apiVersion":API,"capabilities":capabilities,"addon":{"id":"math","version":"0.1.0"}}),
+            json!({"apiVersion":API,"capabilities":capabilities,"addon":request["params"]["addon"]}),
         );
     }
 }
@@ -47,6 +47,14 @@ fn spawn_with(
     script: impl FnOnce(Fake) + Send + 'static,
     cancelled: impl Fn() -> bool,
 ) -> Result<Session, Failure> {
+    spawn_for("math", script, cancelled)
+}
+
+fn spawn_for(
+    id: &str,
+    script: impl FnOnce(Fake) + Send + 'static,
+    cancelled: impl Fn() -> bool,
+) -> Result<Session, Failure> {
     let (child_in, host_in) = pipe().unwrap();
     let (host_out, child_out) = pipe().unwrap();
     let (host_err, mut child_err) = pipe().unwrap();
@@ -57,9 +65,7 @@ fn spawn_with(
             output: child_out,
         });
     });
-    Session::connect(
-        host_in, host_out, host_err, None, "math", "0.1.0", cancelled,
-    )
+    Session::connect(host_in, host_out, host_err, None, id, "0.1.0", cancelled)
 }
 
 fn scope() -> Value {
@@ -559,4 +565,189 @@ fn native_math_session_recognizes_a_selection() {
     );
     revoke_where(&scratch, |_, _| false);
     assert!(!scratch.join("grants").join(&profile).exists());
+}
+
+#[test]
+fn fixture_contributions_use_the_session_protocol() {
+    use crate::addons::{
+        batch as page_batch,
+        contributions::{Invocation, defaults, fixture},
+        manifest::Surface,
+    };
+    use goodtype_core::{PageGeometry, storage};
+    use std::path::Path;
+    let fixture = fixture();
+    let insert = &fixture.commands[0];
+    let generator = &fixture.commands[1];
+    let export = &fixture.commands[2];
+    let mut settings = defaults(&fixture.settings);
+    settings.insert("outline".into(), true.into());
+    let geometry = PageGeometry {
+        width_pt: 595.0,
+        height_pt: 842.0,
+    };
+    let form = |surface, values| Invocation::Form {
+        surface,
+        values,
+        geometry: geometry.clone(),
+        anchor: [10.0, 10.0],
+    };
+    let values = defaults(insert.form.as_ref().unwrap());
+    for (field, bad) in [
+        ("title", json!("a".repeat(41))),
+        ("count", json!(20)),
+        ("color", json!("missing")),
+        ("count", json!(2)),
+    ] {
+        let mut invalid = values.clone();
+        invalid.insert(field.into(), bad);
+        assert_eq!(
+            form(Surface::InsertForm, invalid).params(insert, settings.clone()),
+            Err(Failure::InvalidForm)
+        );
+    }
+    let shape = json!({"op":"addShape","x":30,"y":80,"geometry":{"kind":"rectangle","widthPt":140,"heightPt":50,"cornerRadiusPt":4},"style":{"strokeColor":"#182c39","strokeWidthPt":2,"fillColor":"#e9e6dd","opacity":1}});
+    let insert_reply = json!({"batch":{"operations":[{"op":"addGroup","children":[shape]}]}});
+    let generator_reply = json!({"batch":{"operations":[{"op":"addPage","template":null,"ops":[shape]},{"op":"addPage","template":null,"ops":[]}]}});
+    let mut worker = spawn_for("fixture", {
+        let insert_reply = insert_reply.clone();
+        let generator_reply = generator_reply.clone();
+        move |mut fake| {
+            fake.initialize(&["page-batch-v0"]);
+            let input = fake.read();
+            assert_eq!(input["params"], json!({"command":"insert-diagram","settings":{"outline":true},"form":{"title":"Parabola","count":1.0,"color":"blue"},"page":{"widthPt":595.0,"heightPt":842.0},"anchor":{"x":10.0,"y":10.0}}));
+            fake.reply(&input["id"], insert_reply);
+            let input = fake.read();
+            assert_eq!(input["params"]["command"], "worksheet");
+            fake.reply(&input["id"], generator_reply);
+            let input = fake.read();
+            assert_eq!(input["params"]["command"], "export-diagrams");
+            assert!(input["params"]["pages"].is_array());
+            fake.reply(&input["id"], json!({"bytes":"b2s="}));
+        }
+    }, || false).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("fixture.goodtype");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/notebooks/minimal");
+    let mut snapshot = storage::open_notebook(&fixture).unwrap();
+    let background = goodtype_core::PageBackground::Plain {
+        color: "#ffffff".into(),
+    };
+    snapshot.page.background = background.clone();
+    snapshot.manifest.default_page.background = background;
+    snapshot.manifest.shared_style_path = None;
+    snapshot.page.objects.clear();
+    snapshot.page.reading_order.clear();
+    snapshot.blocks.clear();
+    snapshot.assets.clear();
+    for layer in &mut snapshot.ink_layers {
+        layer.strokes.clear();
+    }
+    storage::create_notebook(&root, &snapshot).unwrap();
+    let mut history = storage::NotebookHistory::default();
+    let before = storage::observe_notebook(&root, &mut history).unwrap();
+    let params = form(Surface::InsertForm, values)
+        .params(insert, settings.clone())
+        .unwrap();
+    let reply = worker.invoke(params, || false).unwrap().unwrap();
+    let mut prepared = page_batch::prepare(&root, &geometry, reply, false, || false).unwrap();
+    use crate::addons::contributions::commit_allowed;
+    assert!(!commit_allowed(true, false, || true));
+    assert!(!commit_allowed(true, true, || false));
+    assert!(commit_allowed(true, true, || true));
+    assert!(commit_allowed(false, false, || false));
+    assert!(
+        storage::open_notebook(&root)
+            .unwrap()
+            .page
+            .objects
+            .is_empty()
+    );
+    let mut candidate = before.clone();
+    prepared.remove(0).insert(&mut candidate).unwrap();
+    let inserted = storage::commit_notebook(&root, &mut history, candidate).unwrap();
+    assert_eq!(inserted.snapshot.page.objects.len(), 2);
+    assert!(
+        storage::undo_notebook(&root, &mut history)
+            .unwrap()
+            .snapshot
+            .page
+            .objects
+            .is_empty()
+    );
+
+    let generated_dir = tempfile::tempdir().unwrap();
+    let generated_root = generated_dir.path().join("generated.goodtype");
+    storage::create_notebook(&generated_root, &snapshot).unwrap();
+    let params = form(Surface::PageGenerator, defaults(&[]))
+        .params(generator, settings.clone())
+        .unwrap();
+    let reply = worker.invoke(params, || false).unwrap().unwrap();
+    let pages = page_batch::prepare(&generated_root, &geometry, reply, true, || false).unwrap();
+    assert_eq!(
+        storage::open_notebook(&generated_root)
+            .unwrap()
+            .manifest
+            .pages
+            .len(),
+        1
+    );
+    let mut history = storage::NotebookStructureHistory::default();
+    storage::observe_structure(&generated_root, &before.page.id, &mut history).unwrap();
+    let pages = pages
+        .into_iter()
+        .map(page_batch::PreviewPage::generated)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    let added = storage::add_generated_pages(
+        &generated_root,
+        "2026-11-23T12:01:00Z",
+        &storage::PagePosition::Last,
+        &geometry,
+        pages,
+    )
+    .unwrap();
+    assert_eq!(added.manifest.pages.len(), 3);
+    assert_eq!(added.page.objects.len(), 1);
+    assert_eq!(
+        added.page.schema_version,
+        goodtype_core::SHAPE_SCHEMA_VERSION
+    );
+    storage::advance_structure(&generated_root, &added, &mut history).unwrap();
+    assert_eq!(
+        storage::undo_structure(&generated_root, "2026-11-23T12:02:00Z", &mut history)
+            .unwrap()
+            .snapshot
+            .manifest
+            .pages
+            .len(),
+        1
+    );
+
+    assert!(
+        !crate::addons::export::after_destination(None, |_| panic!(
+            "cancelled export invoked the addon"
+        ))
+        .unwrap()
+    );
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    let pages = crate::addons::export::export_pages(&root, None, false).unwrap();
+    let params = Invocation::Export {
+        assets: false,
+        pages,
+    }
+    .params(export, settings)
+    .unwrap();
+    let reply = worker.invoke(params, || false).unwrap().unwrap();
+    let chosen = dir.path().join("chosen.json");
+    assert!(
+        crate::addons::export::after_destination(Some(chosen.clone()), |path| {
+            crate::addons::export::write_reply(&path, reply)
+        })
+        .unwrap()
+    );
+    assert_eq!(std::fs::read(&chosen).unwrap(), b"ok");
+    assert!(crate::addons::export::write_reply(&chosen, json!({"bytes":"invalid!"})).is_err());
+    assert_eq!(std::fs::read(&chosen).unwrap(), b"ok");
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
 }

@@ -4,7 +4,7 @@ import { acceptProposal, validateProposalPlacement } from "../helper/proposal";
 import { helperInsertProposal, helperCreatePage } from "../ipc/helper";
 import type { Proposal } from "../ipc/helper";
 import { insertContentShape as saveContentShape, type ShapePlacement } from "../workspace/addons/content";
-import { addonText, insertAddonProposal as addonInsertProposal, type AddonReview } from "../ipc/addons";
+import { addGeneratedPages, exportWithAddon, insertAddonForm, type ContributionEntry, addonText, insertAddonProposal as addonInsertProposal, type AddonReview } from "../ipc/addons";
 import type { createSelection } from "./selectionEditing.svelte";
 import type { createNavigation } from "./viewportNavigation.svelte";
 import { shapeMessage } from "../i18n/labels";
@@ -1653,6 +1653,58 @@ export function createSession(env: SessionEnvironment) {
     if (failure) throw failure;
   }
 
+  async function commitAddonForm(id: string, direct: boolean, position?: PagePosition): Promise<boolean> {
+    const requestRoot = root, pageId = activePageId, generation = notebookGeneration;
+    if (!requestRoot || !await persist()) throw new Error("flush_failed");
+    replacingPageCount += 1; pendingTransactions += 1;
+    let failure: unknown;
+    let committed = false;
+    transactionQueue = transactionQueue.then(async () => {
+      if (root !== requestRoot || activePageId !== pageId || notebookGeneration !== generation || transactionFailed) {
+        failure = new Error("wrong_page");
+        return;
+      }
+      try {
+        const result = position ? await addGeneratedPages(requestRoot, id, position)
+          : await insertAddonForm(requestRoot, pageId, id, direct);
+        if (!result) return;
+        committed = true;
+        if (root !== requestRoot || notebookGeneration !== generation) return;
+        if (position) {
+          resetPageEntries();
+          applySnapshot(result.snapshot);
+          recordStructureAction();
+          await tick();
+          scrollToPage(result.snapshot.page.id);
+        } else if (activePageId === pageId) {
+          applySnapshot(result.snapshot);
+          canUndo = result.canUndo;
+          canRedo = result.canRedo;
+          recordNotebookAction(pageId);
+          editGeneration += 1;
+        }
+      } catch (error) { failure = error; }
+    }).finally(() => { replacingPageCount -= 1; pendingTransactions -= 1; });
+    await transactionQueue;
+    if (failure) throw failure;
+    return committed;
+  }
+
+  async function exportAddon(entry: ContributionEntry, current: boolean) {
+    const requestRoot = root, page = activePageId;
+    if (!requestRoot || !await persist() || root !== requestRoot) return;
+    busy = true;
+    try {
+      if (await exportWithAddon(requestRoot, current ? page : null, entry, get(locale))) {
+        status = notice("addons.contributions.exported");
+      }
+    } catch {
+      status = notice("addons.contributions.exportFailed");
+    } finally {
+      busy = false;
+    }
+  }
+
   function addTranscribedBlock(source: string, placement: { x: number; y: number; layoutWidthPt: number }, label: UiText) {
     if (activeSnapshot?.page.calculation) return;
     insertTypstBlock(source, placement);
@@ -2370,6 +2422,8 @@ export function createSession(env: SessionEnvironment) {
     insertHelperProposal,
     insertAddonProposal,
     insertContentShape,
+    commitAddonForm,
+    exportAddon,
     nextVisualZIndex,
     nextReadingOrder,
     scheduleInkCommit,
