@@ -30,6 +30,7 @@ fn main() {
         .manage(addons::registry::Checks::default())
         .manage(recognition::math_process::MathProcess::default())
         .manage(addons::session::Runtime::default())
+        .manage(addons::objects::Reactions::default())
         .manage(addons::selection::Proposals::default())
         .manage(addons::contributions::PendingForms::default())
         .setup(|app| {
@@ -77,6 +78,9 @@ fn main() {
             addons::selection::addon_selection_commands,
             addons::manager::addon_set_field,
             addons::contributions::addon_contributions,
+            addons::objects::addon_object_action,
+            addons::objects::addon_react,
+            addons::objects::addon_apply_reaction,
             addons::export::addon_export,
             addons::contributions::addon_form_preview,
             addons::contributions::addon_form_insert,

@@ -547,3 +547,40 @@ above. These changes are additive within `goodtype-api 0.1`.
 The Step 4/5 integration validates `addShape` objects and content-pack shapes
 through one host path. Content-pack descriptors omit `protocolVersion` and
 `notebookSchemaVersion` and carry an empty `decoderCommit`. No wire change.
+
+## Object data, tools and reactions (Step 3c)
+
+`own-objects` permits tools and own-object commands. `react-to-changes`
+permits reactions to changes in referenced objects. Rust validates both against
+the installed manifest, catalog ceiling and current policy.
+
+Tools declare an ID, label key, stroke-only path icon, kind (`place`, `connect`
+or `frame`), snap mode (`none` or `ports`) and optional setting IDs. The host
+sends one `tool/apply` per gesture. Parameters include the tool ID, settings,
+page ID and size, points with optional object/port attachments, and snapshots
+of attached objects. Ports in snapshots use page points. An `own-object`
+command receives the selected objects owned by the addon and snapshots of
+their refs. A `page/changed` reaction receives the page ID and size, changed
+referenced snapshots, deleted IDs, and the affected objects owned by the addon.
+
+These methods return a `page-batch-v0` result with an `ops` array. Create ops
+may attach `addonData` under the calling addon's key. Shape and group create
+ops may also store object-local ports. `updateObject` and `deleteObject` require
+an existing entry for the caller. Own-object commands and reactions can update
+or delete objects in the request scope. An unauthorized op rejects the batch
+with `-32002`. An empty `ops` array leaves the page unchanged.
+
+Shape-pack items may define up to 32 finite points as `ports`, relative to
+the item origin. Insertion copies them to the created shape or group and
+accounts for its placement scale and local origin.
+
+Reactions within 750 ms amend the triggering undo step while its revision
+is current. A late result is discarded and can be requested once after at
+least one second without another commit. A chain visits each addon at most
+once and has at most two rounds. Disabled or unavailable addons leave page
+content in place. Detach removes one addon's data from selected objects in
+one undo step.
+
+For local development, the debug Addons page accepts a catalog-known session
+addon folder containing its manifest and Windows executable. The same
+permission approval and AppContainer session apply to local installs.

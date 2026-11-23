@@ -588,3 +588,36 @@ fn real_packs_install_from_checkout_and_insert_each_shape_library() {
         }
     }
 }
+
+#[test]
+fn debug_archives_allow_only_catalogued_session_executables() {
+    let folder = tempfile::tempdir().unwrap();
+    for addon in [&catalog::CONNECTORS, &catalog::MATH, &catalog::GOODNOTES] {
+        write(
+            folder.path(),
+            manifest::FILE,
+            &serde_json::to_vec(&addon.declaration(VERSION)).unwrap(),
+        );
+        write(folder.path(), &addon.executable(), b"fixture executable");
+        if addon.imports_notebooks() {
+            assert!(sideload_archive(folder.path()).is_err());
+        } else {
+            let (found, version, _) = sideload_archive(folder.path()).unwrap();
+            assert_eq!(found.id, addon.id);
+            assert_eq!(version, VERSION);
+        }
+    }
+}
+
+#[test]
+fn shape_pack_item_ports_are_strict_and_bounded() {
+    let mut file = shape_file();
+    file["items"][0]["ports"] = json!([{"x":0,"y":8},{"x":38,"y":8}]);
+    let parsed: Library = serde_json::from_value(file.clone()).unwrap();
+    assert!(parsed.items[0].validate().is_ok());
+    file["items"][0]["ports"] = json!(vec![json!({"x":0,"y":8}); 33]);
+    let parsed: Library = serde_json::from_value(file.clone()).unwrap();
+    assert!(parsed.items[0].validate().is_err());
+    file["items"][0]["ports"] = json!([{"x":0,"y":8,"other":false}]);
+    assert!(serde_json::from_value::<Library>(file).is_err());
+}

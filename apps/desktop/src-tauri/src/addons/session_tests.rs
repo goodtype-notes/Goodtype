@@ -751,3 +751,135 @@ fn fixture_contributions_use_the_session_protocol() {
     assert_eq!(std::fs::read(&chosen).unwrap(), b"ok");
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
 }
+
+#[test]
+fn connector_fixture_exchanges_tool_and_reaction_requests() {
+    use super::super::{batch, catalog, manifest};
+    use goodtype_core::storage;
+    let mut declaration = serde_json::to_value(catalog::CONNECTORS.declaration("1.0.0")).unwrap();
+    declaration["commands"] = json!([{"id":"routing","label":"run","surface":"own-object"}]);
+    let fixture = manifest::parse(
+        &serde_json::to_vec(&declaration).unwrap(),
+        &catalog::CONNECTORS,
+        "1.0.0",
+    )
+    .unwrap();
+    assert_eq!(fixture.tools[0].kind, manifest::ToolKind::Connect);
+    assert!(fixture.has(manifest::Permission::ReactToChanges));
+    let create = json!({"ops":[{
+        "op":"addShape","x":30,"y":30,
+        "geometry":{"kind":"line","start":{"x":0,"y":0},"end":{"x":30,"y":30}},
+        "style":{"strokeColor":"#182c39","strokeWidthPt":2,"fillColor":null,"opacity":1},
+        "addonData":{"connectors":{"refs":[],"data":{"routing":"straight"}}}
+    }]});
+    let mut session = spawn_for(
+        "connectors",
+        move |mut addon| {
+            addon.initialize(&["page-batch-v0"]);
+            let request = addon.read();
+            assert_eq!(request["method"], "tool/apply");
+            assert_eq!(request["params"]["points"].as_array().unwrap().len(), 2);
+            addon.reply(&request["id"], create);
+            let request = addon.read();
+            assert_eq!(request["method"], "page/changed");
+            assert!(request["params"]["own"][0]["addonData"]["connectors"].is_object());
+            let id = request["params"]["own"][0]["id"].clone();
+            addon.reply(
+                &request["id"],
+                json!({"ops":[{"op":"updateObject","id":id,"x":40}]}),
+            );
+        },
+        || false,
+    )
+    .unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/notebooks/minimal");
+    let before = storage::open_notebook(&root).unwrap();
+    let result = session
+        .call(
+            "tool/apply",
+            json!({"tool":"connect","points":[{"x":30,"y":30},{"x":60,"y":60}]}),
+            Duration::from_secs(2),
+            || false,
+        )
+        .unwrap()
+        .unwrap();
+    let snapshot = batch::apply_owned(&root, before, "connectors", None, result)
+        .unwrap()
+        .unwrap();
+    let object = snapshot.page.objects.last().unwrap();
+    let own = HashSet::from([object.fields().id.clone()]);
+    let result = session
+        .call(
+            "page/changed",
+            json!({"own":[object],"changed":[],"deleted":["deleted"]}),
+            Duration::from_secs(2),
+            || false,
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        batch::apply_owned(
+            &root,
+            snapshot.clone(),
+            "connectors",
+            Some(&HashSet::new()),
+            result.clone()
+        )
+        .unwrap_err(),
+        batch::FORBIDDEN
+    );
+    let amended = batch::apply_owned(&root, snapshot, "connectors", Some(&own), result)
+        .unwrap()
+        .unwrap();
+    assert_eq!(amended.page.objects.last().unwrap().fields().x, 40.0);
+}
+
+#[test]
+fn tool_kinds_negotiate_their_point_count_and_snap_mode() {
+    use super::super::{
+        catalog,
+        contributions::Invocation,
+        manifest::{Snap, ToolKind},
+    };
+    let mut fixture = catalog::CONNECTORS.declaration("1.0.0");
+    for (kind, count) in [
+        (ToolKind::Place, 1),
+        (ToolKind::Connect, 2),
+        (ToolKind::Frame, 2),
+    ] {
+        fixture.tools[0].kind = kind;
+        let invocation = |points, snapped| Invocation::Tool {
+            points,
+            snapped,
+            params: json!({"points":[]}),
+        };
+        let valid = request_params(
+            &fixture,
+            "connect",
+            invocation(count, false),
+            Default::default(),
+        )
+        .unwrap();
+        assert_eq!(valid.0, "tool/apply");
+        assert_eq!(valid.1["tool"], "connect");
+        assert!(
+            request_params(
+                &fixture,
+                "connect",
+                invocation(3 - count, false),
+                Default::default()
+            )
+            .is_err()
+        );
+        fixture.tools[0].snap = Snap::None;
+        assert!(
+            request_params(
+                &fixture,
+                "connect",
+                invocation(count, true),
+                Default::default()
+            )
+            .is_err()
+        );
+    }
+}

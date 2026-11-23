@@ -25,9 +25,10 @@ Goodtype keeps your notebooks as plain files on your own disk. No account, no sy
 > [!WARNING]
 > **Goodtype is in alpha and the notebook format is not stable.**
 >
-> Current builds read notebook schemas 1 through 4. Adding a computational page uses schema 4;
-> older builds cannot open those notebooks. Ordinary notebooks keep schema 3. A confirmed page save lazily migrates older
-> ink to schema 3 and preserves the original JSON files. Older builds cannot read schema 3.
+> Current builds read notebook schemas 1 through 5. Adding a computational page uses schema 4.
+> A page with addon data or stored ports uses schema 5. Older builds cannot read a newer schema.
+> Ordinary notebooks keep schema 3. A confirmed page save lazily migrates older ink to schema 3
+> and preserves the original JSON files.
 > Future alpha versions may still change the format; keep a separate copy of important work.
 > The [ink format specification](./formats/ink-v1.md) documents binary storage and migration.
 

@@ -31,6 +31,7 @@ pub struct NotebookHistory {
     current_page_id: Option<String>,
     current_revision: Option<u64>,
     current_fingerprint: Option<u64>,
+    last_commit: Option<std::time::Instant>,
 }
 
 impl NotebookHistory {
@@ -63,7 +64,26 @@ impl NotebookHistory {
         );
         self.redo.clear();
         self.redo_bytes = 0;
+        self.last_commit = Some(std::time::Instant::now());
         self.record(saved, fingerprint);
+    }
+
+    /// Previous state and timing of the latest retained user edit on this revision.
+    pub fn amendment_base(
+        &self,
+        revision: u64,
+        base_revision: u64,
+    ) -> Option<(&NotebookSnapshot, std::time::Instant)> {
+        if self.current_revision != Some(revision) || !self.redo.is_empty() {
+            return None;
+        }
+        let base = self
+            .undo
+            .iter()
+            .rev()
+            .find(|entry| entry.snapshot.page.revision == base_revision)
+            .or_else(|| self.undo.last())?;
+        Some((&base.snapshot, self.last_commit?))
     }
 
     /// Drop both stacks. They describe a page that is no longer the one on disk, so replaying
@@ -73,6 +93,7 @@ impl NotebookHistory {
         self.redo.clear();
         self.undo_bytes = 0;
         self.redo_bytes = 0;
+        self.last_commit = None;
     }
 
     fn describes(&self, snapshot: &NotebookSnapshot, fingerprint: u64) -> bool {
@@ -341,6 +362,7 @@ fn restore_notebook(
             current.without_assets(),
         );
     }
+    history.last_commit = None;
     history.record(&restored, fingerprint);
     Ok(history_result(restored, history))
 }

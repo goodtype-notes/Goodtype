@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use goodtype_core::{SCHEMA_VERSION, paths};
+use goodtype_core::{CALCULATION_SCHEMA_VERSION as SCHEMA_VERSION, paths};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::Manager;
@@ -30,6 +30,7 @@ pub(crate) mod export;
 pub(crate) mod import;
 pub(crate) mod manager;
 mod manifest;
+pub(crate) mod objects;
 pub(crate) mod recognize;
 pub(crate) mod registry;
 pub(crate) mod selection;
@@ -92,6 +93,11 @@ enum Kind {
         recognizes: &'static str,
         check_failure: &'static str,
     },
+    /// Tools, reactions and own-object commands on objects carrying the addon's data (ADR 0046).
+    Objects {
+        permissions: &'static [manifest::Permission],
+        tools: &'static [(&'static str, manifest::ToolKind)],
+    },
 }
 
 #[derive(Serialize)]
@@ -109,6 +115,7 @@ enum CapabilityView {
     Content,
     Import { artwork: bool },
     Recognize { recognizes: &'static str },
+    Objects,
 }
 
 #[tauri::command]
@@ -122,6 +129,7 @@ pub fn addon_catalog() -> Vec<AddonView> {
                 Kind::Content => CapabilityView::Content,
                 Kind::Import { artwork, .. } => CapabilityView::Import { artwork },
                 Kind::Recognize { recognizes, .. } => CapabilityView::Recognize { recognizes },
+                Kind::Objects { .. } => CapabilityView::Objects,
             },
         })
         .collect()
@@ -854,7 +862,8 @@ fn install_with_policy(
             &Provenance {
                 archive_sha256: hash,
                 inventory_sha256: installation_digest(&staging)?,
-                sideloaded: dir.1.is_content() && release.url.is_empty(),
+                sideloaded: release.url.is_empty()
+                    && (dir.1.is_content() || declaration.uses_session()),
             },
             4096,
         )?;
@@ -862,7 +871,10 @@ fn install_with_policy(
             content::load(dir.1, &staging, &declaration.strings, contents)?;
         }
         approve(&declaration)?;
-        if declaration.contents.is_none() {
+        if declaration.contents.is_none()
+            && !matches!(dir.1.kind, Kind::Objects { .. })
+            && !(release.url.is_empty() && declaration.uses_session())
+        {
             let tool = probe(&staging)?;
             check_contract(dir.1, &manifest, Some(&tool), Some(release))?;
         }

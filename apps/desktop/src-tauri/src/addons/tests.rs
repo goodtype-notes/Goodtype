@@ -1038,6 +1038,7 @@ fn catalog_exposes_only_frontend_metadata() {
             },
             { "id": "engineering-shapes", "kind": "content", "i18nPrefix": "addons.engineeringShapes" },
             { "id": "study-templates", "kind": "content", "i18nPrefix": "addons.studyTemplates" },
+            { "id": "connectors", "kind": "objects", "i18nPrefix": "addons.connectors" },
         ])
     );
 }

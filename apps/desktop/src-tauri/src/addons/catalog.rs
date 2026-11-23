@@ -98,7 +98,38 @@ pub static MATH: Addon = Addon {
     },
 };
 
-pub(super) static CATALOG: &[&Addon] = &[&GOODNOTES, &ONENOTE, &MATH, &ENGINEERING, &STUDY];
+pub(super) static CATALOG: &[&Addon] = &[
+    &GOODNOTES,
+    &ONENOTE,
+    &MATH,
+    &ENGINEERING,
+    &STUDY,
+    &CONNECTORS,
+];
+
+/// Connectors between parts (ADR 0046): one `connect` tool, re-routing as a reaction and
+/// own-object commands. Runs in the same AppContainer session as math. No release key yet, so
+/// release builds list it as unpublished and never download anything for it.
+pub(super) static CONNECTORS: Addon = Addon {
+    id: "connectors",
+    legacy: None,
+    en: ("Connectors", "Connect parts"),
+    de: ("Verbinder", "Teile verbinden"),
+    i18n_prefix: "addons.connectors",
+    name: "goodtype-connectors",
+    package: "goodtype-connectors",
+    repository: "/Just8it/Goodtype-Connectors",
+    public_key: None,
+    pinned: None,
+    contribution_surfaces: &[super::manifest::Surface::OwnObject],
+    kind: Kind::Objects {
+        permissions: &[
+            super::manifest::Permission::OwnObjects,
+            super::manifest::Permission::ReactToChanges,
+        ],
+        tools: &[("connect", super::manifest::ToolKind::Connect)],
+    },
+};
 
 pub(super) static ENGINEERING: Addon = Addon {
     id: "engineering-shapes",

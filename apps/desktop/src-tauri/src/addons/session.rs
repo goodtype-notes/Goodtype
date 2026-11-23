@@ -560,6 +560,7 @@ impl Session {
         self.diagnostics.lock().unwrap().clone()
     }
 
+    #[cfg(test)]
     pub(super) fn invoke(
         &mut self,
         params: Value,
@@ -718,14 +719,9 @@ impl Runtime {
                 _ => Failure::Unavailable,
             },
         )?;
-        let command = manifest
-            .commands
-            .iter()
-            .find(|entry| entry.id == command && entry.surface == invocation.surface())
-            .ok_or(Failure::Unavailable)?;
         let settings = super::manager::settings(app, addon.id, &manifest.settings)
             .map_err(|_| Failure::Unavailable)?;
-        let params = invocation.params(command, settings)?;
+        let (method, params) = request_params(&manifest, command, invocation, settings)?;
         if serde_json::to_vec(&params)
             .map_err(|_| Failure::Protocol)?
             .len()
@@ -780,12 +776,60 @@ impl Runtime {
                 }
             }
         };
-        let reply = worker.invoke(params, cancelled)?;
+        let reply = worker.call(method, params, Duration::from_secs(30), cancelled)?;
         if let Some(context) = context {
             *slot = Some((fingerprint, context.into(), worker));
         }
         Ok(reply)
     }
+}
+
+fn request_params(
+    manifest: &super::manifest::Manifest,
+    command: &str,
+    invocation: super::contributions::Invocation,
+    settings: super::contributions::Values,
+) -> Result<(&'static str, Value), Failure> {
+    use super::{
+        contributions::Invocation,
+        manifest::{Permission, Snap, ToolKind},
+    };
+    Ok(match invocation {
+        Invocation::Reaction(params) => {
+            if !manifest.has(Permission::ReactToChanges) {
+                return Err(Failure::Unavailable);
+            }
+            ("page/changed", params)
+        }
+        Invocation::Tool {
+            points,
+            snapped,
+            mut params,
+        } => {
+            let tool = manifest
+                .tools
+                .iter()
+                .find(|tool| tool.id == command)
+                .ok_or(Failure::Unavailable)?;
+            if !manifest.has(Permission::OwnObjects)
+                || points != if tool.kind == ToolKind::Place { 1 } else { 2 }
+                || (snapped && tool.snap != Snap::Ports)
+            {
+                return Err(Failure::Unavailable);
+            }
+            params["tool"] = json!(tool.id);
+            params["settings"] = json!(settings);
+            ("tool/apply", params)
+        }
+        other => {
+            let command = manifest
+                .commands
+                .iter()
+                .find(|entry| entry.id == command && entry.surface == other.surface())
+                .ok_or(Failure::Unavailable)?;
+            ("command/invoke", other.params(command, settings)?)
+        }
+    })
 }
 
 /// Per-process scratch lives under app-local data, beside (not inside) the install directories.

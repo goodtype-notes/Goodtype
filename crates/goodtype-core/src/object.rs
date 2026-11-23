@@ -96,7 +96,7 @@ pub struct SourceRef<'a> {
     pub path: &'a str,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectFields {
     pub id: String,
@@ -118,7 +118,7 @@ pub struct ObjectFields {
     pub ports: Option<Vec<crate::ShapePoint>>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(
     tag = "type",
     rename_all = "snake_case",

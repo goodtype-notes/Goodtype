@@ -18,6 +18,10 @@ pub enum Permission {
     SelectedInk,
     AddPageObjects,
     ReadPages,
+    /// Create and change objects that carry this addon's data (tools, own-object commands).
+    OwnObjects,
+    /// Receive `page/changed` after a commit that touched an object its own objects depend on.
+    ReactToChanges,
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize, PartialEq)]
@@ -36,6 +40,59 @@ pub(super) enum Surface {
     InsertForm,
     PageGenerator,
     Export,
+    /// Shown in the selection menu when the selection holds objects with this addon's data.
+    OwnObject,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub(super) enum ToolKind {
+    Place,
+    Connect,
+    Frame,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub(super) enum Snap {
+    Ports,
+    None,
+}
+
+/// Stroke-only path data on the host's 24-unit icon grid.
+#[derive(Clone, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Icon {
+    pub paths: Vec<String>,
+}
+
+impl Icon {
+    fn valid(&self) -> bool {
+        (1..=8).contains(&self.paths.len())
+            && self.paths.iter().map(String::len).sum::<usize>() <= 2048
+            && self.paths.iter().all(|path| {
+                !path.trim().is_empty()
+                    && path.len() <= 512
+                    && path
+                        .bytes()
+                        .all(|byte| b"MmLlHhVvCcSsQqAaZz0123456789.-, ".contains(&byte))
+            })
+    }
+}
+
+/// A toolbar tool (ADR 0046). Pointer input and preview stay in the frontend; the host calls
+/// `tool/apply` once per completed gesture.
+#[derive(Clone, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Tool {
+    pub id: String,
+    pub label: String,
+    pub icon: Icon,
+    pub kind: ToolKind,
+    pub snap: Snap,
+    /// IDs of the addon's settings fields shown in the palette pocket while the tool is active.
+    #[serde(default)]
+    pub settings: Vec<String>,
 }
 
 #[derive(Deserialize, Serialize, PartialEq)]
@@ -114,6 +171,8 @@ pub(super) struct Manifest {
     transport: Transport,
     pub permissions: Vec<Permission>,
     pub commands: Vec<Command>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<Tool>,
     pub settings: Vec<Field>,
     pub strings: Strings,
 }
@@ -173,6 +232,7 @@ impl Addon {
                 &[SelectedInk, AddPageObjects, ReadPages]
             }
             Kind::Recognize { .. } => &[SelectedInk, AddPageObjects],
+            Kind::Objects { permissions, .. } => permissions,
             Kind::Content => &[],
         }
     }
@@ -180,12 +240,18 @@ impl Addon {
     fn allows_command(&self, command: &Command) -> bool {
         match command.surface {
             Surface::LibraryImport => self.imports_notebooks() && command.id == "import-notebooks",
-            Surface::InkSelection => !self.imports_notebooks() && command.id == "recognize-math",
+            Surface::InkSelection => {
+                matches!(self.kind, Kind::Recognize { .. }) && command.id == "recognize-math"
+            }
             surface => self.contribution_surfaces.contains(&surface),
         }
     }
 
     pub(super) fn declaration(&self, version: &str) -> Manifest {
+        let objects = match self.kind {
+            Kind::Objects { tools, .. } => tools,
+            _ => &[],
+        };
         let (transport, id, surface) = if self.imports_notebooks() {
             (
                 Transport::LegacyImportCli,
@@ -220,7 +286,7 @@ impl Addon {
                 transport
             },
             permissions: self.permissions().to_vec(),
-            commands: if self.is_content() {
+            commands: if self.is_content() || !objects.is_empty() {
                 vec![]
             } else {
                 vec![Command {
@@ -231,6 +297,19 @@ impl Addon {
                     format: None,
                 }]
             },
+            tools: objects
+                .iter()
+                .map(|(id, kind)| Tool {
+                    id: (*id).into(),
+                    label: "run".into(),
+                    icon: Icon {
+                        paths: vec!["M4 12h16".into()],
+                    },
+                    kind: *kind,
+                    snap: Snap::Ports,
+                    settings: vec![],
+                })
+                .collect(),
             settings: vec![],
             strings: Strings {
                 en: strings(self.en),
@@ -267,6 +346,10 @@ impl Manifest {
         self.transport == Transport::StdioJsonrpc
     }
 
+    pub(super) fn has(&self, permission: Permission) -> bool {
+        self.permissions.contains(&permission)
+    }
+
     pub(super) fn same_scope(&self, other: &Self) -> bool {
         self.transport == other.transport
             && self.permissions.len() == other.permissions.len()
@@ -274,6 +357,11 @@ impl Manifest {
                 .permissions
                 .iter()
                 .all(|permission| other.permissions.contains(permission))
+            && self
+                .tools
+                .iter()
+                .map(|tool| (&tool.id, tool.kind))
+                .eq(other.tools.iter().map(|tool| (&tool.id, tool.kind)))
             && self
                 .commands
                 .iter()
@@ -312,6 +400,11 @@ pub(super) fn parse(bytes: &[u8], addon: &Addon, version: &str) -> Result<Manife
     let ceiling = addon.declaration(version);
     let mut permissions = HashSet::new();
     let mut commands = HashSet::new();
+    let mut tools = HashSet::new();
+    let allowed_tools: &[(&str, ToolKind)] = match addon.kind {
+        Kind::Objects { tools, .. } => tools,
+        _ => &[],
+    };
     if manifest.manifest_version != 1
         || manifest.id != addon.id
         || manifest.version != version
@@ -332,8 +425,26 @@ pub(super) fn parse(bytes: &[u8], addon: &Addon, version: &str) -> Result<Manife
                     .as_ref()
                     .is_some_and(super::content::Contents::valid)
         } else {
-            shape.get("contents").is_some() || !(1..=16).contains(&manifest.commands.len())
+            shape.get("contents").is_some()
+                || manifest.commands.len() > 16
+                || (manifest.commands.is_empty() && manifest.tools.is_empty())
         }
+        || manifest.tools.len() > 8
+        || (!manifest.tools.is_empty() && !permissions.contains(&Permission::OwnObjects))
+        || manifest.tools.iter().any(|tool| {
+            !tools.insert(&tool.id)
+                || !identifier(&tool.id)
+                || !manifest.strings.en.contains_key(&tool.label)
+                || !tool.icon.valid()
+                || !allowed_tools.contains(&(tool.id.as_str(), tool.kind))
+                || tool.settings.len() > 16
+                || {
+                    let mut seen = HashSet::new();
+                    tool.settings.iter().any(|id| {
+                        !seen.insert(id) || !manifest.settings.iter().any(|field| field.id() == id)
+                    })
+                }
+        })
         || manifest.commands.iter().any(|command| {
             !commands.insert(&command.id)
                 || !manifest.strings.en.contains_key(&command.label)
@@ -362,6 +473,11 @@ pub(super) fn parse(bytes: &[u8], addon: &Addon, version: &str) -> Result<Manife
                                 .as_ref()
                                 .is_some_and(|format| format.valid(&manifest.strings.en))
                             || !permissions.contains(&Permission::ReadPages)
+                    }
+                    Surface::OwnObject => {
+                        command.form.is_some()
+                            || command.format.is_some()
+                            || !permissions.contains(&Permission::OwnObjects)
                     }
                 }
         })

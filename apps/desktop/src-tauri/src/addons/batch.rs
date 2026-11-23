@@ -1,10 +1,12 @@
 use super::{selection, *};
 use crate::helper::proposals::ProposalItem;
+use goodtype_core::addon_data::{AddonData, AddonEntry};
 use goodtype_core::{
     ObjectFields, PageBackground, PageGeometry, PageObject, ShapeGeometry, ShapePoint, ShapeStyle,
     storage, template,
 };
 use serde_json::{Value, json};
+use std::collections::HashSet;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -32,6 +34,7 @@ enum Operation {
         x_pt: f64,
         y_pt: f64,
         layout_width_pt: f64,
+        addon_data: Option<AddonData>,
     },
     #[serde(rename = "addShape")]
     Shape {
@@ -39,9 +42,31 @@ enum Operation {
         y: f64,
         geometry: ShapeGeometry,
         style: ShapeStyle,
+        addon_data: Option<AddonData>,
+        ports: Option<Vec<ShapePoint>>,
     },
     #[serde(rename = "addGroup")]
-    Group { children: Vec<Operation> },
+    Group {
+        children: Vec<Operation>,
+        addon_data: Option<AddonData>,
+        ports: Option<Vec<ShapePoint>>,
+    },
+    UpdateObject {
+        id: String,
+        x: Option<f64>,
+        y: Option<f64>,
+        rotation: Option<f64>,
+        scale: Option<f64>,
+        geometry: Option<ShapeGeometry>,
+        style: Option<ShapeStyle>,
+        source: Option<String>,
+        ports: Option<Vec<ShapePoint>>,
+        #[serde(default, deserialize_with = "present_entry")]
+        addon_data: Option<Option<AddonEntry>>,
+    },
+    DeleteObject {
+        id: String,
+    },
     #[serde(rename = "addPage")]
     Page {
         template: Option<template::PageTemplate>,
@@ -97,7 +122,7 @@ pub(super) fn prepare(
                 };
                 Ok(PreviewPage {
                     background,
-                    items: objects(root, geometry, ops, &mut budget, &check)?,
+                    items: legacy_items(objects(root, geometry, ops, &mut budget, &check)?)?,
                 })
             })
             .collect()
@@ -107,9 +132,296 @@ pub(super) fn prepare(
         }
         Ok(vec![PreviewPage {
             background: white(),
-            items: objects(root, geometry, operations, &mut budget, &check)?,
+            items: legacy_items(objects(root, geometry, operations, &mut budget, &check)?)?,
         }])
     }
+}
+
+fn present_entry<'de, D: serde::Deserializer<'de>>(
+    decoder: D,
+) -> Result<Option<Option<AddonEntry>>, D::Error> {
+    Option::deserialize(decoder).map(Some)
+}
+
+fn legacy_items(items: Vec<ProposalItem>) -> Result<Vec<ProposalItem>, String> {
+    if items
+        .iter()
+        .any(|item| goodtype_core::addon_data::uses_addon_fields(item.object.fields()))
+    {
+        return Err(INVALID.into());
+    }
+    Ok(items)
+}
+
+pub(super) const FORBIDDEN: &str = "addon-object-permission";
+
+/// Build a complete candidate before publishing any changes. Scope is derived from
+/// the pre-invocation page, so a reply cannot grant itself access to another object.
+pub(super) fn apply_owned(
+    root: &Path,
+    mut snapshot: storage::NotebookSnapshot,
+    addon: &str,
+    allowed: Option<&HashSet<String>>,
+    reply: Value,
+) -> Result<Option<storage::NotebookSnapshot>, String> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct OwnedBatch {
+        ops: Vec<Operation>,
+    }
+
+    let wire = reply.get("batch").cloned().unwrap_or(reply);
+    let OwnedBatch { ops } = if wire.get("operations").is_some() {
+        let Batch { operations } = serde_json::from_value(wire).map_err(|_| INVALID)?;
+        OwnedBatch { ops: operations }
+    } else {
+        serde_json::from_value(wire).map_err(|_| INVALID)?
+    };
+    if ops.is_empty() {
+        return Ok(None);
+    }
+    let own: HashSet<_> = snapshot
+        .page
+        .objects
+        .iter()
+        .filter_map(|object| {
+            let fields = object.fields();
+            (fields.addon_data.as_ref()?.contains_key(addon)
+                && allowed.is_none_or(|ids| ids.contains(&fields.id)))
+            .then(|| fields.id.clone())
+        })
+        .collect();
+    let mut budget = 32usize;
+    let mut deleted = HashSet::new();
+    let mut touched = HashSet::new();
+    for op in ops {
+        match op {
+            Operation::UpdateObject {
+                id,
+                x,
+                y,
+                rotation,
+                scale,
+                geometry,
+                style,
+                source,
+                ports,
+                addon_data,
+            } => {
+                budget = budget.checked_sub(1).ok_or(INVALID)?;
+                if !own.contains(&id) {
+                    return Err(FORBIDDEN.into());
+                }
+                if !touched.insert(id.clone()) {
+                    return Err(INVALID.into());
+                }
+                let object = snapshot
+                    .page
+                    .objects
+                    .iter_mut()
+                    .find(|object| object.fields().id == id)
+                    .ok_or(INVALID)?;
+                let fields = object.fields_mut();
+                if let Some(x) = x {
+                    fields.x = x;
+                }
+                if let Some(y) = y {
+                    fields.y = y;
+                }
+                if let Some(rotation) = rotation {
+                    fields.rotation = rotation;
+                }
+                if let Some(scale) = scale {
+                    fields.scale = scale;
+                }
+                if let Some(ports) = ports {
+                    fields.ports = Some(ports);
+                }
+                if let Some(entry) = addon_data {
+                    if let Some(entry) = entry {
+                        fields
+                            .addon_data
+                            .get_or_insert_with(AddonData::new)
+                            .insert(addon.into(), entry);
+                    } else {
+                        fields.addon_data =
+                            goodtype_core::addon_data::detach(fields.addon_data.take(), addon);
+                    }
+                }
+                fields.modified_at = crate::helper::now().to_string();
+                if geometry.is_some() || style.is_some() {
+                    let PageObject::Shape {
+                        geometry: old_geometry,
+                        style: old_style,
+                        ..
+                    } = object
+                    else {
+                        return Err(INVALID.into());
+                    };
+                    if let Some(geometry) = geometry {
+                        *old_geometry = geometry;
+                    }
+                    if let Some(style) = style {
+                        *old_style = style;
+                    }
+                    validate_shape(old_geometry, old_style).map_err(|_| INVALID)?;
+                }
+                if let Some(source) = source {
+                    let PageObject::Typst {
+                        fields,
+                        source_path,
+                        layout_width_pt,
+                        measured_width_pt,
+                        measured_height_pt,
+                    } = object
+                    else {
+                        return Err(INVALID.into());
+                    };
+                    let item = selection::compile(
+                        root,
+                        &snapshot.page.geometry,
+                        fields.id.clone(),
+                        selection::Operation::AddTypstBlock {
+                            source,
+                            x_pt: fields.x,
+                            y_pt: fields.y,
+                            layout_width_pt: *layout_width_pt,
+                        },
+                    )?;
+                    *measured_width_pt = item.width_pt;
+                    *measured_height_pt = item.height_pt;
+                    let file = snapshot
+                        .blocks
+                        .iter_mut()
+                        .find(|file| file.path == *source_path)
+                        .ok_or(INVALID)?;
+                    file.bytes = item.source.into_bytes();
+                }
+            }
+            Operation::DeleteObject { id } => {
+                budget = budget.checked_sub(1).ok_or(INVALID)?;
+                if !own.contains(&id) {
+                    return Err(FORBIDDEN.into());
+                }
+                if !touched.insert(id.clone()) {
+                    return Err(INVALID.into());
+                }
+                deleted.insert(id);
+            }
+            op => {
+                if allowed.is_some() {
+                    return Err(FORBIDDEN.into());
+                }
+                let items = objects(
+                    root,
+                    &snapshot.page.geometry,
+                    vec![op],
+                    &mut budget,
+                    &|| Ok(()),
+                )?;
+                if items.iter().any(|item| {
+                    item.object
+                        .fields()
+                        .addon_data
+                        .as_ref()
+                        .is_some_and(|data| data.keys().any(|key| key != addon))
+                }) {
+                    return Err(FORBIDDEN.into());
+                }
+                PreviewPage {
+                    background: white(),
+                    items,
+                }
+                .insert(&mut snapshot)?;
+            }
+        }
+    }
+    // Empty parent groups and stroke membership are ordinary page invariants of a delete.
+    loop {
+        let emptied = snapshot
+            .page
+            .objects
+            .iter()
+            .filter_map(|object| {
+                let PageObject::Group { fields, child_ids } = object else {
+                    return None;
+                };
+                (!deleted.contains(&fields.id) && child_ids.iter().all(|id| deleted.contains(id)))
+                    .then(|| fields.id.clone())
+            })
+            .collect::<Vec<_>>();
+        if emptied.is_empty() {
+            break;
+        }
+        deleted.extend(emptied);
+    }
+    for stroke in snapshot
+        .ink_layers
+        .iter_mut()
+        .flat_map(|layer| &mut layer.strokes)
+    {
+        if stroke
+            .group_id
+            .as_ref()
+            .is_some_and(|id| deleted.contains(id))
+        {
+            stroke.group_id = None;
+        }
+    }
+    let removed_paths: HashSet<_> = snapshot
+        .page
+        .objects
+        .iter()
+        .filter(|object| deleted.contains(&object.fields().id))
+        .filter_map(|object| object.searchable_source().map(str::to_owned))
+        .collect();
+    snapshot
+        .page
+        .objects
+        .retain(|object| !deleted.contains(&object.fields().id));
+    snapshot
+        .page
+        .reading_order
+        .retain(|id| !deleted.contains(id));
+    snapshot.blocks.retain(|file| {
+        !removed_paths.contains(&file.path)
+            || snapshot
+                .page
+                .objects
+                .iter()
+                .any(|object| object.searchable_source() == Some(file.path.as_str()))
+    });
+    for object in &mut snapshot.page.objects {
+        let fields = object.fields_mut();
+        if fields
+            .group_id
+            .as_ref()
+            .is_some_and(|id| deleted.contains(id))
+        {
+            fields.group_id = None;
+            snapshot.page.reading_order.push(fields.id.clone());
+        }
+        if let PageObject::Group { child_ids, .. } = object {
+            child_ids.retain(|id| !deleted.contains(id));
+        }
+    }
+    let deleted_refs = deleted.iter().map(String::as_str).collect();
+    goodtype_core::addon_data::remove_refs(&mut snapshot.page.objects, &deleted_refs);
+    let mut ordered: std::collections::HashMap<_, _> = snapshot
+        .page
+        .reading_order
+        .iter()
+        .enumerate()
+        .map(|(index, id)| (id.as_str(), index))
+        .collect();
+    for object in &mut snapshot.page.objects {
+        let fields = object.fields_mut();
+        if let Some(index) = ordered.remove(fields.id.as_str()) {
+            fields.reading_order = index.try_into().map_err(|_| INVALID)?;
+        }
+    }
+    storage::raise_schema_version(&mut snapshot);
+    Ok(Some(snapshot))
 }
 
 fn white() -> PageBackground {
@@ -129,12 +441,19 @@ fn objects(
     for op in ops {
         check()?;
         *budget = budget.checked_sub(1).ok_or(INVALID)?;
-        if let Operation::Group { children } = op {
+        if let Operation::Group {
+            children,
+            addon_data,
+            ports,
+        } = op
+        {
             if children.is_empty() {
                 return Err(INVALID.into());
             }
             *budget = budget.checked_sub(children.len()).ok_or(INVALID)?;
-            let fields = fresh_fields(0.0, 0.0)?;
+            let mut fields = fresh_fields(0.0, 0.0)?;
+            fields.addon_data = addon_data;
+            fields.ports = ports;
             let mut child_ids = Vec::new();
             for child in children {
                 check()?;
@@ -159,6 +478,7 @@ fn leaf(root: &Path, page: &PageGeometry, op: Operation) -> Result<ProposalItem,
             x_pt,
             y_pt,
             layout_width_pt,
+            addon_data,
         } => {
             if x_pt < 0.0
                 || y_pt < 0.0
@@ -174,21 +494,28 @@ fn leaf(root: &Path, page: &PageGeometry, op: Operation) -> Result<ProposalItem,
                 y_pt,
                 layout_width_pt,
             };
-            selection::compile(
+            let mut item = selection::compile(
                 root,
                 page,
                 format!("addon-{}", crate::helper::random_hex(16)?),
                 op,
-            )
+            )?;
+            item.object.fields_mut().addon_data = addon_data;
+            Ok(item)
         }
         Operation::Shape {
             x,
             y,
             geometry,
             style,
+            addon_data,
+            ports,
         } => {
             let area = (page.width_pt, page.height_pt, style.stroke_width_pt / 2.0);
-            let object = shape_object(fresh_fields(x, y)?, geometry, style).map_err(|_| INVALID)?;
+            let mut fields = fresh_fields(x, y)?;
+            fields.addon_data = addon_data;
+            fields.ports = ports;
+            let object = shape_object(fields, geometry, style).map_err(|_| INVALID)?;
             let PageObject::Shape { geometry, .. } = &object else {
                 unreachable!("shape_object builds a shape");
             };
@@ -242,7 +569,7 @@ pub(super) fn shape_within(
 }
 
 /// `[left, top, right, bottom]` of the drawn outline relative to the object origin.
-fn shape_extent(shape: &ShapeGeometry) -> Option<[f64; 4]> {
+pub(super) fn shape_extent(shape: &ShapeGeometry) -> Option<[f64; 4]> {
     let extent = match shape {
         ShapeGeometry::Rectangle {
             width_pt,

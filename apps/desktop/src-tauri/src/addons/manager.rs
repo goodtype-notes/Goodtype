@@ -669,7 +669,7 @@ pub async fn addon_list(
                 import::IMPORT_TIMEOUT.as_secs(),
                 MAX_JSON_BYTES,
             ),
-            Kind::Recognize { .. } => (
+            Kind::Recognize { .. } | Kind::Objects { .. } => (
                 &[][..],
                 crate::recognition::math_process::MEMORY_BYTES,
                 30,
@@ -757,6 +757,9 @@ fn shutdown(app: &tauri::AppHandle, addon: &Addon) {
         forms.forget_addon(addon.id);
     }
     super::session::revoke_grants(app, addon.id);
+    if matches!(addon.kind, Kind::Objects { .. }) {
+        app.state::<super::session::Runtime>().shutdown();
+    }
     if matches!(addon.kind, Kind::Recognize { .. }) {
         app.state::<super::session::Runtime>().shutdown();
         app.state::<crate::recognition::math_process::MathProcess>()

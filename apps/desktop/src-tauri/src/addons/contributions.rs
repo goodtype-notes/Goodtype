@@ -219,6 +219,13 @@ use serde_json::json;
 
 pub(super) enum Invocation {
     Selection(Value),
+    OwnObjects(Vec<Value>),
+    Reaction(Value),
+    Tool {
+        points: usize,
+        snapped: bool,
+        params: Value,
+    },
     Form {
         surface: Surface,
         values: Values,
@@ -235,6 +242,7 @@ impl Invocation {
     pub fn surface(&self) -> Surface {
         match self {
             Self::Selection(_) => Surface::InkSelection,
+            Self::OwnObjects(_) | Self::Tool { .. } | Self::Reaction(_) => Surface::OwnObject,
             Self::Form { surface, .. } => *surface,
             Self::Export { .. } => Surface::Export,
         }
@@ -243,6 +251,10 @@ impl Invocation {
     pub fn params(self, command: &Command, settings: Values) -> Result<Value, Failure> {
         let id = &command.id;
         match self {
+            Self::OwnObjects(objects) => {
+                Ok(json!({"command": id, "settings": settings, "objects": objects}))
+            }
+            Self::Tool { .. } | Self::Reaction(_) => Err(Failure::Unavailable),
             Self::Selection(scope) => {
                 Ok(json!({"command": id, "settings": settings, "scope": scope}))
             }
@@ -284,6 +296,7 @@ pub(crate) struct ContributionView {
     enabled: bool,
     direct_apply: bool,
     commands: Vec<Command>,
+    tools: Vec<super::manifest::Tool>,
     strings: Strings,
     settings: Vec<Field>,
     values: Values,
@@ -298,12 +311,15 @@ pub(crate) async fn addon_contributions(
         let mut views = Vec::new();
         for &addon in CATALOG {
             let (job, _) = importers.get(addon.id)?;
-            let Some(_idle) = job.lock_idle() else {
+            let Some(idle) = job.lock_idle() else {
                 continue;
             };
             let Some((version, path)) = install_dir(&app, addon)?.active() else {
                 continue;
             };
+            if idle.incompatible_session.as_deref() == Some(&version) {
+                continue;
+            }
             let Ok(manifest) = manager::installed(addon, &path, &version, false) else {
                 continue;
             };
@@ -313,11 +329,14 @@ pub(crate) async fn addon_contributions(
                 .filter(|command| {
                     matches!(
                         command.surface,
-                        Surface::InsertForm | Surface::PageGenerator | Surface::Export
+                        Surface::InsertForm
+                            | Surface::PageGenerator
+                            | Surface::Export
+                            | Surface::OwnObject
                     )
                 })
                 .collect();
-            if commands.is_empty() && manifest.settings.is_empty() {
+            if commands.is_empty() && manifest.settings.is_empty() && manifest.tools.is_empty() {
                 continue;
             }
             views.push(ContributionView {
@@ -328,6 +347,7 @@ pub(crate) async fn addon_contributions(
                 settings: manifest.settings,
                 strings: manifest.strings,
                 commands,
+                tools: manifest.tools,
             });
         }
         Ok(views)

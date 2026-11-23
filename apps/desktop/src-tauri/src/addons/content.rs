@@ -119,6 +119,12 @@ struct Item {
     search: String,
     width_pt: f64,
     height_pt: f64,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "strict_core"
+    )]
+    ports: Option<Vec<goodtype_core::ShapePoint>>,
     objects: Vec<ContentObject>,
 }
 
@@ -194,6 +200,16 @@ impl Item {
             || !(1..=64).contains(&self.objects.len())
         {
             return Err("invalid content item dimensions or object count");
+        }
+        if self.ports.as_ref().is_some_and(|ports| {
+            ports.len() > goodtype_core::addon_data::MAX_PORTS
+                || ports
+                    .iter()
+                    .any(|point| !point.x.is_finite() || !point.y.is_finite())
+                || (self.objects.len() == 1
+                    && matches!(self.objects[0], ContentObject::Typst { .. }))
+        }) {
+            return Err("invalid content item ports");
         }
         for object in &self.objects {
             let valid = match object {
@@ -781,6 +797,20 @@ fn commit_shape(
             }
         };
         if group_id.is_none() {
+            if let Some(ports) = &item.ports {
+                // Pack points are relative to the item, whereas a leaf has its own origin.
+                if let ContentObject::Shape { x, y, .. } = &item.objects[0] {
+                    object.fields_mut().ports = Some(
+                        ports
+                            .iter()
+                            .map(|point| goodtype_core::ShapePoint {
+                                x: point.x - x,
+                                y: point.y - y,
+                            })
+                            .collect(),
+                    );
+                }
+            }
             object.fields_mut().reading_order = page
                 .page
                 .reading_order
@@ -794,6 +824,15 @@ fn commit_shape(
     }
     if let Some(id) = group_id {
         let mut fields = next_fields(id.clone(), left, top, 1.0, None)?;
+        fields.ports = item.ports.as_ref().map(|ports| {
+            ports
+                .iter()
+                .map(|point| goodtype_core::ShapePoint {
+                    x: point.x * scale,
+                    y: point.y * scale,
+                })
+                .collect()
+        });
         fields.reading_order = page
             .page
             .reading_order
@@ -855,9 +894,9 @@ fn sideload_archive(folder: &Path) -> Result<(&'static Addon, String, tempfile::
     if is_package_link(&metadata) || !metadata.is_file() {
         return Err("invalid content manifest file".into());
     }
+    let bytes = read_bounded(&manifest_file, 64 * 1024)?;
     let session::Strict(declaration) =
-        serde_json::from_slice(&read_bounded(&manifest_file, 64 * 1024)?)
-            .map_err(|err| err.to_string())?;
+        serde_json::from_slice(&bytes).map_err(|err| err.to_string())?;
     let id = declaration["id"].as_str().ok_or("invalid-manifest")?;
     let version = declaration["version"]
         .as_str()
@@ -866,21 +905,39 @@ fn sideload_archive(folder: &Path) -> Result<(&'static Addon, String, tempfile::
     let addon = catalog::CATALOG
         .iter()
         .copied()
-        .find(|addon| addon.id == id && addon.is_content())
+        .find(|addon| addon.id == id)
         .ok_or("invalid-manifest")?;
+    let declaration = manifest::parse(&bytes, addon, version).map_err(manager::manifest_problem)?;
+    if !addon.is_content() && !declaration.uses_session() {
+        return Err("invalid-manifest".into());
+    }
     let mut files = vec![manifest::FILE.to_string()];
-    files.extend(
-        package_files(&folder.join("content"))?
-            .into_iter()
-            .map(|path| format!("content/{path}")),
-    );
+    if addon.is_content() {
+        files.extend(
+            package_files(&folder.join("content"))?
+                .into_iter()
+                .map(|path| format!("content/{path}")),
+        );
+    } else {
+        let executable = addon.executable();
+        let metadata =
+            fs::symlink_metadata(folder.join(&executable)).map_err(|error| error.to_string())?;
+        if !metadata.is_file() || is_package_link(&metadata) {
+            return Err("invalid local addon executable".into());
+        }
+        files.push(executable);
+    }
     if files.len() > MAX_ARCHIVE_ENTRIES {
         return Err("content folder has too many files".into());
     }
     let temp = tempfile::NamedTempFile::new().map_err(|err| err.to_string())?;
     let mut zip = zip::ZipWriter::new(temp.reopen().map_err(|err| err.to_string())?);
     let top = package_folder(addon, version);
-    let mut budget = MAX_PACK_BYTES as usize;
+    let mut budget = if addon.is_content() {
+        MAX_PACK_BYTES
+    } else {
+        MAX_UNPACKED_BYTES
+    } as usize;
     for relative in files {
         let bytes = read_bounded(&folder.join(&relative), budget)?;
         budget -= bytes.len();
@@ -912,18 +969,30 @@ fn sideload(app: &tauri::AppHandle, folder: &Path) -> Result<(), String> {
     };
     let dir = install_dir(app, addon)?;
     job.begin(Activity::Installing).map_err(|_| "busy")?;
-    let result = install_with_policy(
-        &dir,
-        &temp,
-        &release,
-        &|_| unreachable!("content packs never probe"),
-        |_| Ok(()),
-        |manifest| manager::activate(app, &dir, (false, None), &version, manifest, true),
-    );
+    let result = if addon.is_content() {
+        install_with_policy(
+            &dir,
+            &temp,
+            &release,
+            &|_| unreachable!("content packs never probe"),
+            |_| Ok(()),
+            |manifest| manager::activate(app, &dir, (false, None), &version, manifest, true),
+        )
+    } else {
+        manager::install(
+            app,
+            &dir,
+            &temp,
+            &release,
+            None,
+            &mut InstallProblem::Policy,
+        )
+    };
     let mut state = job.state.lock().unwrap();
     state.activity = Some(Activity::Idle);
     if result.is_ok() {
         state.startup_invalid = false;
+        state.incompatible_session = None;
     }
     result.map(|_| ())
 }
