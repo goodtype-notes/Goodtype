@@ -8,6 +8,7 @@
   let {
     value,
     recent = [],
+    palettes = [],
     mode = "edit",
     canRemove = false,
     embedded = false,
@@ -18,6 +19,7 @@
   }: {
     value: string;
     recent?: string[];
+    palettes?: { name: string; colors: string[] }[];
     /** `edit` retargets an existing swatch; `add` appends a new one. */
     mode?: "edit" | "add";
     canRemove?: boolean;
@@ -251,6 +253,21 @@
     {/each}
   </div>
 
+  {#if palettes.length}
+    <div class="palette-swatches">
+      {#each palettes as palette}
+        <div class="row-label">{palette.name}</div>
+        <div class="grid">
+          {#each palette.colors as color (color)}
+            <button type="button" class="chip" class:current={color.toLowerCase() === value.toLowerCase()}
+              style:background={color} aria-label={colorName(color, $t)} title={colorName(color, $t)}
+              onclick={() => onPick(color)}></button>
+          {/each}
+        </div>
+      {/each}
+    </div>
+  {/if}
+
   {#if recent.length}
     <div class="row-label">{$t("workspace.recent")}</div>
     <div class="grid">
@@ -364,6 +381,13 @@
   .row-label {
     color: var(--muted);
     font-size: var(--text-sm);
+  }
+
+  .palette-swatches {
+    display: grid;
+    gap: 5px;
+    max-height: min(140px, 22dvh);
+    overflow: auto;
   }
 
   .grid {

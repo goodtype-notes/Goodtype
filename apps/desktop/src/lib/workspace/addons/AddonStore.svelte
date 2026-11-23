@@ -1,5 +1,8 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
+  import PackShapePreview from "./PackShapePreview.svelte";
+  import { contentPacks, packKind, packText, shapeLibraries, type ContentPack } from "./content";
   import { displayLocale, formatNumber, locale, t, type MessageKey } from "../../i18n";
   import {
     ADDON_AVAILABILITY_CHANGED, addonCatalog, addonDetails, addonText, checkAddonRegistry,
@@ -16,6 +19,30 @@
 
   let { onClose }: { onClose: () => void } = $props();
   let manager = $state.raw<AddonManager>();
+  let packs = $state.raw<ContentPack[]>([]);
+  let sideloadFailed = $state(false);
+  let sideloadPending = $state(false);
+  const dev = import.meta.env.DEV;
+
+  async function refreshPacks() {
+    try { packs = await contentPacks(undefined, true); }
+    catch { /* Keep the last successful result. */ }
+  }
+  async function loadLocalPack() {
+    sideloadPending = true;
+    sideloadFailed = false;
+    try {
+      if (await invoke<boolean>("addon_sideload_content", { uiLanguage: $locale })) {
+        await refresh();
+        await refreshPacks();
+        window.dispatchEvent(new Event(ADDON_AVAILABILITY_CHANGED));
+      }
+    } catch {
+      sideloadFailed = true;
+    } finally {
+      sideloadPending = false;
+    }
+  }
   let kinds = $state<Record<string, string>>({});
   let query = $state("");
   let selected = $state<string>();
@@ -48,11 +75,14 @@
     }) : "");
   const visible = $derived(manager?.addons.filter(addon => matchesAddon(addon, query, $locale)) ?? []);
   const active = $derived(manager?.addons.find(addon => addon.id === selected));
+  const activePack = $derived(packs.find(pack => pack.id === selected));
+  const activeShapes = $derived(activePack ? shapeLibraries([activePack], $locale).flatMap(library => library.items) : []);
   const activeDetails = $derived(selected ? details[selected] : undefined);
   const newPermissions = $derived(prompt?.addon.catalogPermissions.filter(permission =>
     !prompt?.update || !prompt.addon.permissions.includes(permission)) ?? []);
   const summaryKeys = {
     goodnotes: "addons.goodnotes.description", onenote: "addons.onenote.description", math: "addons.math.description",
+    "engineering-shapes": "addons.engineeringShapes.description", "study-templates": "addons.studyTemplates.description",
   } as const;
 
   const icons = {
@@ -73,7 +103,10 @@
         return previous && (previous.installed !== addon.installed || previous.status !== addon.status);
       });
       manager = next;
-      if (changed) window.dispatchEvent(new Event(ADDON_AVAILABILITY_CHANGED));
+      if (changed) {
+        void refreshPacks();
+        window.dispatchEvent(new Event(ADDON_AVAILABILITY_CHANGED));
+      }
       listFailed = false;
     } catch {
       if (started === request) listFailed = true;
@@ -91,6 +124,7 @@
   onMount(() => {
     initialFocus.focus();
     void refresh();
+    void refreshPacks();
     void check("manager");
     void addonCatalog().then(catalog => {
       kinds = Object.fromEntries(catalog.map(addon => [addon.id, addon.kind]));
@@ -270,6 +304,11 @@
       {#if !active}
         <input type="search" bind:value={query} aria-label={$t("addons.store.search")} placeholder={$t("addons.store.search")} />
       {/if}
+      {#if dev && !active}
+        <button class="quiet-action" type="button" disabled={sideloadPending} onclick={() => void loadLocalPack()}>
+          {$t("contentPacks.loadLocal")}
+        </button>
+      {/if}
       {#if registryText}<span class="registry" role="status">{registryText}</span>{/if}
       <button type="button" class="chrome" aria-label={$t("addons.store.check")} title={$t("addons.store.check")}
         disabled={checking || registry?.checking} onclick={() => void check("manual")}>
@@ -279,6 +318,9 @@
   </header>
 
   <div class="scroll" bind:this={scroller} onscroll={placePrompt}>
+    {#if sideloadFailed}
+      <p class="page problem" role="alert">{$t("contentPacks.loadFailed")}</p>
+    {/if}
     {#if listFailed}
       <div class="page problem"><span role="alert">{$t("addons.store.loadFailed")}</span>
         <button type="button" class="quiet-action" onclick={() => void refresh()}>{$t("addons.store.retry")}</button>
@@ -294,7 +336,18 @@
         ["checking", "awaitingApproval", "importing", "publishing"].includes(active.activity)}
       <div class="page detail">
         <article>
-          <AddonPreview kind={active.kind ?? kinds[active.id]} image={activeDetails?.preview} large />
+          {#if activeShapes.length && !activeDetails?.preview}
+            <div class="pack-previews">
+              {#each activeShapes.slice(0, 3) as shape}
+                <figure>
+                  <div><PackShapePreview item={shape.item} /></div>
+                  <figcaption>{shape.label}</figcaption>
+                </figure>
+              {/each}
+            </div>
+          {:else}
+            <AddonPreview kind={active.kind ?? kinds[active.id]} image={activeDetails?.preview} large />
+          {/if}
           {#if loading[active.id] || !activeDetails}
             <div class="skeleton" role="status" aria-label={$t("addons.store.loadingDescription")}><i></i><i></i><i></i></div>
           {:else if activeDetails.readme}
@@ -333,11 +386,34 @@
             {#if release}<dt>{$t("addons.store.size")}</dt><dd>{megabytes(release.sizeBytes)}</dd>
             {:else if active.status === "needs-reinstall"}<dt>{$t("addons.manager.download")}</dt><dd>{$t("addons.manager.noCompatibleRelease")}</dd>{/if}
             {#if active.formats.length}<dt>{$t("addons.manager.formats")}</dt><dd>{active.formats.join(", ")}</dd>{/if}
+            {#if active.isolation !== "content"}
             <dt>{$t("addons.manager.limitsLabel")}</dt>
             <dd>{$t("addons.manager.limits", { memory: megabytes(active.memoryBytes), seconds: formatNumber(active.timeoutSeconds), output: megabytes(active.outputBytes) })}</dd>
+            {/if}
           </dl>
           <section class="permissions">
-            {#if active.approval}
+            {#if active.isolation === "content"}
+              <h3>{$t("contentPacks.contents")}</h3>
+              {#if activePack}
+                {#if activeShapes.length}
+                  <p><strong>{$t("contentPacks.shapeCount", { count: activeShapes.length })}</strong>
+                    {activeShapes.slice(0, 3).map(shape => shape.label).join(", ")}
+                  </p>
+                {/if}
+                {#each [{ kind: "templates", items: activePack.templates }, { kind: "palettes", items: activePack.palettes }, { kind: "theme", items: activePack.themes }] as row}
+                  {#if row.items.length}
+                    <p><strong>{$t(`addons.store.kind.${row.kind as "templates" | "palettes" | "theme"}`)} ({formatNumber(row.items.length)})</strong>
+                      {row.items.map(item => packText(activePack!, item.label, $locale)).join(", ")}
+                    </p>
+                  {/if}
+                {/each}
+                {#if activePack.typstPackages.length}
+                  <p>{$t("contentPacks.typstPackages", { names: activePack.typstPackages.join(", ") })}</p>
+                {/if}
+              {:else}
+                <p class="muted">{$t("contentPacks.unavailable")}</p>
+              {/if}
+            {:else if active.approval}
               {#key active.approval.token}
                 <AddonApproval id={active.id} approval={active.approval} {refresh} />
               {/key}
@@ -387,7 +463,7 @@
         {#each visible as addon (addon.id)}
           {@const name = addonText(addon.name, $locale)}
           {@const kind = addon.kind ?? kinds[addon.id]}
-          {@const kindLabel = kind === "import" ? $t("addons.store.kind.import") : kind === "recognize" ? $t("addons.store.kind.recognize") : kind === "theme" ? $t("addons.store.kind.theme") : $t("addons.store.kind.other")}
+          {@const kindLabel = kind === "import" ? $t("addons.store.kind.import") : kind === "recognize" ? $t("addons.store.kind.recognize") : kind === "theme" ? $t("addons.store.kind.theme") : addon.isolation === "content" ? $t(`addons.store.kind.${packKind(packs.find(pack => pack.id === addon.id))}`) : $t("addons.store.kind.other")}
           {@const release = addon.update ?? addon.release}
           {@const action = addonAction(addon)}
           {@const percent = downloadPercent(addon.progress)}
@@ -486,6 +562,11 @@
   dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; margin: 14px 0 0; padding: 12px 0; border-block: 1px solid var(--edge-soft); }
   dt { color: var(--muted); }
   dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .permissions h3 { font-size: var(--text-md); margin: 4px 0; }
+  .pack-previews { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+  .pack-previews figure { margin: 0; min-width: 0; overflow-wrap: anywhere; font-size: var(--text-sm); }
+  .pack-previews figcaption { padding-top: 6px; color: var(--muted); }
+  .pack-previews figure div { height: 94px; padding: 8px; background: var(--paper); border-radius: var(--radius); }
   .permissions, .switches { padding-block: 8px; border-bottom: 1px solid var(--edge-soft); }
   .secondary-actions { margin-top: 12px; }
   footer { display: grid; gap: 4px; margin-top: 16px; border-top: 1px solid var(--edge-soft); padding-top: 12px; overflow-wrap: anywhere; }

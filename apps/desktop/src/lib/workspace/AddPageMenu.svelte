@@ -38,6 +38,7 @@
     onSizeChange,
     onOrientationChange,
     onClose,
+    onInsertShape,
   }: {
     where: AddPageWhere;
     groups: AddPageGroup[];
@@ -64,6 +65,7 @@
     onSizeChange: (next: string) => void;
     onOrientationChange: (next: "portrait" | "landscape") => void;
     onClose: () => void;
+    onInsertShape?: () => void;
   } = $props();
 
   const CHOICES: { value: AddPageWhere; label: string }[] = $derived([
@@ -206,7 +208,7 @@
   /// Enter commits from wherever the writer is, and Tab stays inside the panel so a keyboard
   /// writer cannot land behind it on the page it is covering.
   function keydown(event: KeyboardEvent) {
-    if (event.key === "Enter" && !(event.target as HTMLElement).closest(".add")) {
+    if (event.key === "Enter" && !(event.target as HTMLElement).closest(".add, .insert-shape")) {
       event.preventDefault();
       commit(event.shiftKey);
       return;
@@ -251,6 +253,9 @@
       {#key destination}<span class="destination">{destination}</span>{/key}
     </div>
 
+    {#if onInsertShape}
+      <button type="button" class="chip insert-shape" onclick={onInsertShape}>{$t("contentPacks.insertShape")}</button>
+    {/if}
     <div class="run" role="group" aria-label={$t("workspace.howManyPages")}>
       <span class="run-label">{$t("workspace.pages")}</span>
       <button type="button" aria-label={$t("workspace.oneFewerPage")} disabled={behavior.single || count <= 1} onclick={() => step(-1)}>−</button>
@@ -545,6 +550,7 @@
   }
 
   .subject { min-width: 0; flex: 1; }
+  .insert-shape { flex: none; padding-inline: 12px; }
   .subject strong { display: block; font-size: var(--text-lg); font-weight: 600; }
 
   .destination {

@@ -3,6 +3,7 @@ import { exportTarget, INCLUDE_EVERYTHING, parsePageList, type ExportChoice } fr
 import { acceptProposal, validateProposalPlacement } from "../helper/proposal";
 import { helperInsertProposal, helperCreatePage } from "../ipc/helper";
 import type { Proposal } from "../ipc/helper";
+import { insertContentShape as saveContentShape, type ShapePlacement } from "../workspace/addons/content";
 import { addonText, insertAddonProposal as addonInsertProposal, type AddonReview } from "../ipc/addons";
 import type { createSelection } from "./selectionEditing.svelte";
 import type { createNavigation } from "./viewportNavigation.svelte";
@@ -1624,6 +1625,34 @@ export function createSession(env: SessionEnvironment) {
     return inserted;
   }
 
+  async function insertContentShape(request: ShapePlacement) {
+    const requestRoot = root, pageId = activePageId, generation = notebookGeneration;
+    if (!requestRoot || !await persist()) throw new Error("flush_failed");
+    replacingPageCount += 1;
+    pendingTransactions += 1;
+    let failure: unknown;
+    transactionQueue = transactionQueue.then(async () => {
+      try {
+        if (root !== requestRoot || activePageId !== pageId || notebookGeneration !== generation || transactionFailed) {
+          throw new Error("wrong_page");
+        }
+        const result = await saveContentShape(requestRoot, pageId, { ...request, revision });
+        if (root !== requestRoot || notebookGeneration !== generation) return;
+        recordNotebookAction(pageId);
+        editGeneration += 1;
+        if (activePageId !== pageId) return;
+        applySnapshot(result.snapshot);
+        revision = result.snapshot.page.revision;
+        canUndo = result.canUndo;
+        canRedo = result.canRedo;
+        env.selection.updateInkSelection([]);
+        env.selection.lassoObjectIds = result.selectedIds;
+      } catch (error) { failure = error; }
+    }).finally(() => { pendingTransactions -= 1; replacingPageCount -= 1; });
+    await transactionQueue;
+    if (failure) throw failure;
+  }
+
   function addTranscribedBlock(source: string, placement: { x: number; y: number; layoutWidthPt: number }, label: UiText) {
     if (activeSnapshot?.page.calculation) return;
     insertTypstBlock(source, placement);
@@ -2340,6 +2369,7 @@ export function createSession(env: SessionEnvironment) {
     addTranscribedBlock,
     insertHelperProposal,
     insertAddonProposal,
+    insertContentShape,
     nextVisualZIndex,
     nextReadingOrder,
     scheduleInkCommit,

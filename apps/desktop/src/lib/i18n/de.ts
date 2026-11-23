@@ -1,7 +1,29 @@
 import type { Catalog } from "./en";
 
 export const de = {
+  contentPacks: {
+    insertShape: "Form einfügen",
+    search: "Formen suchen",
+    all: "Alle Bibliotheken",
+    noShapesFound: "Keine Formen entsprechen der Suche.",
+    noShapes: "Installiere ein Formenpaket unter Addons, um diese Bibliothek zu füllen.",
+    preview: "Vorschau",
+    scale: "Maßstab",
+    insert: "Einfügen",
+    insertFailed: "Goodtype konnte die Form nicht einfügen.",
+    theme: "Design",
+    defaultTheme: "Standard",
+    contents: "Inhalt",
+    shapeCount_one: "{{count}} Form",
+    shapeCount_other: "{{count}} Formen",
+    typstPackages: "Enthält Typst-Pakete: {{names}}",
+    unavailable: "Der Inhalt ist nach der Installation verfügbar.",
+    loadLocal: "Lokales Paket laden…",
+    loadFailed: "Goodtype konnte das lokale Inhaltspaket nicht laden.",
+  },
   addons: {
+    engineeringShapes: { label: "Technische Formen", description: "Wiederverwendbare Symbole für technische Zeichnungen." },
+    studyTemplates: { label: "Lernvorlagen", description: "Seitenlayouts zum Lernen und Mitschreiben." },
     store: {
       browse: "Erweiterungen entdecken",
       back: "Zurück",
@@ -23,7 +45,7 @@ export const de = {
       installPermissions: "Die Erweiterung kann Folgendes:",
       source: "Von GitHub · {{repository}} · {{reference}}",
       verified: "Durch das signierte Verzeichnis festgelegt",
-      kind: { import: "Import", recognize: "Erkennung", theme: "Design", other: "Erweiterung" },
+      kind: { shapes: "Formen", templates: "Vorlagen", palettes: "Palette", content: "Inhalt", import: "Import", recognize: "Erkennung", theme: "Design", other: "Erweiterung" },
       installProblem: {
         download: "Die Erweiterung konnte nicht heruntergeladen werden.",
         verify: "Das heruntergeladene Paket konnte nicht verifiziert werden.",
@@ -61,6 +83,7 @@ export const de = {
       "noPermissions": "Keine Berechtigungen deklariert.",
       "network": "Goodtype lädt Pakete von GitHub herunter.",
       isolation: {
+        content: "Enthält kein Programm. Goodtype liest nur die Formen, Vorlagen und Farben.",
         sandbox: "Läuft isoliert: kein Netzwerkzugriff, und es kann nur seine eigenen installierten Dateien lesen.",
         job: "Läuft mit dem Datei- und Netzwerkzugriff deines Benutzerkontos. Goodtype begrenzt nur Arbeitsspeicher und Laufzeit.",
       },

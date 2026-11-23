@@ -20,7 +20,7 @@ export type RecognitionAddon = {
   i18nPrefix: PrefixWith<"label">;
 };
 
-type Addon = ImportAddon | RecognitionAddon;
+type Addon = ImportAddon | RecognitionAddon | { id: string; kind: "content"; i18nPrefix: PrefixWith<"label"> };
 
 let catalog: Promise<Addon[]> | undefined;
 
@@ -69,7 +69,7 @@ export type ManagedAddon = {
   timeoutSeconds: number;
   outputBytes: number;
   /** "sandbox": AppContainer, no network, own files only. "job": user access, memory/time limits. */
-  isolation: "sandbox" | "job";
+  isolation: "sandbox" | "job" | "content";
   release: Release | null;
   update: Release | null;
   directApply: boolean;
