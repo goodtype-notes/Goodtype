@@ -140,6 +140,7 @@ pub fn commit_page_delta_with_precondition(
         current,
         candidate,
         precondition,
+        false,
     )
 }
 

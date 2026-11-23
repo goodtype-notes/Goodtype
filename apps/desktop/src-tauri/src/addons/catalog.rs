@@ -92,4 +92,32 @@ pub static MATH: Addon = Addon {
     },
 };
 
-pub(super) static CATALOG: &[&Addon] = &[&GOODNOTES, &ONENOTE, &MATH];
+pub(super) static CATALOG: &[&Addon] = &[&GOODNOTES, &ONENOTE, &MATH, &ENGINEERING, &STUDY];
+
+pub(super) static ENGINEERING: Addon = Addon {
+    id: "engineering-shapes",
+    legacy: None,
+    en: ("Engineering Shapes", ""),
+    de: ("Technische Formen", ""),
+    i18n_prefix: "addons.engineeringShapes",
+    name: "",
+    package: "goodtype-engineering-shapes",
+    repository: "/Just8it/Goodtype-Engineering-Shapes",
+    public_key: None,
+    pinned: None,
+    kind: Kind::Content,
+};
+
+pub(super) static STUDY: Addon = Addon {
+    id: "study-templates",
+    legacy: None,
+    en: ("Study Templates", ""),
+    de: ("Lernvorlagen", ""),
+    i18n_prefix: "addons.studyTemplates",
+    name: "",
+    package: "goodtype-study-templates",
+    repository: "/Just8it/Goodtype-Study-Templates",
+    public_key: None,
+    pinned: None,
+    kind: Kind::Content,
+};

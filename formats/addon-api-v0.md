@@ -68,8 +68,9 @@ JSON keys and duplicate declaration IDs within each declaration list.
 | `version` | Verified release version, three dot-separated decimal components, at most 32 characters. |
 | `apiVersion` | Exact host API string, `goodtype-api 0.1` for this contract. |
 | `target` | `x86_64-pc-windows-msvc`. |
-| `entrypoint` | Forward-slash relative path to the catalog-approved `.exe` inside the verified package. |
-| `transport` | Catalog-approved `legacy-import-cli` or `stdio-jsonrpc`. |
+| `entrypoint` | Forward-slash relative path to the catalog-approved `.exe` inside the verified package. Absent for content packs. |
+| `transport` | Catalog-approved `legacy-import-cli`, `stdio-jsonrpc`, or `content`. |
+| `contents` | Required for content packs and forbidden for process transports. Lists the files or Typst package directories the pack contributes. |
 | `permissions` | Unique array of catalog-approved literals from the vocabulary below. |
 | `commands` | 1–16 catalog-approved commands, each with `id`, `label` and `surface` (`library-import` or `ink-selection`). |
 | `settings` | 0–16 descriptors, each with `id`, `label`, `type`, `default` and optional `hint` and `search` keys. |
@@ -422,6 +423,43 @@ safe relative target within the batch. Rust validates each notebook before
 publishing it to the Library, keeps existing destination notebooks and
 can retain valid completed results after cancellation.
 
+## Content packs
+
+Content packs use the same signed ZIP, staged install, activation and rollback as
+other addons. They omit `entrypoint` and supply empty `permissions`, `commands`
+and `settings`. No executable probe or addon process runs. Debug builds can
+load a local folder for a catalog-known content addon.
+
+`contents` is an object with optional `shapes`, `templates`, `palettes`,
+`themes` and `typstPackages` arrays. At least one must be nonempty. JSON
+contributions live at `content/<kind>/<file>.json` with at most 32 files per
+kind and 1 MiB per file. The entire ZIP expands to at most 16 MiB. JSON rejects
+unknown fields and duplicate keys. Labels and search keywords refer to the
+manifest's English and German string tables.
+
+- Shape libraries provide `id`, `label` and `items`. An item includes `id`,
+  `label`, `search`, `widthPt`, `heightPt` and up to 64 `objects`. A shape
+  object supplies `type: "shape"`, local `x` and `y`, core `geometry` and
+  partial `style`. A label supplies `type: "typst"`, local `x` and `y`,
+  `source` (up to 2 KiB), `layoutWidthPt` and `scale`. The host bounds shapes
+  to the item and allows Typst labels to overhang each edge by half the
+  corresponding dimension. A pack may contain up to 512 items. Inserted
+  geometry, source and pen defaults become ordinary notebook objects.
+- Template files contain a `templates` array of `{label, template}` entries.
+  Definitions are ordinary page templates with IDs starting with the addon ID
+  and a period. A pack may contain up to 32 templates.
+- Palette files contain a `palettes` array of `{id, label, colors}` entries,
+  each with 2–24 unique six-digit hex colours. A pack may contain up to 16 palettes.
+- Theme files contain a `themes` array of `{id, label, tokens}` entries. Only
+  the app's configurable UI colour tokens accept six-digit hex or
+  `rgb(r g b / a%)` values. The host checks text, muted and quiet contrast
+  on the panel and surround, and on-accent contrast on blueprint, at 4.5:1.
+  A pack may contain up to 8 themes. Missing themes return to Default.
+- Typst package directories must be `content/typst/preview/<name>/<version>`
+  with matching `typst.toml`. A pack may contain up to 16. Goodtype resolves
+  regular local Typst packages first, then app-owned offline copies, then
+  downloads when allowed. Offline copies support saved labels after addon removal.
+
 ## Changelog
 
 | API | Changes | Breaking changes |
@@ -452,3 +490,6 @@ one-time tree grant and added the host-side `addon-storage-exceeded` problem
 for the 256 MiB scratch cap. The wire contract is unchanged.
 
 Math catalog: Ed25519 key from `Just8it/Goodtype-ink-recognition` (0.1.0), no bootstrap pin; math installs from the signed index (index-3 onward, now also the bundled snapshot). Math sessions hold `registryRead` only (user-approved 2026-11-21). No wire change.
+
+Step 5 adds the `content` transport and `contents` to manifest v1. Existing
+process manifests and the API version are unchanged.

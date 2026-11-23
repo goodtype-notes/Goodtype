@@ -59,6 +59,7 @@ impl Default for LassoTargets {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
+    pub theme_id: String,
     pub ai_helper: crate::helper::HelperSettings,
     pub ui_language: String,
     pub inline_text_font: String,
@@ -292,6 +293,7 @@ impl Default for AppSettings {
             page_text_baseline_grid: true,
             page_text_line_wrap: true,
             ai_helper: Default::default(),
+            theme_id: String::new(),
             remote_packages: true,
             python_package_downloads: true,
             pull_to_add_page: true,
@@ -372,6 +374,13 @@ fn sanitize_widths(widths: Vec<f64>, fallback: &[f64], minimum: f64, maximum: f6
 /// Settings come from an editable file, so every numeric field is clamped to the documented
 /// interaction bounds before it can reach the pen pipeline.
 fn sanitize(mut settings: AppSettings) -> AppSettings {
+    if settings.theme_id.len() > 97
+        || !settings.theme_id.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-')
+        })
+    {
+        settings.theme_id.clear();
+    }
     settings.inline_text_font = settings.inline_text_font.trim().to_owned();
     if settings.inline_text_font.len() > 200
         || settings.inline_text_font.chars().any(char::is_control)

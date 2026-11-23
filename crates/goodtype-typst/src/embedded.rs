@@ -32,6 +32,54 @@ use crate::{CompileResult, Diagnostic, DiagnosticSeverity};
 
 const MAX_WORLD_FILE_BYTES: usize = 64 * 1024 * 1024;
 
+static CONTENT_PACKAGES: OnceLock<FsPackages> = OnceLock::new();
+
+/// Host-owned offline copies are separate from Typst's ordinary data and cache.
+pub fn set_content_package_directory(root: PathBuf) {
+    let _ = CONTENT_PACKAGES.set(FsPackages::new(root));
+}
+
+thread_local! {
+    static PACK_SCOPE: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// During content insertion, only this pack's contributions supplement the normal resolver.
+pub fn with_content_package_scope<T>(packages: Vec<String>, compile: impl FnOnce() -> T) -> T {
+    struct Reset(Option<Vec<String>>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            PACK_SCOPE.with(|scope| scope.replace(self.0.take()));
+        }
+    }
+    let _reset = Reset(PACK_SCOPE.with(|scope| scope.replace(Some(packages))));
+    compile()
+}
+
+fn content_package(
+    system: &SystemPackages,
+    content: Option<&FsPackages>,
+    scope: Option<&[String]>,
+    spec: &typst::syntax::package::PackageSpec,
+) -> typst::diag::PackageResult<typst_kit::files::FsRoot> {
+    for location in [system.data(), system.cache()].into_iter().flatten() {
+        if let Some(root) = location.obtain(spec) {
+            return Ok(root);
+        }
+    }
+    if let Some(content) = content
+        && scope.is_none_or(|paths| {
+            paths.contains(&format!(
+                "{}/{}/{}",
+                spec.namespace, spec.name, spec.version
+            ))
+        })
+        && let Some(root) = content.obtain(spec)
+    {
+        return Ok(root);
+    }
+    system.obtain(spec)
+}
+
 /// Compile a single wrapped block source in-process and render its first page to SVG.
 pub(crate) fn compile_block(
     root: &Path,
@@ -458,6 +506,7 @@ pub(crate) struct BlockWorld {
     /// Resolves packages: local directories, plus a download on a cache miss when the policy
     /// allows it. Project-file grants do not override this caller-owned package policy.
     packages: &'static SystemPackages,
+    content_package_scope: Option<Vec<String>>,
     /// Generated, in-memory files (the entry document and its helpers) keyed by file id.
     overlay: HashMap<FileId, Bytes>,
     /// Decoded source cache so repeated `source()` calls during layout stay cheap.
@@ -482,6 +531,7 @@ impl BlockWorld {
             preset_packages: PRESET_PACKAGES.with(|s| s.borrow().clone()),
             main,
             packages: package_loader(allow_remote_packages),
+            content_package_scope: PACK_SCOPE.with(|scope| scope.borrow().clone()),
             overlay,
             sources: Mutex::new(HashMap::new()),
             files: Mutex::new(HashMap::new()),
@@ -519,7 +569,13 @@ impl BlockWorld {
                 // download happens only on a miss — and only when the user allows it.
                 // Project grants and package-download policy are independent. Offline callers
                 // supply the offline loader; reviewed preset replay never reaches this fallback.
-                let root = self.packages.obtain(spec).map_err(FileError::Package)?;
+                let root = content_package(
+                    self.packages,
+                    CONTENT_PACKAGES.get(),
+                    self.content_package_scope.as_deref(),
+                    spec,
+                )
+                .map_err(FileError::Package)?;
                 // FsRoot::resolve denies a virtual path that would escape the package root.
                 root.resolve(id.vpath())
             }
@@ -671,3 +727,7 @@ fn project_file_id(name: &str) -> FileId {
 #[cfg(test)]
 #[path = "computation_spike.rs"]
 mod computation_spike;
+
+#[cfg(test)]
+#[path = "content_package_tests.rs"]
+mod content_package_tests;

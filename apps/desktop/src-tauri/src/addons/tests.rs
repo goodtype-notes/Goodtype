@@ -1036,6 +1036,8 @@ fn catalog_exposes_only_frontend_metadata() {
                 "i18nPrefix": "addons.math",
                 "recognizes": "math",
             },
+            { "id": "engineering-shapes", "kind": "content", "i18nPrefix": "addons.engineeringShapes" },
+            { "id": "study-templates", "kind": "content", "i18nPrefix": "addons.studyTemplates" },
         ])
     );
 }
