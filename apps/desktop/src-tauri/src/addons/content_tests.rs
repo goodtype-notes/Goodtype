@@ -272,8 +272,23 @@ fn verifies_install_without_probe_and_insertion_survives_removing_pack() {
         &fs::read(fixture.join(reference)).unwrap(),
     );
     storage::create_notebook(&root, &source).unwrap();
+    // Keep the old schema, but exercise export on a page without the fixture's PDF material.
+    let source = storage::create_page(
+        &root,
+        "2026-11-23T00:00:00Z",
+        &storage::PagePosition::Last,
+        Some(&goodtype_core::PageBackground::Plain {
+            color: "#ffffff".into(),
+        }),
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        source.page.schema_version,
+        goodtype_core::MIN_SUPPORTED_SCHEMA_VERSION
+    );
     let mut history = storage::NotebookHistory::default();
-    storage::observe_notebook(&root, &mut history).unwrap();
+    storage::observe_page(&root, &source.page.id, &mut history).unwrap();
     let mut request = ShapeInsertion {
         addon_id: addon.id.into(),
         library_id: "circuits".into(),
@@ -347,7 +362,13 @@ fn verifies_install_without_probe_and_insertion_survives_removing_pack() {
         ("#223344", 2.5)
     );
     let export = crate::export::export_page_from_bundle(&reopened, false).unwrap();
-    assert!(goodtype_typst::export::export_pages(&root, "pack-check", &[export], false).is_ok());
+    let exported =
+        goodtype_typst::export::export_pages(&root, "pack-check.pdf", &[export], false).unwrap();
+    assert!(
+        fs::read(exported.output_path)
+            .unwrap()
+            .starts_with(b"%PDF-")
+    );
 }
 
 #[test]
