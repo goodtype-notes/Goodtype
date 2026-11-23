@@ -2,6 +2,20 @@ import type { Catalog } from "./en";
 
 export const de = {
   addons: {
+    contributions: {
+      destination: "Speicherort f?r die Datei ausw?hlen",
+      insertTitle: "Aus Add-on einf?gen",
+      preview: "Vorschau",
+      insert: "Einf?gen",
+      choose: "Add-on-Befehl ausw?hlen",
+      emptyPreview: "Erstelle eine Vorschau, um das Ergebnis hier zu sehen.",
+      invalid: "Pr?fe die markierten Felder und versuche es erneut.",
+      failed: "Das Add-on konnte diesen Befehl nicht ausf?hren.",
+      settings: "Add-on-Einstellungen",
+      format: "Format",
+      exported: "Export abgeschlossen.",
+      exportFailed: "Das Add-on konnte diese Seiten nicht exportieren.",
+    },
     store: {
       browse: "Erweiterungen entdecken",
       back: "Zurück",
@@ -119,6 +133,7 @@ export const de = {
         "derived-import-artwork": "Beim Import abgeleitete Grafiken erstellen",
         "publish-import-batch": "Neu importierte Notizbücher in die Bibliothek übernehmen",
         "selected-ink": "Die ausgewählten Stiftstriche lesen",
+        "read-pages": "Die zum Export ausgew?hlten Seiten lesen",
         "add-page-objects": "Vorschlagen, Objekte zu einer Seite hinzuzufügen"
       },
     },

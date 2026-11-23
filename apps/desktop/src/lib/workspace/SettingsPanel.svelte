@@ -1,6 +1,9 @@
 <script lang="ts">
   import ConfirmDialog from "./ConfirmDialog.svelte";
-  import { listAddons, resetAddonPolicy, setAddonAutoCheck, setAddonDirectApply, type AddonManager } from "../ipc/addons";
+  import AddonSettings from "./addons/AddonSettings.svelte";
+  import { matchesField } from "./addons/formModel";
+  import { locale as addonLocale } from "../i18n";
+  import { addonContributions, type AddonContribution, listAddons, resetAddonPolicy, setAddonAutoCheck, setAddonDirectApply, type AddonManager } from "../ipc/addons";
   import CodexSettings from "../helper/CodexSettings.svelte";
   import HelperSetup from "../helper/HelperSetup.svelte";
   import { onMount, tick, untrack } from "svelte";
@@ -54,6 +57,7 @@
     if (!("__TAURI_INTERNALS__" in window)) return;
     void typstFontFamilies().then(value => { fonts = value; }).catch(() => { fontLoadFailed = true; });
   });
+  let contributions = $state.raw<AddonContribution[]>([]);
   let addonManager = $state.raw<AddonManager>();
   const groups = $derived(settingGroups($t, [...new Set([...fonts, settings.inlineTextFont, selectedBlockFont].filter((font): font is string => Boolean(font)))], settings.aiHelper.enabled));
   let addonError = $state<"loadFailed" | "policyFailed" | null>(null);
@@ -67,6 +71,7 @@
       const next = await listAddons();
       if (request !== addonRequest) return;
       addonManager = next;
+      void addonContributions().then(found => { if (request === addonRequest) contributions = found; }).catch(() => {});
       if (addonError === "loadFailed") addonError = null;
     } catch {
       if (request === addonRequest) addonError = "loadFailed";
@@ -117,6 +122,9 @@
     groups.find((entry) => entry.id === groupId) ?? groups[0],
   );
   const hits = $derived(searchSettings(query, groups));
+  const addonHits = $derived(contributions.filter(addon => addon.settings.some(field => matchesField(addon, field, query, $addonLocale))));
+  const addonHitCount = $derived(addonHits.reduce((count, addon) => count +
+    addon.settings.filter(field => matchesField(addon, field, query, $addonLocale)).length, 0));
   const searching = $derived(query.trim().length > 0);
 
   function apply(item: SettingItem, value: boolean | string | number) {
@@ -316,12 +324,15 @@
       <div class="pane">
         {#if searching}
           <div class="pane-head">
-            <h2>{$t("counts.results", { count: hits.length })}</h2>
+            <h2>{$t("counts.results", { count: hits.length + addonHitCount })}</h2>
           </div>
-          {#if hits.length}
+          {#if hits.length || addonHitCount}
             <div class="settings">
               {#each hits as hit (hit.item.id)}
                 {@render setting(hit.item, hit.group.title)}
+              {/each}
+              {#each addonHits as addon (addon.addonId)}
+                <AddonSettings {addon} {query} disabled={addonManager?.recovery} />
               {/each}
             </div>
           {:else}

@@ -1,5 +1,19 @@
 export const en = {
   addons: {
+    contributions: {
+      destination: "Choose where to save the file",
+      insertTitle: "Insert from addon",
+      preview: "Preview",
+      insert: "Insert",
+      choose: "Choose an addon command",
+      emptyPreview: "Generate a preview to see the result here.",
+      invalid: "Check the marked fields and try again.",
+      failed: "The addon could not complete this command.",
+      settings: "Addon settings",
+      format: "Format",
+      exported: "Export completed.",
+      exportFailed: "The addon could not export these pages.",
+    },
     store: {
       browse: "Browse addons",
       back: "Back",
@@ -46,9 +60,9 @@ export const en = {
       approve: "Approve and install",
       "title": "Addons",
       "search": "addon extension plugin importer recognition permissions update install",
-      "globalHint": "This preference will apply to eligible addon commands once Goodtype supports them. Each addon also needs its own permission.",
+      "globalHint": "Eligible commands can apply directly when the addon also has permission.",
       "direct": "Apply changes directly",
-      "directHint": "This preference will apply to eligible commands once Goodtype supports them and the global setting is on.",
+      "directHint": "Eligible commands can apply directly when the global setting is also on.",
       "installed": "Installed version",
       "download": "Download",
       "formats": "Import formats",
@@ -117,6 +131,7 @@ export const en = {
         "derived-import-artwork": "Create derived artwork during import",
         "publish-import-batch": "Publish newly imported notebooks",
         "selected-ink": "Read the selected ink",
+        "read-pages": "Read the pages you choose to export",
         "add-page-objects": "Propose adding objects to a page"
       },
     },

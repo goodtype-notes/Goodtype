@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { t } from "../i18n";
+  import { contributionText, type ContributionEntry } from "../ipc/addons";
+  import { locale, t } from "../i18n";
   import { dismissable } from "./dismiss";
   import { exportTarget, parsePageList, type ExportChoice, type ExportInclude, type ExportScope } from "./exportTarget";
 
@@ -17,7 +18,9 @@
    * The Export button takes focus on open without a ring, so repeating the last export is the
    * button plus Enter. The choice is owned by the caller and outlives the sheet.
    */
-  let { choice, pageNumber, pageCount, trigger, onChange, onExport, onClose }: {
+  let { formats = [], onAddonExport, choice, pageNumber, pageCount, trigger, onChange, onExport, onClose }: {
+    formats?: ContributionEntry[];
+    onAddonExport?: (entry: ContributionEntry, current: boolean) => void;
     choice: ExportChoice;
     /** The page in view, one-based. */
     pageNumber: number;
@@ -29,6 +32,10 @@
     onClose: () => void;
   } = $props();
 
+  let selectedFormat = $state("");
+  const format = $derived(formats.find(({ addon, command }) => selectedFormat === addon.addonId + "/" + command.id));
+  const formatLabel = $derived(format?.command.surface === "export"
+    ? contributionText(format.addon, format.command.format.label, $locale) : null);
   let commit = $state<HTMLButtonElement>();
   let pagesInput = $state<HTMLInputElement>();
   onMount(() => commit?.focus({ focusVisible: false } as FocusOptions));
@@ -61,6 +68,8 @@
   const listed = $derived(choice.scope === "pages" ? parsePageList(choice.pages, pageCount) : null);
   // The real ids do not matter for counting and naming; their positions do.
   const target = $derived(exportTarget(choice, Array.from({ length: pageCount }, (_, index) => String(index + 1)), String(pageNumber)));
+  const outputName = $derived(format?.command.surface === "export"
+    ? `notebook.${format.command.format.extension}` : target?.outputName);
   const count = $derived(target?.pageCount ?? 0);
   const pagesReadout = $derived(
     choice.scope === "notebook"
@@ -69,7 +78,7 @@
         ? $t("exportMenu.pageN", { number: pageNumber })
         : listed ? choice.pages.trim() : "—",
   );
-  const headline = $derived(target ? $t("exportMenu.headline", { count, file: target.outputName }) : $t("exportMenu.pagesInvalid", { pageCount }));
+  const headline = $derived(target ? $t("exportMenu.headline", { count, file: outputName ?? target.outputName }) : $t("exportMenu.pagesInvalid", { pageCount }));
 
   function pick(scope: ExportScope) {
     // A fresh list starts at the page in view, which is the likelier start than page 1.
@@ -99,13 +108,14 @@
 
   function run() {
     if (!count) return;
-    onExport(choice);
+    if (format) onAddonExport?.(format, choice.scope === "page");
+    else onExport(choice);
     onClose();
   }
 
   function keydown(event: KeyboardEvent) {
     const onButton = (event.target as HTMLElement).closest("button");
-    if (event.key === "Enter" && !onButton) {
+    if (event.key === "Enter" && !onButton && !(event.target instanceof HTMLSelectElement)) {
       event.preventDefault();
       run();
     }
@@ -123,7 +133,7 @@
 >
   <header>
     <div class="subject">
-      <strong id="export-title">{$t("workspace.exportPDF")}</strong>
+      <strong id="export-title">{formatLabel ?? $t("workspace.exportPDF")}</strong>
       {#key headline}<span id="export-headline" class="headline" class:invalid={!target}>{headline}</span>{/key}
     </div>
     <button type="button" class="close" aria-label={$t("library.close")} title={$t("library.close")} onclick={onClose}>
@@ -133,11 +143,27 @@
 
   <div class="body">
     <div class="settings">
+      {#if formats.length}
+        <label class="format">
+          {$t("addons.contributions.format")}
+          <select aria-label={$t("addons.contributions.format")} value={selectedFormat} onchange={(event) => {
+            selectedFormat = event.currentTarget.value;
+            if (selectedFormat && choice.scope === "pages") pick("notebook");
+          }}>
+            <option value="">PDF</option>
+            {#each formats as { addon, command }}
+              {#if command.surface === "export"}
+                <option value={addon.addonId + "/" + command.id}>{contributionText(addon, command.format.label, $locale)} (.{command.format.extension})</option>
+              {/if}
+            {/each}
+          </select>
+        </label>
+      {/if}
       {#if pageCount > 1}
         <section>
           <div class="eyebrow" id="export-pages">{$t("exportMenu.pages")}</div>
           <div class="row" role="radiogroup" aria-labelledby="export-pages" tabindex="-1" onkeydown={walk}>
-            {#each scopes as scope (scope.id)}
+            {#each scopes.filter(scope => !format || scope.id !== "pages") as scope (scope.id)}
               <button
                 type="button"
                 role="radio"
@@ -169,6 +195,7 @@
         </section>
       {/if}
 
+      {#if !format}
       <section>
         <div class="eyebrow">{$t("exportMenu.include")}</div>
         <div class="pairs" role="group" aria-label={$t("exportMenu.include")}>
@@ -205,10 +232,12 @@
           {/each}
         </div>
       </section>
+      {/if}
     </div>
 
     <div class="preview">
       <div class="eyebrow">{$t("exportMenu.contents")}</div>
+      {#if !format}
       <div class="stage">
         <div class="stack" class:many={count > 1}>
           <!-- Notebook content colours, drawn on paper: ink, highlighter, a photo. Not UI tokens. -->
@@ -260,15 +289,18 @@
         </div>
       </div>
 
+      {/if}
       <dl class="summary">
         <div><dt>{$t("exportMenu.pages")}</dt><dd>{pagesReadout}</dd></div>
-        <div><dt>{$t("exportMenu.calculations")}</dt><dd>{jupyterChoices.find((option) => option.id === jupyter)?.label()}</dd></div>
-        <div><dt>{$t("exportMenu.file")}</dt><dd title={target?.outputName}>{target?.outputName ?? "—"}</dd></div>
+        {#if !format}
+          <div><dt>{$t("exportMenu.calculations")}</dt><dd>{jupyterChoices.find((option) => option.id === jupyter)?.label()}</dd></div>
+        {/if}
+        <div><dt>{$t("exportMenu.file")}</dt><dd title={outputName}>{outputName ?? "—"}</dd></div>
       </dl>
 
       <div class="commit">
         <button type="button" class="export" bind:this={commit} disabled={!count} onclick={run}>{$t("exportMenu.export", { count })}</button>
-        <span class="note">{$t("exportMenu.destination")}</span>
+        <span class="note">{$t(format ? "addons.contributions.destination" : "exportMenu.destination")}</span>
       </div>
     </div>
   </div>
@@ -280,6 +312,8 @@
 </div>
 
 <style>
+  .format { display: grid; gap: 6px; }
+  .format select { min-height: var(--control); color: var(--text); background: var(--charcoal); border: 1px solid var(--edge-soft); border-radius: var(--radius); }
   /* Centred on the window like the Add page panel, which it is paired with. */
   .export-panel {
     position: fixed;
