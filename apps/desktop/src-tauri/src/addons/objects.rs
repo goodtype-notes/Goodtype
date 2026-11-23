@@ -50,7 +50,26 @@ fn geometry_value(page: &goodtype_core::Page) -> Value {
     json!({"id": page.id, "widthPt": page.geometry.width_pt, "heightPt": page.geometry.height_pt})
 }
 
-fn transformed_extent(object: &PageObject, page: &goodtype_core::Page) -> [f64; 4] {
+fn transformed_extent(object: &PageObject, bundle: &storage::NotebookSnapshot) -> [f64; 4] {
+    let page = &bundle.page;
+    if let PageObject::InkGroup {
+        ink_layer_id,
+        stroke_ids,
+        ..
+    } = object
+    {
+        let ids: HashSet<_> = stroke_ids.iter().map(String::as_str).collect();
+        if let Some(bounds) = goodtype_core::outline::stroke_bounds(
+            bundle
+                .ink_layers
+                .iter()
+                .filter(|layer| layer.id == *ink_layer_id)
+                .flat_map(|layer| &layer.strokes)
+                .filter(|stroke| ids.contains(stroke.id.as_str())),
+        ) {
+            return bounds;
+        }
+    }
     let extent = match object {
         PageObject::Shape { geometry, .. } => batch::shape_extent(geometry),
         PageObject::Typst {
@@ -96,9 +115,10 @@ fn transformed_extent(object: &PageObject, page: &goodtype_core::Page) -> [f64; 
         )
 }
 
-fn object_extent(object: &PageObject, page: &goodtype_core::Page) -> [f64; 4] {
+fn object_extent(object: &PageObject, bundle: &storage::NotebookSnapshot) -> [f64; 4] {
+    let page = &bundle.page;
     let PageObject::Group { child_ids, .. } = object else {
-        return transformed_extent(object, page);
+        return transformed_extent(object, bundle);
     };
     // Group children already live in page coordinates. The group transform positions its ports.
     let index: std::collections::HashMap<_, _> = page
@@ -119,18 +139,18 @@ fn object_extent(object: &PageObject, page: &goodtype_core::Page) -> [f64; 4] {
         if let PageObject::Group { child_ids, .. } = child {
             pending.extend(child_ids.iter().map(String::as_str));
         } else {
-            let [left, top, right, bottom] = transformed_extent(child, page);
+            let [left, top, right, bottom] = transformed_extent(child, bundle);
             bounds = Some(bounds.map_or([left, top, right, bottom], |[l, t, r, b]| {
                 [l.min(left), t.min(top), r.max(right), b.max(bottom)]
             }));
         }
     }
-    bounds.unwrap_or_else(|| transformed_extent(object, page))
+    bounds.unwrap_or_else(|| transformed_extent(object, bundle))
 }
 
-fn object_snapshot(object: &PageObject, page: &goodtype_core::Page) -> Value {
+fn object_snapshot(object: &PageObject, bundle: &storage::NotebookSnapshot) -> Value {
     let fields = object.fields();
-    let [x, y, right, bottom] = object_extent(object, page);
+    let [x, y, right, bottom] = object_extent(object, bundle);
     let kind = match object {
         PageObject::Typst { .. } => "typst",
         PageObject::PageTypst { .. } => "page_typst",
@@ -161,10 +181,11 @@ fn own_value(object: &PageObject, addon: &str) -> Value {
 }
 
 fn capture(
-    page: &goodtype_core::Page,
+    bundle: &storage::NotebookSnapshot,
     addon: &str,
     action: Action,
 ) -> Result<(String, Invocation, Option<HashSet<String>>), String> {
+    let page = &bundle.page;
     let objects = &page.objects;
     let find = |id: &str| objects.iter().find(|obj| obj.fields().id == id);
     match action {
@@ -184,7 +205,7 @@ fn capture(
                     point.x = port.x;
                     point.y = port.y;
                     if seen.insert(&attachment.object_id) {
-                        attached.push(object_snapshot(object, page));
+                        attached.push(object_snapshot(object, bundle));
                     }
                 } else if !(0.0..=page.geometry.width_pt).contains(&point.x)
                     || !(0.0..=page.geometry.height_pt).contains(&point.y)
@@ -237,7 +258,7 @@ fn capture(
                         let id = &object.fields().id;
                         refs.contains(id.as_str()) && !own.contains(id)
                     })
-                    .map(|object| object_snapshot(object, page)),
+                    .map(|object| object_snapshot(object, bundle)),
             );
             Ok((id, Invocation::OwnObjects(payload), Some(own)))
         }
@@ -300,7 +321,7 @@ pub(crate) async fn addon_object_action(
         })
         .map_err(error)?;
         let (command, invocation, scope) =
-            capture(&snapshot.page, addon.id, request.action).map_err(error)?;
+            capture(&snapshot, addon.id, request.action).map_err(error)?;
         let context = format!("{}:{}", root.display(), request.page_id);
         let reply = app
             .state::<session::Runtime>()
@@ -414,6 +435,8 @@ fn reactions(
                 continue;
             };
             if old != next
+                || (matches!(next, PageObject::Group { .. } | PageObject::InkGroup { .. })
+                    && object_extent(old, before) != object_extent(next, after))
                 || next
                     .searchable_source()
                     .is_some_and(|path| before_sources.get(path) != after_sources.get(path))
@@ -440,7 +463,7 @@ fn reactions(
     }
     let changed: Vec<_> = changed
         .into_iter()
-        .map(|id| object_snapshot(after_objects[id], &after.page))
+        .map(|id| object_snapshot(after_objects[id], after))
         .collect();
     Some((
         json!({"page": geometry_value(&after.page), "changed": changed, "deleted": deleted, "own": own}),
@@ -699,7 +722,7 @@ mod tests {
         ] {
             let count = points.len();
             let (_, Invocation::Tool { points, params, .. }, _) = capture(
-                &snapshot.page,
+                &snapshot,
                 "connectors",
                 Action::Tool {
                     id: "fixture".into(),
@@ -719,6 +742,26 @@ mod tests {
                 assert!(objects[0].get("style").is_none());
             }
         }
+    }
+
+    #[test]
+    fn ink_reference_snapshots_use_transformed_stroke_bounds() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../fixtures/notebooks/minimal");
+        let mut snapshot = storage::open_notebook(&root).unwrap();
+        let object = snapshot
+            .page
+            .objects
+            .iter()
+            .find(|object| matches!(object, PageObject::InkGroup { .. }))
+            .unwrap();
+        let (left, _, right, _) = {
+            let [left, top, right, bottom] = object_extent(object, &snapshot);
+            (left, top, right, bottom)
+        };
+        assert!(right > left);
+        snapshot.ink_layers[0].strokes[0].transform.translate_x += 10.0;
+        assert_eq!(object_extent(object, &snapshot)[0], left + 10.0);
     }
 
     #[test]
