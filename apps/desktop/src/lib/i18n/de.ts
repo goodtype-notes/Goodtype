@@ -142,7 +142,7 @@ export const de = {
     },
     math: {
       label: "Formel",
-      description: "Die Formelerkennung ist ein optionales Add-on. Die Texterkennung funktioniert auch ohne.",
+      description: "Wandelt handschriftliche Formeln in bearbeitbare Typst-Mathematik um. Die Texterkennung funktioniert auch ohne.",
     },
   },
   newPage: {

@@ -140,7 +140,7 @@ export const en = {
     },
     math: {
       label: "Math",
-      description: "Math recognition is an optional add-on. Text recognition works without it.",
+      description: "Turns handwritten formulas into editable Typst math. Text recognition works without it.",
     },
   },
   newPage: {

@@ -353,11 +353,13 @@
                 onclick={() => void run(active, () => setAddonEnabled(active.id, active.status !== "enabled"))}>
                 {$t("addons.manager.status.enabled")}<span></span>
               </button>
-              <button type="button" class="switch-row" role="switch" aria-checked={active.directApply} disabled={locked || manager?.recovery}
-                onclick={() => void run(active, () => setAddonDirectApply(active.id, !active.directApply), "addons.manager.policyFailed")}>
-                {$t("addons.manager.direct")}<span></span>
-              </button>
-              <p class="status">{$t("addons.manager.directHint")}</p>
+              {#if active.catalogPermissions.includes("add-page-objects")}
+                <button type="button" class="switch-row" role="switch" aria-checked={active.directApply} disabled={locked || manager?.recovery}
+                  onclick={() => void run(active, () => setAddonDirectApply(active.id, !active.directApply), "addons.manager.policyFailed")}>
+                  {$t("addons.manager.direct")}<span></span>
+                </button>
+                <p class="status">{$t("addons.manager.directHint")}</p>
+              {/if}
             </section>
           {/if}
           <div class="secondary-actions">
