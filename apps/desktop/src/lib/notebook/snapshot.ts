@@ -176,6 +176,8 @@ export function projectSnapshot(input: Projection): NotebookSnapshot {
     });
   }
 
+  reconcileGroups(objects, input.mixedGroup?.groupId, input.now);
+
   const topLevelIds = new Set(
     objects.filter((object) => object.groupId === null).map((object) => object.id),
   );
@@ -429,6 +431,34 @@ function newImage(
     heightPt: image.heightPt,
     altText: image.alt,
   };
+}
+
+/**
+ * General groups pass through unchanged, but their children do not: erasing a grouped shape
+ * removes it, and the precise eraser replaces it with ungrouped pieces. A group keeps only the
+ * children that still exist; one left empty disappears, and so does a parent it empties in turn.
+ */
+function reconcileGroups(objects: PageObject[], managedGroupId: string | undefined, now: string) {
+  for (;;) {
+    const present = new Set(objects.map((object) => object.id));
+    const emptied = new Set<string>();
+    for (let index = 0; index < objects.length; index++) {
+      const object = objects[index];
+      if (object.type !== "group" || object.id === managedGroupId) continue;
+      const childIds = object.childIds.filter((id) => present.has(id));
+      if (childIds.length === object.childIds.length) continue;
+      if (childIds.length === 0) emptied.add(object.id);
+      else objects[index] = { ...object, childIds, modifiedAt: now };
+    }
+    if (emptied.size === 0) return;
+    for (let index = objects.length - 1; index >= 0; index--) {
+      const object = objects[index];
+      if (emptied.has(object.id)) objects.splice(index, 1);
+      else if (object.groupId !== null && emptied.has(object.groupId)) {
+        objects[index] = { ...object, groupId: null, modifiedAt: now };
+      }
+    }
+  }
 }
 
 function newShape(shape: ShapeView, now: string): Extract<PageObject, { type: "shape" }> {
