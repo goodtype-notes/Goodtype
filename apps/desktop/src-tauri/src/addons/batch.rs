@@ -293,7 +293,9 @@ impl PreviewPage {
             &mut snapshot.blocks,
             &mut snapshot.page.reading_order,
             last,
-        )
+        )?;
+        storage::raise_schema_version(snapshot);
+        Ok(())
     }
 }
 

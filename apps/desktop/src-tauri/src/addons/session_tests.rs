@@ -676,24 +676,31 @@ fn fixture_contributions_use_the_session_protocol() {
             .is_empty()
     );
 
+    let generated_dir = tempfile::tempdir().unwrap();
+    let generated_root = generated_dir.path().join("generated.goodtype");
+    storage::create_notebook(&generated_root, &snapshot).unwrap();
     let params = form(Surface::PageGenerator, defaults(&[]))
         .params(generator, settings.clone())
         .unwrap();
     let reply = worker.invoke(params, || false).unwrap().unwrap();
-    let pages = page_batch::prepare(&root, &geometry, reply, true, || false).unwrap();
+    let pages = page_batch::prepare(&generated_root, &geometry, reply, true, || false).unwrap();
     assert_eq!(
-        storage::open_notebook(&root).unwrap().manifest.pages.len(),
+        storage::open_notebook(&generated_root)
+            .unwrap()
+            .manifest
+            .pages
+            .len(),
         1
     );
     let mut history = storage::NotebookStructureHistory::default();
-    storage::observe_structure(&root, &before.page.id, &mut history).unwrap();
+    storage::observe_structure(&generated_root, &before.page.id, &mut history).unwrap();
     let pages = pages
         .into_iter()
         .map(page_batch::PreviewPage::generated)
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
     let added = storage::add_generated_pages(
-        &root,
+        &generated_root,
         "2026-11-23T12:01:00Z",
         &storage::PagePosition::Last,
         &geometry,
@@ -702,9 +709,13 @@ fn fixture_contributions_use_the_session_protocol() {
     .unwrap();
     assert_eq!(added.manifest.pages.len(), 3);
     assert_eq!(added.page.objects.len(), 1);
-    storage::advance_structure(&root, &added, &mut history).unwrap();
     assert_eq!(
-        storage::undo_structure(&root, "2026-11-23T12:02:00Z", &mut history)
+        added.page.schema_version,
+        goodtype_core::SHAPE_SCHEMA_VERSION
+    );
+    storage::advance_structure(&generated_root, &added, &mut history).unwrap();
+    assert_eq!(
+        storage::undo_structure(&generated_root, "2026-11-23T12:02:00Z", &mut history)
             .unwrap()
             .snapshot
             .manifest

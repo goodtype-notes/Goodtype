@@ -79,7 +79,7 @@ pub(crate) fn validate_manifest(manifest: &NotebookManifest) -> Result<(), Stora
 ///
 /// Only ever upwards: a page that loses its last shape does not drag the notebook back down,
 /// because a sibling page this snapshot cannot see may still hold one.
-pub(crate) fn raise_schema_version(snapshot: &mut NotebookSnapshot) {
+pub fn raise_schema_version(snapshot: &mut NotebookSnapshot) {
     let version = snapshot
         .manifest
         .schema_version

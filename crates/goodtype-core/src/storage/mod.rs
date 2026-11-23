@@ -52,6 +52,7 @@ pub use recovery::{
     restore_recovery_candidate,
 };
 pub use search::{SearchHit, search_notebook};
+pub use validate::raise_schema_version;
 pub(crate) use validate::validate_ink_layer;
 pub use write::{
     TypstStyleEntry, install_reviewed_typst_style, install_typst_style, list_typst_style_entries,

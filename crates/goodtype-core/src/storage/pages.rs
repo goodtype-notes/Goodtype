@@ -1290,8 +1290,15 @@ pub fn add_generated_pages(
         });
     }
     guard.manifest.modified_at = modified_at.to_owned();
+    for snapshot in &snapshots {
+        guard.manifest.schema_version = guard
+            .manifest
+            .schema_version
+            .max(required_schema_version(&snapshot.page));
+    }
     for snapshot in &mut snapshots {
         snapshot.manifest = guard.manifest.clone();
+        raise_schema_version(snapshot);
         validate_snapshot(&root, snapshot)?;
     }
     guard.ensure_unchanged("adding generated pages")?;
