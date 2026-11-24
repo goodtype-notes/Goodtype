@@ -2334,7 +2334,7 @@
 </HelperWorkspace>
   {#if settingsReady}
   {#if !session.notebookChosen}
-    <div class="start-slot">
+    <div class="start-slot" data-ui="solid">
       <LibrarySurface
         {tauriAvailable}
         onSettings={() => (settingsOpen = true)}

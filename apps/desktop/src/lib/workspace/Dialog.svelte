@@ -102,8 +102,8 @@
 </div>
 
 <style>
-  .scrim { position: fixed; z-index: 80; inset: 0; display: grid; padding: 20px; background: rgb(10 12 16 / 62%); place-items: center; animation: scrim-in var(--enter) ease-out; }
-  .panel { box-sizing: border-box; display: flex; flex-direction: column; width: 100%; max-height: 100%; padding: 22px; overflow-y: auto; border: 1px solid var(--edge); border-radius: var(--radius-lg); background: var(--panel); box-shadow: var(--shadow-modal); color: var(--text); font: var(--text-md) var(--font-ui); animation: panel-in var(--enter) cubic-bezier(0.16, 1, 0.3, 1); }
+  .scrim { position: fixed; z-index: 80; inset: 0; display: grid; padding: 20px; background: rgb(8 10 12 / 60%); place-items: center; animation: scrim-in var(--enter) ease-out; }
+  .panel { box-sizing: border-box; display: flex; flex-direction: column; width: 100%; max-height: 100%; padding: 24px; overflow-y: auto; border: 1px solid var(--edge); border-radius: var(--radius-lg); background: var(--panel); box-shadow: var(--shadow-modal); color: var(--text); font: var(--text-md) var(--font-ui); animation: panel-in var(--enter) ease-out; }
   .panel:focus { outline: none; }
   .sm { max-width: 400px; }
   .md { max-width: 480px; }
@@ -112,7 +112,7 @@
   header { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 18px; }
   header.bare { margin-bottom: 0; }
   .titles { flex: 1; min-width: 0; }
-  h2 { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.25; }
+  h2 { margin: 0; font-family: var(--font-display); font-size: var(--text-xl); font-weight: 600; line-height: 1.25; }
   .sm h2 { font-size: var(--text-lg); }
   .titles > :global(.lead) { margin-top: 5px; }
   /* minmax(0, 1fr): a long path or name must truncate or wrap, never widen the dialog. */
@@ -151,7 +151,7 @@
   .panel :global(.progress.indeterminate span) { right: auto; width: 30%; transform: none; animation: travel 1.3s ease-in-out infinite; }
 
   @keyframes scrim-in { from { opacity: 0; } }
-  @keyframes panel-in { from { opacity: 0; transform: translateY(7px) scale(0.99); } }
+  @keyframes panel-in { from { opacity: 0; transform: translateY(4px); } }
   @keyframes travel { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
   @media (max-width: 520px) { .panel { padding: 18px; } }
   @media (pointer: coarse) { .panel :global(:is(.control, .primary, .danger)) { min-height: var(--control-touch); } }

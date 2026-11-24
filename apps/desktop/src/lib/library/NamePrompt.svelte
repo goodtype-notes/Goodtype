@@ -76,10 +76,10 @@
     box-sizing: border-box;
     width: 100%;
     min-height: var(--control);
-    padding: 9px 11px;
+    padding: 0 12px;
     border: 1px solid var(--edge);
     border-radius: var(--radius);
-    background: rgb(0 0 0 / 25%);
+    background: var(--inset);
     color: var(--text);
     font: inherit;
     font-size: var(--text-md);
@@ -88,6 +88,6 @@
   input:focus-visible { border-color: var(--blueprint-light); outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
   input[aria-invalid="true"] { border-color: var(--oxide); }
   .name-problem { min-height: 1.2em; margin: 7px 2px 0; color: transparent; font-size: var(--text-sm); }
-  .name-problem.shown { color: var(--oxide); }
+  .name-problem.shown { color: var(--oxide-text); }
   @media (pointer: coarse) { input { min-height: var(--control-touch); } }
 </style>

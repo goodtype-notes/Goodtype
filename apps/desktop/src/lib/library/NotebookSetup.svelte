@@ -145,18 +145,18 @@
 
 <style>
   .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
-  label, fieldset { display: grid; gap: 6px; min-width: 0; margin: 0; padding: 0; border: 0; color: var(--muted); font-size: var(--text-sm); }
+  label, fieldset { display: grid; gap: 6px; min-width: 0; margin: 0; padding: 0; border: 0; color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
   .wide { grid-column: 1 / -1; }
-  input, select { box-sizing: border-box; width: 100%; height: var(--control); padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius); background-color: rgb(0 0 0 / 25%); color: var(--text); font: var(--text-md) var(--font-ui); }
+  input, select { box-sizing: border-box; width: 100%; height: var(--control); padding: 0 12px; border: 1px solid var(--edge); border-radius: var(--radius); background-color: var(--inset); color: var(--text); font: var(--text-md) var(--font-ui); }
   select { padding-right: 34px; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23aeb5be' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 9.5 5 5 5-5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
   option { background: var(--panel); }
   input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
   input:hover, select:hover { border-color: var(--edge-strong); }
   input[aria-invalid="true"] { border-color: var(--oxide); }
-  small { min-height: 1.2em; color: var(--quiet); }
-  small.error, .failure { color: var(--oxide); }
-  .segmented { display: flex; height: var(--control); padding: 3px; border: 1px solid var(--edge); border-radius: var(--radius); background: rgb(0 0 0 / 25%); gap: 3px; }
-  .segmented button { flex: 1; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; }
+  small { min-height: 1.2em; color: var(--quiet); font-weight: 400; }
+  small.error, .failure { color: var(--oxide-text); }
+  .segmented { display: flex; height: var(--control); padding: 3px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); gap: 3px; }
+  .segmented button { flex: 1; font: inherit; font-size: var(--text-md); border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; }
   .segmented button:hover { background: var(--wash); color: var(--text); }
   .segmented button.active { background: var(--accent-fill); box-shadow: inset 0 0 0 1px var(--accent-edge); color: var(--text); }
   .failure { margin: 12px 0 0; font-size: var(--text-sm); }

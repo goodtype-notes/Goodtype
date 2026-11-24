@@ -821,6 +821,8 @@ export const en = {
     "openNotebook": "Open notebook",
     "library": "Library",
     "change": "Change",
+    "libraryFolder": "Library folder",
+    "changeLibraryFolder": "Change library folder",
     "favourites": "Favourites",
     "path": "Path",
     "importRunning3": "Import running…",

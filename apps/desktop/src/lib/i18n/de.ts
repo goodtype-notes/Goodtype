@@ -822,6 +822,8 @@ export const de = {
     "openNotebook": "Notizbuch öffnen",
     "library": "Bibliothek",
     "change": "Ändern",
+    "libraryFolder": "Bibliotheksordner",
+    "changeLibraryFolder": "Bibliotheksordner ändern",
     "favourites": "Favoriten",
     "path": "Pfad",
     "importRunning3": "Import läuft…",

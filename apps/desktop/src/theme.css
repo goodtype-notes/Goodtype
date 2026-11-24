@@ -76,5 +76,50 @@
   --text-lg: 15px;
 
   --font-ui: Bahnschrift, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-display: var(--font-ui);
+  --font-brand: Bahnschrift, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
   --font-code: "Cascadia Mono", Consolas, monospace;
+  --text-xl: 20px;
+}
+
+/* The solid language (DESIGN.md). Surfaces opt in with data-ui="solid" while they are migrated
+   one at a time; once every surface carries it, these values move into :root and the wash values
+   above go. Same token names, so a migrated component changes values, not names. */
+[data-ui="solid"] {
+  --charcoal: #121418;
+  --surround: #16181c;
+  --panel: #202329;
+
+  --text: #eceef1;
+  --muted: #b0b6bf;
+  --quiet: #959da7;
+
+  --blueprint-light: #8ab8f8;
+  --accent-tint: color-mix(in srgb, #4c8df0 10%, #202329);
+  --accent-fill: color-mix(in srgb, #4c8df0 18%, #202329);
+  --accent-edge: color-mix(in srgb, #4c8df0 60%, #202329);
+
+  --fill-soft: #1c1f24;
+  --wash: #2b2f36;
+  --wash-strong: #353a42;
+  --edge-soft: #2a2e35;
+  --edge: #33373f;
+  --edge-strong: #4a505a;
+  --inset: #121418;
+
+  --shadow-menu: 0 8px 24px rgb(0 0 0 / 36%);
+  --shadow-panel: 0 12px 32px rgb(0 0 0 / 42%);
+  --shadow-modal: 0 24px 64px rgb(0 0 0 / 50%);
+
+  --control-dense: 32px;
+  --text-xs: 12px;
+  --text-sm: 12px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+
+  font-family: var(--font-ui);
 }
