@@ -5,6 +5,9 @@ $manifestPath = (Resolve-Path -LiteralPath $Manifest).Path
 $metadata = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $packageRoot = Split-Path -Parent $manifestPath
 $archive = Join-Path $packageRoot $metadata.archive
+if ((Get-Item -LiteralPath $archive).Length -ne $metadata.archiveBytes) {
+    throw "Archive size differs from its manifest."
+}
 if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $metadata.sha256) {
     throw "Archive checksum differs from its manifest."
 }
@@ -14,6 +17,12 @@ $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $extracted = Join-Path $temporaryRoot ("goodtype-package-check-" + [guid]::NewGuid().ToString("N"))
 try {
     Expand-Archive -LiteralPath $archive -DestinationPath $extracted
+    foreach ($entry in Get-ChildItem -LiteralPath $extracted -Recurse -Force -File) {
+        $relative = $entry.FullName.Substring($extracted.Length + 1).Replace('\', '/')
+        if (-not $metadata.files.PSObject.Properties[$relative]) {
+            throw "Extracted file is missing from the release manifest: $relative"
+        }
+    }
     foreach ($file in $metadata.files.PSObject.Properties) {
         $path = Join-Path $extracted $file.Name
         if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.Value) {

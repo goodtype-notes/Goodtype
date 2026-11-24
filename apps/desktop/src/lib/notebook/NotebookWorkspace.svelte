@@ -92,6 +92,7 @@
   import { applyTheme, contentPacks, installedThemes, packText, shapeLibraries, type ContentPack, type PackShape, type ShapeChoice } from "../workspace/addons/content";
   import { createTapTracker, dropPoint, loadRecent, nextStamp, previewMargin, rememberShape, saveRecent, sameShape, type ShapeDrag } from "../workspace/addons/shapePanel";
   import AddonStore from "../workspace/addons/AddonStore.svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import SettingsPanel from "../workspace/SettingsPanel.svelte";
   import LibrarySurface from "../library/LibrarySurface.svelte";
   import { SHELF_ROOT, type ShelfLocation } from "../library/location";
@@ -1178,6 +1179,32 @@
     const block = session.typstBlocks.find(candidate => candidate.id === selection.selectedTypstId);
     return block ? `${block.id}:${block.transform.x}:${block.transform.y}:${block.transform.rotation ?? 0}` : null;
   });
+  let { onAppNotice }: { onAppNotice?: (message: UiText) => void } = $props();
+
+  async function restartForUpdate() {
+    await windowClose.handle({ preventDefault() {} }, async () => {
+      await invoke("arm_app_restart", { armed: true });
+      try { await getCurrentWindow().destroy(); }
+      catch (error) { await invoke("arm_app_restart", { armed: false }); throw error; }
+    });
+  }
+
+  async function checkUpdatesOnStartup() {
+    if (!tauriAvailable || !settings.autoCheckAppReleases) return;
+    try {
+      const channel = settings.includeBetaReleases;
+      const key = channel ? "goodtype.update-check.beta" : "goodtype.update-check.stable";
+      const now = Date.now();
+      const last = Number(localStorage.getItem(key));
+      if (last <= now && now - last < 86_400_000) return;
+      localStorage.setItem(key, String(now));
+      const offer = await invoke<{ version: string } | null>("check_app_release", { beta: channel });
+      if (offer && !destroyed && settings.autoCheckAppReleases && channel === settings.includeBetaReleases) {
+        onAppNotice?.(notice("appUpdates.notice", { version: offer.version }));
+      }
+    } catch { /* Offline startup continues. Manual checks report the error. */ }
+  }
+
   let destroyed = false;
   const windowClose = createWindowCloseHandler({
     saveSettings: flushSettings,
@@ -1275,6 +1302,7 @@
     settings = await loadSettings(tauriAvailable);
     setLanguage(settings.uiLanguage);
     settingsReady = true;
+    void checkUpdatesOnStartup();
     paletteDock = settings.paletteDock;
     if (!tauriAvailable) {
       session.root = "Browser preview (persistence and real Typst compilation require Tauri)";
@@ -3204,7 +3232,7 @@
       selectedBlockFont={selection.selectedTypstId ? blockFont(session.typstBlocks.find(block => block.id === selection.selectedTypstId)?.source ?? "") : null}
       onFontChange={changeInlineFont}
       {settings}
-      actions={{ browseAddons: () => openAddons(true), openMetrics: () => (metricsOpen = true), changePython: () => { settingsOpen = false; void calculations.changePython(); } }}
+      actions={{ restartForUpdate, browseAddons: () => openAddons(true), openMetrics: () => (metricsOpen = true), changePython: () => { settingsOpen = false; void calculations.changePython(); } }}
       onChange={changeSettings}
       onClose={() => { settingsOpen = false; settingsInitialGroup = "appearance"; }}
     />

@@ -121,6 +121,8 @@ pub struct AppSettings {
     /// Allow downloading Typst Universe packages on a cache miss. Cached packages
     /// keep working either way.
     pub remote_packages: bool,
+    pub include_beta_releases: bool,
+    pub auto_check_app_releases: bool,
     pub python_package_downloads: bool,
     /// Scrolling on past the last page, against resistance, adds a page in the notebook paper.
     pub pull_to_add_page: bool,
@@ -313,6 +315,8 @@ impl Default for AppSettings {
             ai_helper: Default::default(),
             theme_id: String::new(),
             remote_packages: true,
+            include_beta_releases: false,
+            auto_check_app_releases: false,
             python_package_downloads: true,
             pull_to_add_page: true,
             draw_with_finger: false,

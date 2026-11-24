@@ -36,7 +36,7 @@ pub(crate) mod recognize;
 pub(crate) mod registry;
 pub(crate) mod selection;
 pub(crate) mod session;
-mod update;
+pub(crate) mod update;
 
 use catalog::CATALOG;
 use import::ImportResult;
@@ -168,7 +168,7 @@ const PROTOCOL_VERSION: u64 = 1;
 const PACKAGE_MANIFEST: &str = "importer-manifest.json";
 const TARGET: &str = "x86_64-pc-windows-msvc";
 /// The only hosts a release download may be redirected to.
-const ASSET_HOSTS: [&str; 3] = [
+pub(crate) const ASSET_HOSTS: [&str; 3] = [
     "objects.githubusercontent.com",
     "release-assets.githubusercontent.com",
     "github-releases.githubusercontent.com",
@@ -198,7 +198,7 @@ pub fn platform_supported() -> bool {
 
 /// Splits an absolute `https://host/path` URL. Anything else — another scheme, credentials, a port,
 /// a relative redirect — is refused rather than interpreted.
-fn https_parts(url: &str) -> Option<(String, &str)> {
+pub(crate) fn https_parts(url: &str) -> Option<(String, &str)> {
     let rest = url.strip_prefix("https://")?;
     let slash = rest.find('/')?;
     let (host, path) = rest.split_at(slash);
@@ -229,7 +229,7 @@ fn https_agent() -> Result<ureq::Agent, String> {
         .build())
 }
 
-fn github_asset(
+pub(crate) fn github_asset(
     url: &str,
     allowed: impl Fn(&str, bool) -> bool,
 ) -> Result<ureq::Response, registry::Problem> {

@@ -1,4 +1,27 @@
+import nativeUpdate from "./nativeUpdate.json";
+
 export const en = {
+  appUpdates: {
+    installed: "Installed version {{version}}",
+    betaChannel: "Beta",
+    stableChannel: "Stable",
+    ...nativeUpdate.en,
+    auto: "Check automatically once a day",
+    download: "Download verified update",
+    staging: "Downloading and checking the package…",
+    restart: "Restart to update",
+    notice: "Goodtype {{version}} is available in Settings → App updates.",
+    stageFailed: "The update could not be staged. Check the connection, free space and original package files.",
+    title: "App updates",
+    privacy: "Checking sends a request to GitHub for public Goodtype releases.",
+    beta: "Include beta releases",
+    check: "Check for updates",
+    checking: "Checking GitHub…",
+    current: "This build is up to date for this channel.",
+    local: "Update checks are available in official Windows x64 builds.",
+    failed: "Could not verify a release. Try again later.",
+    available: "Goodtype {{version}} ({{channel}}) is available ({{size}} MiB).",
+  },
   contentPacks: {
     shapes: "Shapes",
     closeShapes: "Close shapes",

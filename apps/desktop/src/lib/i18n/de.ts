@@ -1,6 +1,29 @@
 import type { Catalog } from "./en";
 
+import nativeUpdate from "./nativeUpdate.json";
+
 export const de = {
+  appUpdates: {
+    installed: "Installierte Version {{version}}",
+    betaChannel: "Beta",
+    stableChannel: "Stabil",
+    ...nativeUpdate.de,
+    auto: "Einmal täglich automatisch suchen",
+    download: "Geprüftes Update herunterladen",
+    staging: "Das Paket wird heruntergeladen und geprüft …",
+    restart: "Für das Update neu starten",
+    notice: "Goodtype {{version}} ist unter Einstellungen → App-Updates verfügbar.",
+    stageFailed: "Das Update konnte nicht vorbereitet werden. Prüfe die Verbindung, den freien Speicherplatz und die ursprünglichen Paketdateien.",
+    title: "App-Updates",
+    privacy: "Bei der Suche fragt Goodtype öffentliche Versionen auf GitHub ab.",
+    beta: "Betaversionen einbeziehen",
+    check: "Nach Updates suchen",
+    checking: "GitHub wird abgefragt …",
+    current: "Diese Version ist für den gewählten Kanal aktuell.",
+    local: "Die Updatesuche ist in offiziellen Windows-x64-Versionen verfügbar.",
+    failed: "Die Version konnte nicht geprüft werden. Versuche es später erneut.",
+    available: "Goodtype {{version}} ({{channel}}) ist verfügbar ({{size}} MiB).",
+  },
   contentPacks: {
     shapes: "Formen",
     closeShapes: "Formen schließen",

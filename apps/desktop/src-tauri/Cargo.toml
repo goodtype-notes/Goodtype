@@ -46,6 +46,7 @@ rmcp = { version = "=3.8.0", default-features = false, features = ["client"] }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
   "Win32_Security",
   "Win32_Security_Authorization",
   "Win32_Security_Isolation",

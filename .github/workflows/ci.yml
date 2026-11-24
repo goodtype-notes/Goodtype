@@ -108,6 +108,7 @@ jobs:
 
   release:
     name: Publish Windows pre-release
+    environment: portable-release
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     needs: [branch-policy, windows, build-smoke]
     runs-on: ubuntu-24.04
@@ -127,6 +128,7 @@ jobs:
       - name: Publish the Windows candidate
         run: node scripts/release.mjs publish target/release-assets
         env:
+          GOODTYPE_RELEASE_SIGNING_KEY: ${{ secrets.GOODTYPE_RELEASE_SIGNING_KEY }}
           GH_TOKEN: ${{ github.token }}
 
   promote:

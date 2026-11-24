@@ -16,7 +16,7 @@
   });
 </script>
 
-<NotebookWorkspace />
+<NotebookWorkspace onAppNotice={message => { addonNotice = message; }} />
 
 <div class="addon-notice" class:visible={addonNotice}>
   <span role="status">{addonNotice ? renderMessage(addonNotice, $t) : ""}</span>
