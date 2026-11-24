@@ -16,7 +16,7 @@
   const hint = $derived(field.hint ? contributionText(addon, field.hint, $locale) : "");
 </script>
 
-<div class="field">
+<div class="field" data-ui="solid">
   {#if field.type === "toggle"}
     <button type="button" class="switch-row" role="switch" aria-checked={value === true}
       aria-describedby={hint ? id : undefined} {disabled} onclick={() => onChange(value !== true)}>
@@ -48,21 +48,38 @@
 </div>
 
 <style>
-  .field { display: grid; gap: 6px; min-width: 0; padding-block: 6px; }
-  .field p { margin: 0; color: var(--muted); font-size: var(--text-sm); }
-  fieldset { padding: 0; border: 0; margin: 0; min-width: 0; }
-  legend { padding: 0; margin-block-end: 6px; }
-  .segments { display: flex; flex-wrap: wrap; gap: 4px; }
+  .field { display: grid; gap: 4px; min-width: 0; padding-block: 8px; }
+  .field > label, legend { padding: 0; color: var(--muted); font-size: var(--text-sm); font-weight: 600; line-height: 1.4; }
+  .field p { margin: 0; color: var(--quiet); font-size: var(--text-sm); line-height: 1.4; }
+  fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+  legend { margin-block-end: 4px; }
+  .segments { display: flex; flex-wrap: wrap; width: fit-content; max-width: 100%; padding: 3px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); gap: 3px; }
   .segments label { position: relative; }
   .segments input { position: absolute; width: 1px; height: 1px; opacity: 0; }
-  .segments span { display: grid; place-items: center; min-height: var(--control); padding-inline: 10px; border-radius: var(--radius); background: var(--charcoal); }
-  .segments input:checked + span { background: var(--wash); color: var(--text); }
-  .segments input:focus-visible + span { outline: 2px solid var(--blueprint); outline-offset: 2px; }
-  .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: start; min-height: var(--control); color: inherit; font: inherit; border: 0; background: transparent; cursor: pointer; }
-  .switch-row span { box-sizing: border-box; width: 34px; height: 20px; padding: 3px; border-radius: var(--radius-pill); background: var(--track); flex: none; }
-  .switch-row span::before { content: ""; display: block; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); }
+  .segments span { display: grid; place-items: center; min-height: calc(var(--control) - 8px); padding-inline: 12px; border-radius: var(--radius); color: var(--muted); font-size: var(--text-md); cursor: pointer; transition: background var(--fast) ease, color var(--fast) ease; }
+  .segments label:hover span { background: var(--wash); color: var(--text); }
+  .segments input:checked + span { background: var(--accent-fill); box-shadow: inset 0 0 0 1px var(--accent-edge); color: var(--text); }
+  .segments input:focus-visible + span { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
+  fieldset:disabled .segments { opacity: var(--disabled); }
+  fieldset:disabled .segments span { cursor: default; }
+  fieldset:disabled .segments label:hover span { background: transparent; color: var(--muted); }
+  .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--control); padding: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: var(--text-md); text-align: start; cursor: pointer; }
+  .switch-row:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; border-radius: var(--radius); }
+  .switch-row:disabled { opacity: var(--disabled); cursor: default; }
+  .switch-row span { box-sizing: border-box; width: 34px; height: 20px; padding: 3px; border-radius: var(--radius-pill); background: var(--track); flex: none; transition: background var(--fast) ease; }
+  .switch-row span::before { content: ""; display: block; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: transform var(--fast) ease, background var(--fast) ease; }
   .switch-row[aria-checked="true"] span { background: var(--blueprint); }
   .switch-row[aria-checked="true"] span::before { background: var(--text); transform: translateX(14px); }
-  .field > input { box-sizing: border-box; width: 100%; padding: 6px 8px; min-height: var(--control); border: 1px solid var(--edge-soft); border-radius: var(--radius); background: var(--charcoal); color: var(--text); font: inherit; }
+  .field > input { box-sizing: border-box; width: 100%; min-height: var(--control); padding: 0 12px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); color: var(--text); font: inherit; font-size: var(--text-md); transition: border-color var(--fast) ease; }
+  .field > input:hover:not(:disabled) { border-color: var(--edge-strong); }
+  .field > input:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
+  .field > input:disabled { opacity: var(--disabled); }
   .field > input[aria-invalid="true"] { border-color: var(--oxide); }
+  @media (pointer: coarse) {
+    .field > input, .switch-row { min-height: var(--control-touch); }
+    .segments span { min-height: calc(var(--control-touch) - 8px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .segments span, .switch-row span, .switch-row span::before, .field > input { transition: none; }
+  }
 </style>

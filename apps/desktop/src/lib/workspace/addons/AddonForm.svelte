@@ -121,11 +121,13 @@
   }
 </script>
 
-<div role="dialog" aria-modal="true" aria-label={title} class="sheet" tabindex="-1"
+<div role="dialog" aria-modal="true" aria-label={title} class="sheet" data-ui="solid" tabindex="-1"
   bind:this={panel} use:dismissable={{ onClose, swallow: true }} onkeydown={trap}>
   <header>
-    <strong>{title}</strong>
-    <button type="button" class="close" aria-label={$t("library.close")} onclick={onClose}>&times;</button>
+    <h2>{title}</h2>
+    <button type="button" class="close" aria-label={$t("library.close")} onclick={onClose}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+    </button>
   </header>
   <div class="body">
     <form onsubmit={(event) => { event.preventDefault(); void generate(); }} novalidate>
@@ -139,7 +141,7 @@
           </select>
         </label>
       {:else if entry}
-        <strong>{contributionText(entry.addon, entry.command.label, $locale)}</strong>
+        <strong class="subject">{contributionText(entry.addon, entry.command.label, $locale)}</strong>
         <p>{contributionText(entry.addon, "name", $locale)}</p>
       {/if}
       {#if entry}
@@ -187,24 +189,36 @@
 </div>
 
 <style>
-  .sheet { position: fixed; z-index: 90; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; width: min(700px, calc(100vw - 48px)); max-height: calc(100vh - 80px); background: var(--panel); color: var(--text); border: 1px solid var(--edge-soft); border-radius: var(--radius-lg); box-shadow: var(--shadow-modal); overflow: hidden; font: var(--text-md) var(--font-ui); }
-  header, footer { min-height: var(--control); padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; }
-  header { border-bottom: 1px solid var(--edge-soft); }
+  .sheet { position: fixed; z-index: 90; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; width: min(700px, calc(100vw - 48px)); max-height: calc(100vh - 80px); background: var(--panel); color: var(--text); border: 1px solid var(--edge); border-radius: var(--radius-lg); box-shadow: var(--shadow-modal); overflow: hidden; font: var(--text-md) var(--font-ui); animation: sheet-in var(--enter) ease-out; }
+  .sheet:focus { outline: none; }
+  @keyframes sheet-in { from { opacity: 0; margin-top: 4px; } }
+  header, footer { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; }
+  header { padding-inline: 24px 16px; border-bottom: 1px solid var(--edge-soft); }
   footer { justify-content: flex-end; border-top: 1px solid var(--edge-soft); }
-  button { min-height: var(--control); padding-inline: 12px; border: 0; border-radius: var(--radius); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  h2 { margin: 0; font-family: var(--font-display); font-size: var(--text-xl); font-weight: 600; line-height: 1.25; }
+  button { display: inline-flex; min-height: var(--control); align-items: center; justify-content: center; padding-inline: 16px; border: 0; border-radius: var(--radius); background: transparent; color: var(--text); font: inherit; font-size: var(--text-md); cursor: pointer; transition: background var(--fast) ease, color var(--fast) ease; }
+  button:focus-visible, select:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
   button:disabled { opacity: var(--disabled); cursor: default; }
-  .close:hover { background: var(--wash); }
-  .close { font-size: var(--text-lg); }
-  .body { min-height: 0; overflow: auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  form, .preview { min-width: 0; padding: 18px; }
-  form > p, .preview > p { color: var(--muted); margin-block: 6px; }
-  form > label { display: grid; gap: 6px; }
-  select { width: 100%; min-height: var(--control); background: var(--charcoal); color: var(--text); }
+  .close { width: var(--control); padding: 0; color: var(--muted); }
+  .close:hover { background: var(--wash); color: var(--text); }
+  .close svg { width: var(--icon-dense); height: var(--icon-dense); fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: var(--stroke-dense); }
+  .body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; overflow: auto; }
+  form, .preview { min-width: 0; padding: 24px; }
+  form > p, .preview > p { margin-block: 4px 0; color: var(--muted); font-size: var(--text-sm); line-height: 1.4; }
+  form > p[role="alert"] { color: var(--oxide-text); font-size: var(--text-md); }
+  .subject { display: block; font-size: var(--text-md); font-weight: 600; }
+  form > label { display: grid; gap: 4px; color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
+  select { box-sizing: border-box; width: 100%; min-height: var(--control); padding: 0 12px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); color: var(--text); color-scheme: dark; font: inherit; font-size: var(--text-md); font-weight: 400; transition: border-color var(--fast) ease; }
+  select:hover:not(:disabled) { border-color: var(--edge-strong); }
   .preview { display: grid; align-content: start; justify-items: center; gap: 12px; background: var(--charcoal); border-inline-start: 1px solid var(--edge-soft); }
   .paper { width: min(100%, 200px); position: relative; background: var(--paper); overflow: hidden; }
   .paper > svg, .template { position: absolute; inset: 0; width: 100%; height: 100%; }
   .template :global(svg) { width: 100%; height: 100%; }
-  .preview-button { background: var(--wash); margin-top: 12px; }
-  .insert { background: var(--blueprint); color: var(--on-accent); }
+  .preview-button { margin-top: 12px; background: var(--wash); }
+  .preview-button:hover:not(:disabled) { background: var(--wash-strong); }
+  .insert { background: var(--blueprint); color: var(--on-accent); font-weight: 600; }
+  .insert:hover:not(:disabled) { background: var(--blueprint-hover); }
   @media (max-width: 540px) { .body { grid-template-columns: minmax(0, 1fr); } .preview { border-inline-start: 0; border-top: 1px solid var(--edge-soft); } }
+  @media (pointer: coarse) { button, select { min-height: var(--control-touch); } .close { width: var(--control-touch); } }
+  @media (prefers-reduced-motion: reduce) { .sheet { animation: none; } button, select { transition: none; } }
 </style>
