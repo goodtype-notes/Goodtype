@@ -1240,6 +1240,8 @@ export const de = {
     "draw": "Zeichnen",
     "shapeType": "Formtyp",
     "pattern": "Muster",
+    "strokeOpacity": "Deckkraft",
+    "paletteFromAddons": "Aus Add-ons",
     "linePattern": "Linienmuster",
     "patternSpacing": "Musterabstand",
     "keepProportions": "Proportionen beibehalten",

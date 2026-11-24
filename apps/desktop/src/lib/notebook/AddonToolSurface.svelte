@@ -1,11 +1,12 @@
 <script lang="ts">
   import { pagePorts } from "./addonPorts";
   import type { Point } from "../geometry/coordinates";
-  import type { PageObject } from "../model";
+  import { patternDashArray } from "../shape/geometry";
+  import type { PageObject, ShapeStyle } from "../model";
   import type { AddonPoint, AddonTool } from "../ipc/addons";
 
-  let { tool, label, zoom, objects, pointAt, onApply }: {
-    tool: AddonTool; label: string; zoom: number; objects: PageObject[];
+  let { tool, label, zoom, objects, style, pointAt, onApply }: {
+    tool: AddonTool; label: string; zoom: number; objects: PageObject[]; style?: ShapeStyle;
     pointAt: (x: number, y: number) => Point | null; onApply: (points: AddonPoint[]) => void;
   } = $props();
 
@@ -69,6 +70,9 @@
   onpointerleave={() => { if (captured === null) clear(); }}
   onpointermove={(event) => { if (captured === null || captured === event.pointerId) pointer = sample(event); }}>
   <svg aria-hidden="true" width="100%" height="100%">
+    <g class:styled={!!style} style:--preview-color={style?.strokeColor}
+      style:--preview-width={style?.strokeWidthPt} opacity={style?.opacity}
+      stroke-dasharray={style ? patternDashArray(style.pattern ?? "solid", style.strokeWidthPt, style.patternSpacing)?.join(" ") : undefined}>
     {#if pointer && tool.kind === "place"}
       <rect x={pointer.x - 8} y={pointer.y - 8} width="16" height="16" />
     {:else if start && pointer && tool.kind === "connect"}
@@ -77,6 +81,7 @@
       <rect x={Math.min(start.x, pointer.x)} y={Math.min(start.y, pointer.y)}
         width={Math.abs(start.x - pointer.x)} height={Math.abs(start.y - pointer.y)} />
     {/if}
+    </g>
     {#each nearby as port}
       <circle class:snapped={pointer?.attach?.objectId === port.attach.objectId && pointer?.attach?.port === port.attach.port}
         cx={port.x} cy={port.y} r={4 / zoom} />
@@ -88,6 +93,7 @@
   .surface { position: absolute; inset: 0; z-index: 2147483647; cursor: crosshair; touch-action: none; }
   svg { pointer-events: none; }
   line, rect, circle { fill: none; stroke: var(--paper-select); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .styled :is(line, rect) { stroke: var(--preview-color); stroke-width: var(--preview-width); vector-effect: none; stroke-linecap: round; }
   circle { fill: var(--paper); }
   circle.snapped { fill: var(--paper-select); }
 </style>

@@ -9,6 +9,8 @@ pub(super) type Values = BTreeMap<String, Value>;
 pub(super) struct Choice {
     value: String,
     label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    icon: Option<super::manifest::Icon>,
 }
 
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
@@ -180,6 +182,10 @@ pub(super) fn valid_fields(
                                 identifier(&choice.value)
                                     && values.insert(&choice.value)
                                     && strings.contains_key(&choice.label)
+                                    && choice
+                                        .icon
+                                        .as_ref()
+                                        .is_none_or(super::manifest::Icon::valid)
                             })
                     }
                     Field::Text {

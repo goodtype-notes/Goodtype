@@ -140,6 +140,7 @@ pub struct AppSettings {
     pub eraser_mode: String,
     /// Palette tiles the writer has taken off the bar. Their shortcuts keep working.
     pub hidden_tools: Vec<String>,
+    pub addon_stroke_slots: std::collections::BTreeMap<String, AddonStrokeSlot>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -191,12 +192,29 @@ const PALETTE_TOOLS: [&str; 8] = [
     "typst-block",
 ];
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddonStrokeSlot {
+    pub style: goodtype_core::ShapeStyle,
+    pub widths: Vec<f64>,
+    pub colors: Vec<String>,
+}
+
+fn addon_tool_id(id: &str) -> bool {
+    id.strip_prefix("addon:")
+        .and_then(|id| id.split_once('/'))
+        .is_some_and(|(addon, tool)| {
+            crate::addons::valid_addon_identifier(addon)
+                && crate::addons::valid_addon_identifier(tool)
+        })
+}
+
 /// Keeps known tile ids once each, and never lets both pens leave the bar: a palette with no pen
 /// on it has nothing left to write with by tap.
 fn sanitize_hidden_tools(hidden: Vec<String>) -> Vec<String> {
     let mut kept: Vec<String> = Vec::new();
     for id in hidden {
-        if PALETTE_TOOLS.contains(&id.as_str()) && !kept.contains(&id) {
+        if (PALETTE_TOOLS.contains(&id.as_str()) || addon_tool_id(&id)) && !kept.contains(&id) {
             kept.push(id);
         }
     }
@@ -305,6 +323,7 @@ impl Default for AppSettings {
             eraser_reach: "everything".into(),
             eraser_mode: "stroke".into(),
             hidden_tools: Vec::new(),
+            addon_stroke_slots: Default::default(),
         }
     }
 }
@@ -523,6 +542,19 @@ fn sanitize(mut settings: AppSettings) -> AppSettings {
         settings.eraser_mode = defaults.eraser_mode;
     }
     settings.hidden_tools = sanitize_hidden_tools(settings.hidden_tools);
+    settings.addon_stroke_slots.retain(|id, slot| {
+        slot.widths = sanitize_widths(
+            std::mem::take(&mut slot.widths),
+            &defaults.pen_widths,
+            0.2,
+            12.0,
+        );
+        slot.colors = sanitize_swatches(std::mem::take(&mut slot.colors), &defaults.pen_swatches);
+        addon_tool_id(id)
+            && valid_color(&slot.style.stroke_color)
+            && slot.style.validate().is_ok()
+            && slot.style.fill_color.is_none()
+    });
     settings
 }
 
@@ -1034,6 +1066,31 @@ mod tests {
         assert_eq!(settings.eraser_mode, "stroke");
         assert!(settings.hidden_tools.is_empty());
         assert!(!settings.highlighter_taper);
+    }
+
+    #[test]
+    fn addon_stroke_slot_and_visibility_survive_device_settings_round_trip() {
+        let settings: AppSettings = serde_json::from_value(serde_json::json!({
+            "hiddenTools": ["addon:connectors/connect", "addon:../connect"],
+            "addonStrokeSlots": {
+                "addon:connectors/connect": {
+                    "style": {"strokeColor": "#123abc", "strokeWidthPt": 2.0,
+                        "opacity": 0.7, "pattern": "dashed", "patternSpacing": 1.5},
+                    "widths": [1.0, 2.0], "colors": ["#123abc"]
+                }
+            }
+        }))
+        .unwrap();
+        let serialized = serde_json::to_value(sanitize(settings)).unwrap();
+        assert_eq!(
+            serialized["hiddenTools"],
+            serde_json::json!(["addon:connectors/connect"])
+        );
+        let style = &serialized["addonStrokeSlots"]["addon:connectors/connect"]["style"];
+        assert_eq!(style["strokeColor"], "#123abc");
+        assert_eq!(style["patternSpacing"], 1.5);
+        assert_eq!(style["opacity"], 0.7);
+        assert!(AppSettings::default().addon_stroke_slots.is_empty());
     }
 
     #[test]

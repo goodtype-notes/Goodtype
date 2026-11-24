@@ -183,7 +183,8 @@ export type AppSettings = {
   eraserReach: EraserReach;
   eraserMode: EraserMode;
   /** Palette tiles taken off the bar. Their keyboard shortcuts keep working. */
-  hiddenTools: PaletteCommand[];
+  hiddenTools: (PaletteCommand | `addon:${string}/${string}`)[];
+  addonStrokeSlots: Record<string, import("./notebook/addonToolSettings").AddonStrokeSlot>;
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -244,6 +245,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   eraserReach: "everything",
   eraserMode: "stroke",
   hiddenTools: [],
+  addonStrokeSlots: {},
 };
 
 /** End taper for a highlighter that has it switched on, as a fraction of stroke length. */

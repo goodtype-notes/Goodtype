@@ -1239,6 +1239,8 @@ export const en = {
     "draw": "Draw",
     "shapeType": "Shape type",
     "pattern": "Pattern",
+    "strokeOpacity": "Opacity",
+    "paletteFromAddons": "From addons",
     "linePattern": "Line pattern",
     "patternSpacing": "Pattern spacing",
     "keepProportions": "Keep proportions",

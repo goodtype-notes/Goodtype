@@ -184,20 +184,21 @@ export const cancelAddonCommand = (requestId: string) => invoke<void>("addon_can
 
 export type AddonValue = string | number | boolean;
 export type AddonValues = Record<string, AddonValue>;
+type AddonIcon = { paths: string[] };
 type FieldLabel = { id: string; label: string; hint?: string | null; search?: string | null };
 export type AddonField = FieldLabel & (
   | { type: "toggle"; default: boolean }
-  | { type: "choice"; default: string; choices: { value: string; label: string }[] }
+  | { type: "choice"; default: string; choices: { value: string; label: string; icon?: AddonIcon }[] }
   | { type: "text"; default: string; maxLength: number; pattern?: "any" | "number" | "identifier" | null }
   | { type: "number"; default: number; min: number; max: number; step: number }
 );
 export type AddonTool = {
-  id: string; label: string; icon: { paths: string[] };
+  id: string; label: string; icon: AddonIcon; stroke?: boolean;
   kind: "place" | "connect" | "frame"; snap: "ports" | "none"; settings: string[];
 };
 export type AddonPoint = { x: number; y: number; attach: { objectId: string; port: number } | null };
 export type AddonObjectAction =
-  | { kind: "tool"; id: string; points: AddonPoint[]; pen?: { strokeColor: string; strokeWidthPt: number } }
+  | { kind: "tool"; id: string; points: AddonPoint[]; style?: import("../model").ShapeStyle; pen?: { strokeColor: string; strokeWidthPt: number } }
   | { kind: "command"; id: string; selected: string[] };
 export const addonObjectAction = (root: string, pageId: string, revision: number, addonId: string, action: AddonObjectAction) =>
   invoke<import("./types").HistoryResult | null>("addon_object_action", { request: { root, pageId, revision, addonId, action } });

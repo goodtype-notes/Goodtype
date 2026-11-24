@@ -67,7 +67,7 @@ pub(super) struct Icon {
 }
 
 impl Icon {
-    fn valid(&self) -> bool {
+    pub(super) fn valid(&self) -> bool {
         (1..=8).contains(&self.paths.len())
             && self.paths.iter().map(String::len).sum::<usize>() <= 2048
             && self.paths.iter().all(|path| {
@@ -90,6 +90,8 @@ pub(super) struct Tool {
     pub icon: Icon,
     pub kind: ToolKind,
     pub snap: Snap,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stroke: bool,
     /// IDs of the addon's settings fields shown in the palette pocket while the tool is active.
     #[serde(default)]
     pub settings: Vec<String>,
@@ -192,7 +194,7 @@ pub(super) fn release_version(version: &str) -> bool {
             .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
-pub(super) fn identifier(value: &str) -> bool {
+pub(crate) fn identifier(value: &str) -> bool {
     value.len() <= 48
         && value.split('-').all(|part| {
             !part.is_empty()
@@ -302,6 +304,7 @@ impl Addon {
                 .map(|(id, kind)| Tool {
                     id: (*id).into(),
                     label: "run".into(),
+                    stroke: false,
                     icon: Icon {
                         paths: vec!["M4 12h16".into()],
                     },

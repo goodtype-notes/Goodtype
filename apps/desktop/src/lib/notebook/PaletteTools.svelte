@@ -15,8 +15,9 @@
 
   type Props = {
     addonTools?: { addon: AddonContribution; tool: AddonTool }[];
+    addonCardOpen?: boolean;
     activeAddonTool?: { addonId: string; toolId: string } | null;
-    onAddonTool?: (addon: AddonContribution, tool: AddonTool) => void;
+    onAddonTool?: (addon: AddonContribution, tool: AddonTool, tile: HTMLElement) => void;
     settings: AppSettings;
     activeCommands: readonly PaletteCommand[];
     expandedCommand: PaletteCommand | null;
@@ -25,7 +26,7 @@
     onActivate: (command: PaletteCommand, tile: HTMLElement) => void;
   };
 
-  let { settings, activeCommands, expandedCommand, horizontal, onActivate, addonTools = [], activeAddonTool, onAddonTool }: Props = $props();
+  let { settings, activeCommands, expandedCommand, horizontal, onActivate, addonTools = [], activeAddonTool, addonCardOpen, onAddonTool }: Props = $props();
 
   // The mark under each instrument is the line it will actually lay down: the pen's colour,
   // thickness and pattern, the highlighter's translucent band. That, more than the silhouette,
@@ -100,12 +101,13 @@
   </button>
 {/each}
 
+{#if addonTools.length}<span class:horizontal class="palette-divider"></span>{/if}
 {#each addonTools as { addon, tool } (`${addon.addonId}/${tool.id}`)}
   {@const label = contributionText(addon, tool.label, $locale)}
   {@const selected = activeAddonTool?.addonId === addon.addonId && activeAddonTool.toolId === tool.id}
   <button class="tool-tile" class:active={selected} type="button"
-    aria-label={label} aria-pressed={selected} title={label}
-    onclick={() => onAddonTool?.(addon, tool)}>
+    aria-label={label} aria-pressed={selected} aria-expanded={selected && (tool.stroke || tool.settings.length) ? !!addonCardOpen : undefined} title={label}
+    onclick={(event) => onAddonTool?.(addon, tool, event.currentTarget)}>
     <svg viewBox="0 0 24 24" aria-hidden="true">
       {#each tool.icon.paths as path}
         <path d={path} />

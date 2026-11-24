@@ -1,6 +1,7 @@
+import { contributionText, type AddonContribution } from "../ipc/addons";
 import type { AppSettings, HelperPermission } from "../settings";
 import { LANGUAGES, translate, formatNumber, type Translator } from "../i18n";
-import { paletteTools, type PaletteCommand } from "../notebook/palette";
+import { addonPaletteId, paletteTools } from "../notebook/palette";
 
 /**
  * What Settings holds, described as data rather than markup.
@@ -61,6 +62,7 @@ export type SettingItem = {
   id: string;
   label: string;
   hint?: string;
+  section?: string;
   /** Words that should find this setting but do not appear in its own text. */
   keywords?: string[];
   control: SettingControl;
@@ -75,7 +77,7 @@ export type SettingGroup = {
   items: SettingItem[];
 };
 
-export function settingGroups(t: Translator = translate, fonts: string[] = [], aiEnabled = false, themes: { value: string; label: string }[] = []): SettingGroup[] { const groups: SettingGroup[] = [
+export function settingGroups(t: Translator = translate, fonts: string[] = [], aiEnabled = false, themes: { value: string; label: string }[] = [], addons: AddonContribution[] = [], locale = "en"): SettingGroup[] { const groups: SettingGroup[] = [
   {
     id: "appearance",
     title: t("workspace.appearance"),
@@ -216,7 +218,14 @@ export function settingGroups(t: Translator = translate, fonts: string[] = [], a
     icon: "M4 7h16M4 12h16M4 17h16M9 4v16",
     blurb:
       t("workspace.takeToolsYouNeverUseOffThe"),
-    items: paletteTools(t).map((tool) => paletteToggle(tool.id, tool.label, t)),
+    items: [
+      ...paletteTools(t).map(tool => paletteToggle(tool.id, tool.label, t)),
+      ...addons.filter(addon => addon.enabled).flatMap(addon => (addon.tools ?? []).map(tool => ({
+        ...paletteToggle(addonPaletteId(addon.addonId, tool.id), contributionText(addon, tool.label, locale), t),
+        hint: contributionText(addon, "name", locale),
+        section: t("workspace.paletteFromAddons"),
+      }))),
+    ],
   },
   {
     id: "editing",
@@ -426,7 +435,7 @@ export function settingGroups(t: Translator = translate, fonts: string[] = [], a
 }
 
 /** At least one pen stays on the bar; Rust holds the same line for an edited settings file. */
-function lastPenShown(settings: AppSettings, id: PaletteCommand): boolean {
+function lastPenShown(settings: AppSettings, id: AppSettings["hiddenTools"][number]): boolean {
   const otherPen = id === "pen-1" ? "pen-2" : id === "pen-2" ? "pen-1" : null;
   return (
     otherPen !== null &&
@@ -435,7 +444,7 @@ function lastPenShown(settings: AppSettings, id: PaletteCommand): boolean {
   );
 }
 
-function paletteToggle(id: PaletteCommand, label: string, t: Translator): SettingItem {
+function paletteToggle(id: AppSettings["hiddenTools"][number], label: string, t: Translator): SettingItem {
   return {
     id: `palette-${id}`,
     label,

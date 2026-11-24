@@ -1,8 +1,8 @@
 <script lang="ts">
   import { t } from "../i18n";
-  import { tick, type Snippet } from "svelte";
+  import { type Snippet } from "svelte";
   import type { PaletteDock } from "./palette";
-  import { dismissable } from "../workspace/dismiss";
+  import { placePalettePopup } from "./palettePopup";
 
   let { title, anchor, dock, onClose, onDismiss, children }: {
     title: string;
@@ -13,35 +13,9 @@
     children: Snippet;
   } = $props();
 
-  function place(node: HTMLElement) {
-    const palette = anchor.closest<HTMLElement>(".instrument-palette")!;
-    const workspace = anchor.closest<HTMLElement>(".workspace-chrome") ?? palette.parentElement!;
-    // Include the rail in the dismissal boundary: pressing the opener again must close, not reopen.
-    const dismiss = dismissable(palette, onDismiss);
-    const position = () => {
-      const chip = anchor.getBoundingClientRect();
-      const rail = palette.getBoundingClientRect();
-      const bounds = workspace.getBoundingClientRect();
-      const box = node.getBoundingClientRect();
-      const x = dock === "left" ? rail.right + 10 : dock === "right" ? rail.left - box.width - 10 : chip.left + chip.width / 2 - box.width / 2;
-      const y = dock === "top" ? rail.bottom + 10 : dock === "bottom" ? rail.top - box.height - 10 : chip.top + chip.height / 2 - box.height / 2;
-      node.style.left = `${Math.max(bounds.left + 8, Math.min(x, bounds.right - box.width - 8))}px`;
-      node.style.top = `${Math.max(bounds.top + 8, Math.min(y, bounds.bottom - box.height - 8))}px`;
-    };
-    position();
-    const observer = new ResizeObserver(position);
-    observer.observe(node);
-    observer.observe(workspace);
-    palette.addEventListener("scroll", position, true);
-    let mounted = true;
-    void tick().then(() => {
-      if (mounted) node.querySelector<HTMLElement>("[aria-pressed='true'], input, button")?.focus();
-    });
-    return { destroy() { mounted = false; observer.disconnect(); palette.removeEventListener("scroll", position, true); dismiss.destroy(); } };
-  }
 </script>
 
-<div use:place class="palette-editor" role="dialog" aria-label={title} tabindex="-1"
+<div use:placePalettePopup={{ anchor, dock, onDismiss, focus: "[aria-pressed='true'], input, button" }} class="palette-editor" role="dialog" aria-label={title} tabindex="-1"
   onkeydown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
   <header><strong>{title}</strong><button type="button" aria-label={$t("workspace.close2", { "value1": title.toLowerCase() })} onclick={onClose}>
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>

@@ -1,8 +1,12 @@
 <script lang="ts">
+  import type { Snippet } from "svelte";
+  import { patternLabel } from "../i18n/labels";
+  import { MIN_PATTERN_SPACING, MAX_PATTERN_SPACING } from "../ink/pattern";
   import { t, formatNumber, displayLocale } from "../i18n";
   import { centredDash } from "./dash";
+  import { placePalettePopup } from "./palettePopup";
   import type { PaletteDock } from "./palette";
-  import type { StrokePattern } from "../model";
+  import type { ShapeStyle, StrokePattern } from "../model";
   import { patternDashArray } from "../shape/geometry";
   import { NIB_PATHS } from "./instruments";
   import StepSlider from "./StepSlider.svelte";
@@ -20,7 +24,12 @@
     tool,
     label,
     preset,
-    smoothing,
+    smoothing = 0,
+    addonStyle,
+    anchor,
+    children,
+    onPatternChange,
+    onSpacingChange,
     opacity = 1,
     straighten = false,
     behindInk = true,
@@ -35,16 +44,21 @@
   }: {
     /** Which edge the rail is on, so the pointer faces back toward the tile that opened this. */
     dock: PaletteDock;
-    tool: "pen" | "highlighter";
+    tool: "pen" | "highlighter" | "addon";
     label: string;
-    preset: PenPreset;
-    smoothing: number;
+    preset?: PenPreset;
+    smoothing?: number;
+    addonStyle?: ShapeStyle;
+    anchor?: HTMLElement;
+    children?: Snippet;
+    onPatternChange?: (pattern: StrokePattern) => void;
+    onSpacingChange?: (spacing: number) => void;
     opacity?: number;
     straighten?: boolean;
     behindInk?: boolean;
     taperEnds?: boolean;
-    onChange: (preset: PenPreset) => void;
-    onSmoothingChange: (smoothing: number) => void;
+    onChange?: (preset: PenPreset) => void;
+    onSmoothingChange?: (smoothing: number) => void;
     onOpacityChange?: (opacity: number) => void;
     onStraightenChange?: (straighten: boolean) => void;
     onBehindInkChange?: (behindInk: boolean) => void;
@@ -69,8 +83,9 @@
   /// Switching nib adopts that nib's character; the colour is the writer's and is kept.
   function chooseNib(id: PenTypeId) {
     const type = penType(id);
-    onChange({ ...preset, type: id, pressure: type.pressure, widthPt: type.widthPt });
-    onSmoothingChange(type.smoothing);
+    if (!preset) return;
+    onChange?.({ ...preset, type: id, pressure: type.pressure, widthPt: type.widthPt });
+    onSmoothingChange?.(type.smoothing);
   }
 
   function keydown(event: KeyboardEvent) {
@@ -108,7 +123,7 @@
 {/snippet}
 
 {#snippet choiceRow(name: string, options: { label: string; value: number }[], current: number, onPick: (value: number) => void)}
-  <div class="row">
+  <div class="row" class:stacked={tool === "addon"}>
     <span class="row-name">{name}</span>
     <div class="segmented" role="group" aria-label={name}>
       {#each options as option (option.label)}
@@ -116,6 +131,8 @@
           type="button"
           class:current={option.value === current}
           aria-pressed={option.value === current}
+          aria-label={option.label}
+          title={option.label}
           onclick={() => onPick(option.value)}
         >{option.label}</button>
       {/each}
@@ -125,6 +142,8 @@
 
 <div
   class="tool-card"
+  class:anchored={!!anchor}
+  use:placePalettePopup={anchor ? { anchor, dock, onDismiss: onClose } : undefined}
   class:point-down={dock === "bottom"}
   class:point-up={dock === "top"}
   class:point-left={dock === "left"}
@@ -137,13 +156,35 @@
   <span class="arrow" aria-hidden="true"></span>
   <header>
     <span class="name">{label}</span>
-    <span class="meta">{mm(preset.widthPt)}</span>
+    {#if preset || addonStyle}<span class="meta">{mm(addonStyle?.strokeWidthPt ?? preset!.widthPt)}</span>{/if}
     <button type="button" class="chrome" aria-label={$t("workspace.closeSettings")} onclick={onClose}>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
     </button>
   </header>
 
     <div class="body">
+      {#if tool === "addon"}
+        {@render children?.()}
+        {#if addonStyle}
+          {@const current = addonStyle.pattern ?? "solid"}
+          <section class="rows">
+            {@render choiceRow($t("workspace.linePattern"),
+              (["solid", "dashed", "dotted"] as const).map((pattern, value) => ({ value, label: patternLabel(pattern, $t) })),
+              ["solid", "dashed", "dotted"].indexOf(current),
+              (index) => onPatternChange?.((["solid", "dashed", "dotted"] as const)[index]))}
+            {#if current !== "solid"}
+              <StepSlider name={$t("workspace.patternSpacing")} value={addonStyle.patternSpacing ?? 1}
+                min={MIN_PATTERN_SPACING} max={MAX_PATTERN_SPACING} step={0.05}
+                valueText={formatNumber(addonStyle.patternSpacing ?? 1, { maximumFractionDigits: 2 }, $displayLocale)}
+                onInput={(value) => onSpacingChange?.(value)} />
+            {/if}
+            <StepSlider name={$t("workspace.strokeOpacity")} value={addonStyle.opacity}
+              min={0.05} max={1} step={0.05}
+              valueText={formatNumber(addonStyle.opacity, { style: "percent" }, $displayLocale)}
+              onInput={(value) => onOpacityChange?.(value)} />
+          </section>
+        {/if}
+      {:else if preset}
       <!-- The choice made visible rather than numeric: the same stroke the pen will lay down. -->
       <div class="preview">
         <svg viewBox="0 0 250 42" aria-hidden="true">
@@ -188,12 +229,12 @@
       <!-- One line per setting. New switches land here; see AGENT_DOC §3.9. -->
       <section class="rows">
         {#if tool === "pen"}
-          {@render toggleRow($t("workspace.pressure"), preset.pressure, () => onChange({ ...preset, pressure: !preset.pressure }), $t("workspace.stylusForceVariesTheWidth"))}
+          {@render toggleRow($t("workspace.pressure"), preset.pressure, () => onChange?.({ ...preset, pressure: !preset.pressure }), $t("workspace.stylusForceVariesTheWidth"))}
           {#if penType(preset.type).taper > 0}
             <StepSlider name="Maximum taper" value={preset.taperLengthWidths ?? 3} min={0} max={6} step={0.25}
               valueText={$t("workspace.lineWidth", { "value1": preset.taperLengthWidths ?? 3 })} label={$t("workspace.maximumTaperLength")}
               spokenValue={$t("workspace.timesLineWidth", { "value1": preset.taperLengthWidths ?? 3 })}
-              onInput={(taperLengthWidths) => onChange({ ...preset, taperLengthWidths })} />
+              onInput={(taperLengthWidths) => onChange?.({ ...preset, taperLengthWidths })} />
           {/if}
         {:else}
           <StepSlider name="Opacity" value={opacity} min={0.1} max={1} step={0.05}
@@ -202,8 +243,9 @@
           {@render toggleRow($t("workspace.drawBehindInk"), behindInk, () => onBehindInkChange?.(!behindInk))}
           {@render toggleRow($t("workspace.taperedEnds"), taperEnds, () => onTaperEndsChange?.(!taperEnds), $t("workspace.offKeepsTheFullWidthToBoth"))}
         {/if}
-        {@render choiceRow($t("workspace.stabiliser"), SMOOTHING_STEPS, nearestSmoothing.value, onSmoothingChange)}
+        {@render choiceRow($t("workspace.stabiliser"), SMOOTHING_STEPS, nearestSmoothing.value, (next) => onSmoothingChange?.(next))}
       </section>
+      {/if}
     </div>
 </div>
 
@@ -224,6 +266,8 @@
     box-shadow: var(--shadow-panel);
     color: var(--text);
   }
+
+  .tool-card.anchored { position: fixed; z-index: 60; }
 
   /* A rotated square with two of its borders kept, so the pointer reads as a corner of the card
      rather than a separate shape sitting next to it. */
@@ -409,6 +453,10 @@
     gap: 10px;
   }
 
+  .row.stacked { display: grid; gap: 5px; }
+  .stacked .row-name { color: var(--muted); font-size: var(--text-sm); }
+  .stacked .segmented button { flex: 1; min-height: var(--control-dense); }
+
   .row-name {
     display: flex;
     min-width: 0;
@@ -450,7 +498,7 @@
     flex: none;
     padding: 2px;
     border-radius: var(--radius);
-    background: rgb(0 0 0 / 22%);
+    background: var(--inset);
     gap: 2px;
   }
 

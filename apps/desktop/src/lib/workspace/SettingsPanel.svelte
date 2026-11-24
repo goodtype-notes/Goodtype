@@ -61,7 +61,7 @@
   });
   let contributions = $state.raw<AddonContribution[]>([]);
   let addonManager = $state.raw<AddonManager>();
-  const groups = $derived(settingGroups($t, [...new Set([...fonts, settings.inlineTextFont, selectedBlockFont].filter((font): font is string => Boolean(font)))], settings.aiHelper.enabled, themes));
+  const groups = $derived(settingGroups($t, [...new Set([...fonts, settings.inlineTextFont, selectedBlockFont].filter((font): font is string => Boolean(font)))], settings.aiHelper.enabled, themes, contributions, $addonLocale));
   let addonError = $state<"loadFailed" | "policyFailed" | null>(null);
   let confirmReset = $state(false);
   let policyPending = $state(false);
@@ -69,11 +69,11 @@
   let addonRequest = 0;
   async function refreshAddons() {
     const request = ++addonRequest;
+    void addonContributions().then(found => { if (request === addonRequest) contributions = found; }).catch(() => {});
     try {
       const next = await listAddons();
       if (request !== addonRequest) return;
       addonManager = next;
-      void addonContributions().then(found => { if (request === addonRequest) contributions = found; }).catch(() => {});
       if (addonError === "loadFailed") addonError = null;
     } catch {
       if (request === addonRequest) addonError = "loadFailed";
@@ -348,7 +348,10 @@
             {#if group.blurb}<p class="blurb">{group.blurb}</p>{/if}
           </div>
           <div class="settings">
-            {#each group.items as item (item.id)}
+            {#each group.items as item, index (item.id)}
+              {#if item.section && item.section !== group.items[index - 1]?.section}
+                <h3 class="setting-section">{item.section}</h3>
+              {/if}
               {@render setting(item)}
             {/each}
             {#if group.id === "aiHelper" && settings.aiHelper.enabled}<CodexSettings {settings} {onChange} /><HelperSetup />{/if}
@@ -554,6 +557,8 @@
     font-size: var(--text-sm);
     line-height: 1.5;
   }
+
+  .setting-section { margin: 18px 0 6px; color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
 
   .settings { display: flex; flex-direction: column; }
 

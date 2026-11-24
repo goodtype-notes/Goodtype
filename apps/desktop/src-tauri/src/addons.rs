@@ -30,6 +30,7 @@ pub(crate) mod export;
 pub(crate) mod import;
 pub(crate) mod manager;
 mod manifest;
+pub(crate) use manifest::identifier as valid_addon_identifier;
 pub(crate) mod objects;
 pub(crate) mod recognize;
 pub(crate) mod registry;

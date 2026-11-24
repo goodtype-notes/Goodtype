@@ -814,6 +814,7 @@ fn request_params(
             if !manifest.has(Permission::OwnObjects)
                 || points != if tool.kind == ToolKind::Place { 1 } else { 2 }
                 || (snapped && tool.snap != Snap::Ports)
+                || tool.stroke != params.get("style").is_some()
             {
                 return Err(Failure::Unavailable);
             }

@@ -558,7 +558,20 @@ Tools declare an ID, label key, stroke-only path icon, kind (`place`, `connect`
 or `frame`), snap mode (`none` or `ports`) and optional setting IDs. The host
 sends one `tool/apply` per gesture. Parameters include the tool ID, settings,
 page ID and size, points with optional object/port attachments, and snapshots
-of attached objects. Ports in snapshots use page points. An `own-object`
+of attached objects. Ports in snapshots use page points. A tool declaring
+`"stroke": true` receives a validated core `ShapeStyle` in `style`. The host
+initializes a device-local slot from the pen in hand and retains it by tool ID.
+Tools without a stroke slot still receive `pen` with the active pen's colour
+and width.
+
+Choice options may declare an `icon` with the same stroke-path rules as a tool
+icon. The host presents up to five fully icon-labelled choices or up to four
+short text choices as segments when room permits. In a vertical or crowded
+rail, those segments move into the tool card. Other choices appear as lists
+and toggles as switches in that card. Settings ? Palette lists enabled addon
+tools and retains visibility by `addon:<id>/<tool>`.
+
+An `own-object`
 command receives the selected objects owned by the addon and snapshots of
 their refs. A `page/changed` reaction receives the page ID and size, changed
 referenced snapshots, deleted IDs, and the affected objects owned by the addon.

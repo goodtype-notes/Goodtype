@@ -69,7 +69,7 @@
   import HelperCrop from "../helper/HelperCrop.svelte";
   import MixedSelection from "./MixedSelection.svelte";
   import { DEFAULT_LASSO_TARGETS } from "./lasso";
-  import { type PaletteCommand, type PaletteDock } from "./palette";
+  import { addonPaletteId, type PaletteCommand, type PaletteDock } from "./palette";
   import { newInkZIndex } from "./objectOrder";
   import { cycledTab } from "./tabs";
   import { addWidth as addRowWidth, canRemoveWidth, editWidth as editRowWidth, movePattern, moveSpacing, patternForWidth, prunePatterns, pruneSpacings, removeWidth as removeRowWidth, spacingForWidth, withWidthPattern, withWidthSpacing, widthTaken, WIDTH_BOUNDS_MM } from "./widths";
@@ -79,8 +79,9 @@
   import AddonCommandPanel from "./AddonCommandPanel.svelte";
   import { completeSelectedGroups } from "./clipboard";
   import AddonToolSurface from "./AddonToolSurface.svelte";
-  import AddonSettings from "../workspace/addons/AddonSettings.svelte";
-  import { ADDON_AVAILABILITY_CHANGED, addonContributions, addonSelectionCommands, addonText, contributionText, type AddonContribution, type AddonTool, type ContributionEntry, type SelectionCommand } from "../ipc/addons";
+  import AddonToolOptions from "./AddonToolOptions.svelte";
+  import { defaultAddonStrokeSlot, fitsAddonSegments, toolFieldPresentation, type AddonStrokeSlot } from "./addonToolSettings";
+  import { ADDON_AVAILABILITY_CHANGED, addonContributions, setAddonField, type AddonValue, addonSelectionCommands, addonText, contributionText, type AddonContribution, type AddonTool, type ContributionEntry, type SelectionCommand } from "../ipc/addons";
   import { recognitionCapabilities, type InkPolylines, type RecognitionCapabilities } from "../ipc/recognition";
   import { inkPolylines, polylineBounds, shapePolylines, transcriptionPlacement } from "./transcription";
   import ConflictDialog from "../workspace/ConflictDialog.svelte";
@@ -400,24 +401,86 @@
   let activeAddonTool = $state<{ addonId: string; toolId: string } | null>(null);
   const addonTools = $derived(contributions.filter((addon) => addon.enabled)
     .flatMap((addon) => (addon.tools ?? []).map((tool) => ({ addon, tool }))));
-  const selectedAddonTool = $derived(addonTools.find(({ addon, tool }) =>
+  const visibleAddonTools = $derived(addonTools.filter(({ addon, tool }) =>
+    !settings.hiddenTools.includes(addonPaletteId(addon.addonId, tool.id))));
+  const selectedAddonTool = $derived(visibleAddonTools.find(({ addon, tool }) =>
     addon.addonId === activeAddonTool?.addonId && tool.id === activeAddonTool.toolId));
   const toolSettings = $derived(selectedAddonTool && {
     ...selectedAddonTool.addon,
     settings: selectedAddonTool.addon.settings.filter((field) => selectedAddonTool.tool.settings.includes(field.id)),
   });
+  let addonCard = $state<HTMLElement | null>(null);
+  let addonSettingPending = $state(false);
+  let addonRailWidth = $state(0);
+  let workspaceWidth = $state(0);
+  let addonSegmentsWidth = $state(0);
+  const horizontalPalette = $derived.by(() => paletteDock === "top" || paletteDock === "bottom");
+  const addonSlotId = $derived(selectedAddonTool?.tool.stroke
+    ? addonPaletteId(selectedAddonTool.addon.addonId, selectedAddonTool.tool.id) : null);
+  const addonSlot = $derived.by(() => addonSlotId ? settings.addonStrokeSlots?.[addonSlotId] : undefined);
+  const addonSegments = $derived(toolSettings?.settings.filter(field => {
+    const mode = toolFieldPresentation(toolSettings, field, $locale);
+    return mode === "icons" || mode === "text-segments";
+  }) ?? []);
+  // Reserve room for the history controls in a narrow canvas, even when they can be relocated.
+  const addonSegmentsInRail = $derived.by(() =>
+    fitsAddonSegments(paletteDock, workspaceWidth, addonRailWidth, addonSegmentsWidth));
+  const addonCardFields = $derived(toolSettings?.settings.filter(field =>
+    !addonSegmentsInRail || !addonSegments.includes(field)) ?? []);
+
   $effect(() => {
-    if (activeAddonTool && (!selectedAddonTool || session.activeCalculation)) activeAddonTool = null;
+    if (activeAddonTool && (!selectedAddonTool || session.activeCalculation)) {
+      activeAddonTool = null;
+      closeToolCard();
+    }
   });
 
-  function selectAddonTool(addon: AddonContribution, chosen: AddonTool) {
-    const previous = activeAddonTool;
+  function updateAddonSlot(slot: AddonStrokeSlot, recentColors = settings.recentColors) {
+    if (!addonSlotId) return;
+    changeSettings({ ...settings, recentColors,
+      addonStrokeSlots: { ...settings.addonStrokeSlots, [addonSlotId]: slot } });
+  }
+
+  async function updateAddonToolField(id: string, value: AddonValue) {
+    if (!toolSettings || addonSettingPending) return;
+    const addonId = toolSettings.addonId;
+    addonSettingPending = true;
+    try {
+      await setAddonField(addonId, id, value);
+      contributions = contributions.map(addon => addon.addonId === addonId
+        ? { ...addon, values: { ...addon.values, [id]: value } } : addon);
+    } catch {
+      session.status = notice("addons.manager.policyFailed");
+    } finally {
+      addonSettingPending = false;
+    }
+  }
+
+  function closeAddonCard() {
+    const trigger = addonCard;
+    closeToolCard();
+    trigger?.focus();
+  }
+
+  function selectAddonTool(addon: AddonContribution, chosen: AddonTool, tile: HTMLElement) {
+    if (activeAddonTool?.addonId === addon.addonId && activeAddonTool.toolId === chosen.id) {
+      const open = !addonCard;
+      closeToolCard();
+      if (open && (chosen.stroke || chosen.settings.length)) {
+        addonCard = tile;
+      }
+      return;
+    }
     activateTool("pen");
     closeToolCard();
-    if (previous?.addonId !== addon.addonId || previous.toolId !== chosen.id) {
-      activeAddonTool = { addonId: addon.addonId, toolId: chosen.id };
-      session.status = notice("workspace.active", { value1: contributionText(addon, chosen.label, $locale) });
+    const id = addonPaletteId(addon.addonId, chosen.id);
+    if (chosen.stroke && !settings.addonStrokeSlots?.[id]) {
+      changeSettings({ ...settings, addonStrokeSlots: {
+        ...settings.addonStrokeSlots, [id]: defaultAddonStrokeSlot(settings, penPreset - 1),
+      } });
     }
+    activeAddonTool = { addonId: addon.addonId, toolId: chosen.id };
+    session.status = notice("workspace.active", { value1: contributionText(addon, chosen.label, $locale) });
   }
   let strokeMetrics = $state<StrokePerformance[]>([]);
   let compileMs = $state<number | null>(null);
@@ -705,6 +768,7 @@
   }
 
   function closeToolCard() {
+    addonCard = null;
     toolCard = null;
     shapeCard = null;
     paletteEditor = null;
@@ -729,8 +793,8 @@
 
   function selectOrOpenTool(kind: "pen" | "highlighter", slot: number, tile: HTMLElement) {
     stopStamp();
-    const alreadyActive =
-      kind === "highlighter" ? tool === "highlighter" : tool === "pen" && penPreset === slot;
+    const alreadyActive = !activeAddonTool &&
+      (kind === "highlighter" ? tool === "highlighter" : tool === "pen" && penPreset === slot);
     if (!alreadyActive) {
       closeToolCard();
       if (kind === "pen") activateTool("pen", slot as 1 | 2);
@@ -782,6 +846,7 @@
   function selectPlainTool(activate: () => void) {
     stopStamp();
     closeToolCard();
+    activeAddonTool = null;
     activate();
   }
 
@@ -816,7 +881,7 @@
   const selectedInk = $derived(session.strokes.filter((stroke) => selection.selectedStrokeIds.includes(stroke.id)));
   const selectedShape = $derived(session.shapes.find((shape) => shape.id === selection.selectedShapeId) ?? null);
   const selectedShapes = $derived(session.shapes.filter(shape => shape.id === selection.selectedShapeId || selection.lassoObjectIds.includes(shape.id)));
-  const restyling = $derived(selectedInk.length > 0 || selectedShapes.length > 0);
+  const restyling = $derived(!activeAddonTool && (selectedInk.length > 0 || selectedShapes.length > 0));
   const paletteContext = $derived<"ink" | "eraser" | null>(
     restyling || tool === "pen" || tool === "highlighter" || tool === "shape"
       ? "ink"
@@ -1492,6 +1557,7 @@
   }
 
   function activateTool(next: InkTool, preset?: 1 | 2) {
+    if (activeAddonTool) closeToolCard();
     activeAddonTool = null;
     stopStamp();
     if (next === "eraser" && tool !== "eraser") toolBeforeEraser = { tool, preset: penPreset };
@@ -1543,25 +1609,25 @@
   });
 
   const activeWidthChips = $derived(
-    tool === "highlighter" && !restyling ? settings.highlighterWidths : settings.penWidths,
+    addonSlot?.widths ?? (tool === "highlighter" && !restyling ? settings.highlighterWidths : settings.penWidths),
   );
   const activeColorChips = $derived(
-    tool === "highlighter" && !restyling ? settings.highlighterSwatches : settings.penSwatches,
+    addonSlot?.colors ?? (tool === "highlighter" && !restyling ? settings.highlighterSwatches : settings.penSwatches),
   );
   // A mixed selection shares no width or colour, so nothing on the row reads as selected.
   const activeWidth = $derived(
-    restyling
+    addonSlot?.style.strokeWidthPt ?? (restyling
       ? (selectionStyle.widthPt ?? Number.NaN)
       : tool === "highlighter"
         ? settings.highlighter.widthPt
-        : settings.penPresets[penPreset - 1].widthPt,
+        : settings.penPresets[penPreset - 1].widthPt),
   );
   const activeInkColor = $derived(
-    restyling
+    addonSlot?.style.strokeColor ?? (restyling
       ? (selectionStyle.color ?? "")
       : tool === "highlighter"
         ? settings.highlighter.color
-        : settings.penPresets[penPreset - 1].color,
+        : settings.penPresets[penPreset - 1].color),
   );
 
   function nearestChip(chips: readonly number[], value: number): number {
@@ -1572,6 +1638,10 @@
 
   /// Picking a pen chip takes its pattern too: the pattern belongs to that width, not the pen.
   function setActiveWidth(widthPt: number) {
+    if (addonSlot) {
+      updateAddonSlot({ ...addonSlot, style: { ...addonSlot.style, strokeWidthPt: widthPt } });
+      return;
+    }
     if (restyling) {
       // A chip is a whole stroke — width, pattern and spacing — so picking it hands all three to
       // the selection, as it does to the pen.
@@ -1601,6 +1671,10 @@
   }
 
   function setActiveSpacing(spacing: number) {
+    if (addonSlot) {
+      updateAddonSlot({ ...addonSlot, style: { ...addonSlot.style, patternSpacing: spacing } });
+      return;
+    }
     if (restyling) {
       selection.restyleSelection({ patternSpacing: spacing });
       return;
@@ -1614,6 +1688,10 @@
 
   /// Sets the pattern of the chip being edited and draws with it, leaving the other widths alone.
   function setActivePattern(pattern: StrokePattern) {
+    if (addonSlot) {
+      updateAddonSlot({ ...addonSlot, style: { ...addonSlot.style, pattern } });
+      return;
+    }
     if (restyling) {
       selection.restyleSelection({ pattern });
       return;
@@ -1633,6 +1711,11 @@
   /// Point the active tool at a colour, and remember it as recently used. This changes which
   /// colour the pen writes with; it does not touch the swatch row.
   function setActiveColor(color: string) {
+    if (addonSlot) {
+      updateAddonSlot({ ...addonSlot, style: { ...addonSlot.style, strokeColor: color } },
+        withRecentColor(settings.recentColors, color));
+      return;
+    }
     if (restyling) {
       changeSettings({ ...settings, recentColors: withRecentColor(settings.recentColors, color) });
       selection.restyleSelection({ color });
@@ -1654,6 +1737,11 @@
   /// Replace the swatch at `index` for the active tool, and follow it with the active colour so
   /// editing the chip you are drawing with changes your ink immediately.
   function editSwatch(index: number, color: string) {
+    if (addonSlot) {
+      updateAddonSlot({ ...addonSlot, colors: addonSlot.colors.map((swatch, i) => i === index ? color : swatch),
+        style: { ...addonSlot.style, strokeColor: color } }, withRecentColor(settings.recentColors, color));
+      return;
+    }
     const key = tool === "highlighter" ? "highlighterSwatches" : "penSwatches";
     const swatches = settings[key].map((existing, position) =>
       position === index ? color : existing,
@@ -1666,6 +1754,13 @@
 
   /// Append a colour to the active tool's swatch row and select it.
   function addSwatch(color: string) {
+    if (addonSlot) {
+      const colors = addonSlot.colors.some(swatch => swatch.toLowerCase() === color.toLowerCase())
+        ? addonSlot.colors : [...addonSlot.colors, color].slice(0, MAX_SWATCHES);
+      updateAddonSlot({ ...addonSlot, colors, style: { ...addonSlot.style, strokeColor: color } },
+        withRecentColor(settings.recentColors, color));
+      return;
+    }
     const key = tool === "highlighter" ? "highlighterSwatches" : "penSwatches";
     if (settings[key].some((existing) => existing.toLowerCase() === color.toLowerCase())) {
       setActiveColor(color);
@@ -1725,6 +1820,11 @@
    */
   /// A new chip arrives whole: its width, and for a pen its pattern and spacing, in one write.
   function addWidth(widthPt: number, pattern: StrokePattern = "solid", spacing = 1) {
+    if (addonSlot) {
+      updateAddonSlot({ ...addonSlot, widths: addRowWidth(addonSlot.widths, widthPt, MAX_WIDTHS),
+        style: { ...addonSlot.style, strokeWidthPt: widthPt, pattern, patternSpacing: spacing } });
+      return;
+    }
     const widths = settings[widthKey()];
     const next = addRowWidth(widths, widthPt, MAX_WIDTHS);
     if (next === widths) session.status = notice("workspace.thePaletteHoldsAtMostWidths", { "MAX_WIDTHS": MAX_WIDTHS });
@@ -1737,6 +1837,11 @@
   }
 
   function editWidth(index: number, widthPt: number) {
+    if (addonSlot) {
+      updateAddonSlot({ ...addonSlot, widths: editRowWidth(addonSlot.widths, index, widthPt, MAX_WIDTHS),
+        style: { ...addonSlot.style, strokeWidthPt: widthPt } });
+      return;
+    }
     const previous = settings[widthKey()][index];
     const moves = tool !== "highlighter" && previous !== undefined;
     const patterns = moves
@@ -1754,6 +1859,11 @@
   }
 
   function removeWidth(index: number) {
+    if (addonSlot) {
+      const widths = removeRowWidth(addonSlot.widths, index);
+      updateAddonSlot({ ...addonSlot, widths, style: { ...addonSlot.style, strokeWidthPt: nearestChip(widths, activeWidth) } });
+      return;
+    }
     const widths = settings[widthKey()];
     const remaining = removeRowWidth(widths, index);
     if (remaining === widths) {
@@ -1764,6 +1874,10 @@
   }
 
   function removeSwatch(index: number) {
+    if (addonSlot) {
+      updateAddonSlot({ ...addonSlot, colors: addonSlot.colors.filter((_, position) => position !== index) });
+      return;
+    }
     const key = tool === "highlighter" ? "highlighterSwatches" : "penSwatches";
     if (settings[key].length <= 1) {
       session.status = notice("workspace.thePaletteKeepsAtLeastOneColor");
@@ -1908,7 +2022,8 @@
   function historyShortcut(event: KeyboardEvent) {
     if (formRun || event.defaultPrevented || addonsOpen) return;
     if (event.key === "Escape" && activeAddonTool) {
-      activateTool(tool);
+      if (addonCard) closeAddonCard();
+      else activateTool(tool);
       event.preventDefault();
       return;
     }
@@ -2581,14 +2696,15 @@
                     {@const activeTool = selectedAddonTool}
                     {@const label = contributionText(activeTool.addon, activeTool.tool.label, $locale)}
                     {#key `${entry.id}/${activeTool.addon.addonId}/${activeTool.tool.id}`}
-                      <AddonToolSurface tool={activeTool.tool} {label} {zoom}
+                      <AddonToolSurface tool={activeTool.tool} {label} {zoom} style={addonSlot?.style}
                         objects={session.activeSnapshot?.page.objects ?? []}
                         pointAt={navigation.pagePointAt}
                         onApply={(points) => {
                           if (session.pageInputLocked) return;
                           const pen = shapePen();
                           void session.applyAddonObjectAction(activeTool.addon.addonId,
-                            { kind: "tool", id: activeTool.tool.id, points, pen: { strokeColor: pen.color, strokeWidthPt: pen.widthPt } }, label);
+                            { kind: "tool", id: activeTool.tool.id, points, ...(addonSlot ? { style: addonSlot.style }
+                              : { pen: { strokeColor: pen.color, strokeWidthPt: pen.widthPt } }) }, label);
                         }} />
                     {/key}
                   {/if}
@@ -2693,7 +2809,7 @@
 
       {#if !session.activeCalculation}
       <NotebookPalette {workspace} {settings} {changeSettings} onStatus={next => { session.status = next; }}
-        bind:paletteDock bind:paletteElement bind:paletteDragging {closeToolCard}
+        bind:paletteDock bind:paletteElement bind:paletteDragging bind:baseRailWidth={addonRailWidth} bind:railAvailableWidth={workspaceWidth} {closeToolCard}
         onUndo={session.undo} onRedo={session.redo}
         undoDisabled={session.busy || session.pendingTransactions > 0 || !session.canUndo}
         redoDisabled={session.busy || session.pendingTransactions > 0 || !session.canRedo}>
@@ -2723,9 +2839,9 @@
                 <WidthPanel embedded widthPt={Number.isFinite(activeWidth) ? activeWidth : settings.penWidths[0]} kind={tool === "highlighter" && !restyling ? "highlighter" : "pen"}
                   minimumMm={WIDTH_BOUNDS_MM[tool === "highlighter" && !restyling ? "highlighter" : "pen"].minimum}
                   maximumMm={WIDTH_BOUNDS_MM[tool === "highlighter" && !restyling ? "highlighter" : "pen"].maximum}
-                  pattern={restyling ? selectionStyle.pattern : inkPattern()}
+                  pattern={addonSlot?.style.pattern ?? (restyling ? selectionStyle.pattern : inkPattern())}
                   onPatternChange={penLike ? setActivePattern : undefined}
-                  spacing={restyling ? selectionStyle.spacing : inkPatternSpacing()}
+                  spacing={addonSlot?.style.patternSpacing ?? (restyling ? selectionStyle.spacing : inkPatternSpacing())}
                   onSpacingChange={penLike ? setActiveSpacing : undefined}
                   canRemove={!restyling && paletteEditor.index >= 0 && canRemoveWidth(activeWidthChips)}
                   adding={paletteEditor.adding}
@@ -2775,6 +2891,17 @@
             />
           </div>
         {/if}
+        {#if addonCard && selectedAddonTool && toolSettings}
+            <ToolCard dock={paletteDock} tool="addon" anchor={addonCard}
+              label={contributionText(toolSettings, selectedAddonTool.tool.label, $locale)}
+              addonStyle={addonSlot?.style}
+              onPatternChange={setActivePattern} onSpacingChange={setActiveSpacing}
+              onOpacityChange={(opacity) => { if (addonSlot) updateAddonSlot({ ...addonSlot, style: { ...addonSlot.style, opacity } }); }}
+              onClose={closeAddonCard}>
+              <AddonToolOptions addon={toolSettings} fields={addonCardFields}
+                disabled={addonSettingPending} onChange={updateAddonToolField} />
+            </ToolCard>
+        {/if}
         {#if toolCard && toolCardPreset}
           <div class="palette-panel-anchor card" style:--anchor={`${toolCard.anchor}px`}>
             <ToolCard
@@ -2809,27 +2936,31 @@
             activeCommands={activePaletteCommands}
             expandedCommand={expandedPaletteCommand}
             horizontal={paletteDock === "top" || paletteDock === "bottom"}
-            onActivate={(command, tile) => { activeAddonTool = null; paletteCommands[command](tile); }}
-            {addonTools} {activeAddonTool} onAddonTool={selectAddonTool}
+            onActivate={(command, tile) => paletteCommands[command](tile)}
+            addonTools={visibleAddonTools} {activeAddonTool} addonCardOpen={!!addonCard} onAddonTool={selectAddonTool}
           />
 
-          {#if toolSettings?.settings.length}
-            {#key toolSettings.addonId}
-              <div class="addon-tool-pocket"><AddonSettings addon={toolSettings} compact /></div>
-            {/key}
-          {:else if !activeAddonTool && paletteContext}
+          {#if toolSettings && addonSegments.length && horizontalPalette}
+            <div class="addon-segments" class:measuring={!addonSegmentsInRail} inert={!addonSegmentsInRail}>
+              <div class="addon-tracks" bind:clientWidth={addonSegmentsWidth}>
+                <AddonToolOptions addon={toolSettings} fields={addonSegments} rail
+                  disabled={addonSettingPending} onChange={updateAddonToolField} />
+              </div>
+            </div>
+          {/if}
+          {#if addonSlot || (!activeAddonTool && paletteContext)}
             <PalettePocket
-              kind={paletteContext}
+              kind={addonSlot ? "ink" : paletteContext ?? "ink"}
               horizontal={paletteDock === "top" || paletteDock === "bottom"}
               widths={activeWidthChips}
               {activeWidth}
               colors={activeColorChips}
               activeColor={activeInkColor}
-              opacity={tool === "highlighter" ? settings.highlighterOpacity : 1}
+              opacity={addonSlot?.style.opacity ?? (tool === "highlighter" ? settings.highlighterOpacity : 1)}
               eraserSizes={ERASER_SIZE_OPTIONS}
               eraserSize={settings.eraserSize}
-              pattern={restyling ? selectionStyle.pattern : inkPattern()}
-              patternOf={tool === "pen" || restyling ? (width) => patternForWidth(settings.penWidthPatterns, width) : undefined}
+              pattern={addonSlot?.style.pattern ?? (restyling ? selectionStyle.pattern : inkPattern())}
+              patternOf={!addonSlot && (tool === "pen" || restyling) ? (width) => patternForWidth(settings.penWidthPatterns, width) : undefined}
               tag={restyling ? $t("workspace.selection") : undefined}
               matchPattern={restyling}
               expandedEditor={paletteEditor?.adding ? null : paletteEditor?.kind ?? null}
@@ -3359,11 +3490,28 @@
 
   /* Where a popout from the bar hangs. `--anchor` is the tapped tile's centre within the bar;
      this knows only the four docks, and the thing it holds knows only its own contents. */
-  .addon-tool-pocket {
-    padding: 0 8px;
-    max-width: 180px;
-    overflow: auto;
+  .addon-segments {
+    flex: none;
+    margin-left: 3px;
   }
+
+  .addon-tracks {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: max-content;
+    padding-left: 7px;
+    border-left: 1px solid var(--edge);
+  }
+
+  .addon-segments.measuring {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 0;
+    overflow: clip;
+    visibility: hidden;
+  }
+
   .palette-panel-anchor {
     position: absolute;
     bottom: calc(100% + 10px);

@@ -60,8 +60,10 @@ export const PALETTE_TOOLS = paletteTools();
  * tiles, so hiding the last tool of a group can never leave two dividers side by side or one
  * dangling at the end of the rail.
  */
+export const addonPaletteId = (addon: string, tool: string): `addon:${string}/${string}` => `addon:${addon}/${tool}`;
+
 export function visiblePaletteTools(
-  hidden: readonly PaletteCommand[],
+  hidden: readonly string[],
   t: Translator = translate,
 ): { tool: PaletteTool; dividerBefore: boolean }[] {
   const shown = paletteTools(t).filter((tool) => !hidden.includes(tool.id));

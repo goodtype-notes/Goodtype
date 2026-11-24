@@ -28,8 +28,13 @@ enum Action {
         points: Vec<Point>,
         #[serde(default)]
         pen: Option<Pen>,
+        #[serde(default)]
+        style: Option<goodtype_core::ShapeStyle>,
     },
-    Command { id: String, selected: Vec<String> },
+    Command {
+        id: String,
+        selected: Vec<String>,
+    },
 }
 
 /// The active pen, so a tool's new objects can match it (the addon decides whether to use it).
@@ -206,7 +211,15 @@ fn capture(
             id,
             mut points,
             pen,
+            style,
         } => {
+            if style
+                .as_ref()
+                .is_some_and(|style| style.validate().is_err())
+                || (style.is_some() && pen.is_some())
+            {
+                return Err("addon-invalid-response".into());
+            }
             if let Some(pen) = &pen
                 && (!goodtype_core::valid_hex_color(&pen.stroke_color)
                     || !pen.stroke_width_pt.is_finite()
@@ -246,6 +259,9 @@ fn capture(
                         let mut params = json!({"page":geometry_value(page), "points":points, "objects":attached});
                         if let Some(pen) = pen {
                             params["pen"] = json!(pen);
+                        }
+                        if let Some(style) = style {
+                            params["style"] = json!(style);
                         }
                         params
                     },
@@ -757,6 +773,7 @@ mod tests {
                 Action::Tool {
                     id: "fixture".into(),
                     points,
+                    style: None,
                     pen: Some(Pen {
                         stroke_color: "#123abc".into(),
                         stroke_width_pt: 1.5,
@@ -767,7 +784,10 @@ mod tests {
                 panic!("tool scope");
             };
             assert_eq!(points, count);
-            assert_eq!(params["pen"], json!({"strokeColor": "#123abc", "strokeWidthPt": 1.5}));
+            assert_eq!(
+                params["pen"],
+                json!({"strokeColor": "#123abc", "strokeWidthPt": 1.5})
+            );
             if count == 2 {
                 assert_eq!(params["points"][0]["x"], 40.0);
                 assert_eq!(params["points"][0]["y"], 25.0);
@@ -780,12 +800,37 @@ mod tests {
     }
 
     #[test]
+    fn tool_capture_validates_the_core_shape_style_instead_of_a_pen() {
+        let snapshot = fixture();
+        for (width, valid) in [(2.5, true), (-1.0, false)] {
+            let style = json!({"strokeColor":"#123abc", "strokeWidthPt":width, "fillColor":null,
+                "opacity":0.8, "pattern":"dotted", "patternSpacing":1.5});
+            let action = serde_json::from_value(json!({"kind":"tool", "id":"fixture",
+                "points":[{"x":1.0, "y":2.0, "attach":null}], "style":style}))
+            .unwrap();
+            match capture(&snapshot, "connectors", action) {
+                Ok((_, Invocation::Tool { params, .. }, _)) if valid => {
+                    assert_eq!(params["style"], style);
+                    assert!(params.get("pen").is_none());
+                }
+                Err(_) if !valid => {}
+                _ => panic!("unexpected tool style validation"),
+            }
+        }
+    }
+
+    #[test]
     fn tool_capture_rejects_an_invalid_pen() {
         let snapshot = fixture();
         for pen in [("red", 1.0), ("#123abc", f64::NAN), ("#123abc", 0.0)] {
             let action = Action::Tool {
                 id: "fixture".into(),
-                points: vec![Point { x: 1.0, y: 2.0, attach: None }],
+                points: vec![Point {
+                    x: 1.0,
+                    y: 2.0,
+                    attach: None,
+                }],
+                style: None,
                 pen: Some(Pen {
                     stroke_color: pen.0.into(),
                     stroke_width_pt: pen.1,
