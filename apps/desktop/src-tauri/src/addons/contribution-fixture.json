@@ -1,0 +1,27 @@
+{
+  "manifestVersion": 1,
+  "id": "fixture",
+  "version": "0.1.0",
+  "apiVersion": "goodtype-api 0.1",
+  "target": "x86_64-pc-windows-msvc",
+  "entrypoint": "goodtype-fixture.exe",
+  "transport": "stdio-jsonrpc",
+  "permissions": ["add-page-objects", "read-pages"],
+  "commands": [
+    {
+      "id": "insert-diagram", "label": "insert", "surface": "insert-form",
+      "form": [
+        {"id":"title","label":"title","type":"text","maxLength":40,"default":"Parabola"},
+        {"id":"count","label":"count","type":"number","min":1,"max":9,"step":2,"default":1},
+        {"id":"color","label":"color","type":"choice","default":"blue","choices":[{"value":"blue","label":"blue"},{"value":"green","label":"green"}]}
+      ]
+    },
+    {"id":"worksheet","label":"generate","surface":"page-generator","form":[]},
+    {"id":"export-diagrams","label":"format","surface":"export","format":{"extension":"json","label":"format"}}
+  ],
+  "settings": [{"id":"outline","label":"outline","search":"contour","type":"toggle","default":false}],
+  "strings": {
+    "en":{"name":"Diagram tools","insert":"Insert diagram","generate":"Diagram worksheet","title":"Diagram title","count":"Count","color":"Color","blue":"Blue","green":"Green","format":"Diagram JSON","outline":"Show outlines","contour":"Contours"},
+    "de":{"name":"Diagrammwerkzeuge","insert":"Diagramm einfügen","generate":"Diagramm-Arbeitsblatt","title":"Diagrammtitel","count":"Anzahl","color":"Farbe","blue":"Blau","green":"Grün","format":"Diagramm-JSON","outline":"Konturen anzeigen","contour":"Umrisse"}
+  }
+}

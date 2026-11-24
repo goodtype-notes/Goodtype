@@ -257,6 +257,11 @@ pub fn close_notebook_session(
 ) -> Result<(), String> {
     let canonical = ensure_allowed(&roots, &root)?;
     crate::computation::end_root_sessions(&computation, &canonical)?;
+    app.state::<crate::addons::selection::Proposals>()
+        .forget_root(&canonical);
+    if let Some(forms) = app.try_state::<crate::addons::contributions::PendingForms>() {
+        forms.forget_root(&canonical);
+    }
     clear_active_recent(&app, &path_string(canonical.clone())?)?;
     histories.forget_root(&canonical)
 }

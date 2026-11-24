@@ -13,3 +13,7 @@
 *.otf binary
 *.zip binary
 *.exe binary
+
+# The detached signature covers the exact index bytes, including line endings.
+apps/desktop/src-tauri/src/addons/registry-snapshot/* -text
+apps/desktop/src-tauri/src/addons/registry-snapshot/*.sig binary

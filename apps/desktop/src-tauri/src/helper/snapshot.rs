@@ -503,32 +503,14 @@ fn ink_bounds(bundle: &NotebookSnapshot, object: &PageObject) -> Option<serde_js
     let PageObject::InkGroup { stroke_ids, .. } = object else {
         return None;
     };
-    let mut bounds = [
-        f64::INFINITY,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-        f64::NEG_INFINITY,
-    ];
-    for s in bundle
-        .ink_layers
-        .iter()
-        .flat_map(|l| &l.strokes)
-        .filter(|s| stroke_ids.contains(&s.id))
-    {
-        for p in &s.points {
-            let t = &s.transform;
-            let r = t.rotation.to_radians();
-            let x = p.x * t.scale_x;
-            let y = p.y * t.scale_y;
-            let x2 = x * r.cos() - y * r.sin() + t.translate_x;
-            let y2 = x * r.sin() + y * r.cos() + t.translate_y;
-            bounds[0] = bounds[0].min(x2);
-            bounds[1] = bounds[1].min(y2);
-            bounds[2] = bounds[2].max(x2);
-            bounds[3] = bounds[3].max(y2);
-        }
-    }
-    bounds.iter().all(|v| v.is_finite()).then(|| serde_json::json!({"x":bounds[0],"y":bounds[1],"width":bounds[2]-bounds[0],"height":bounds[3]-bounds[1]}))
+    let [x, y, right, bottom] = goodtype_core::outline::stroke_bounds(
+        bundle
+            .ink_layers
+            .iter()
+            .flat_map(|layer| &layer.strokes)
+            .filter(|stroke| stroke_ids.contains(&stroke.id)),
+    )?;
+    Some(serde_json::json!({"x":x,"y":y,"width":right-x,"height":bottom-y}))
 }
 
 #[cfg(test)]

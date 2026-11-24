@@ -97,6 +97,16 @@ describe("bundled English and German interface", () => {
     if (smoothing.control.kind === "slider") expect(smoothing.control.format(0.2)).toBe("0,20");
   });
 
+  it("finds Browse addons and the global policies in both languages", () => {
+    for (const language of ["en", "de"] as const) {
+      setLanguage(language);
+      const groups = settingGroups(get(t));
+      expect(searchSettings(translate("addons.store.browse"), groups).map(hit => hit.item.id)).toContain("addons:browse");
+      expect(searchSettings(translate("addons.manager.global"), groups).map(hit => hit.item.id)).toContain("addons:direct-apply");
+      expect(searchSettings(translate("addons.manager.autoCheck"), groups).map(hit => hit.item.id)).toContain("addons:auto-check");
+    }
+  });
+
   it("renders German semantic controls and escapes user-provided details", () => {
     setLanguage("de");
     const { body } = render(SettingsPanel, { props: {

@@ -229,7 +229,7 @@ pub(crate) async fn on_notebook<T: Send + 'static>(
 
 /// As [`on_notebook`], for the operations scoped to one page: resolves the `(root, page)` history
 /// entry so that keying stays in one place.
-async fn on_page<T: Send + 'static>(
+pub(crate) async fn on_page<T: Send + 'static>(
     roots: &tauri::State<'_, AllowedRoots>,
     histories: &tauri::State<'_, NotebookHistories>,
     root: String,
@@ -633,6 +633,129 @@ pub async fn insert_helper_proposal(
                 result,
                 asset_paths: None,
             })
+        },
+    )
+    .await
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddonInvocation {
+    review: crate::addons::selection::Review,
+    direct: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AddonSelection {
+    root: String,
+    page_id: String,
+    stroke_ids: Vec<String>,
+    addon_id: String,
+    command: String,
+    request_id: String,
+    review_first: bool,
+}
+
+#[tauri::command]
+pub async fn invoke_addon_selection(
+    roots: tauri::State<'_, AllowedRoots>,
+    histories: tauri::State<'_, NotebookHistories>,
+    app: tauri::AppHandle,
+    selection: AddonSelection,
+) -> Result<AddonInvocation, NotebookError> {
+    use crate::addons::selection as addons;
+    let AddonSelection {
+        root,
+        page_id,
+        stroke_ids,
+        addon_id,
+        command,
+        request_id,
+        review_first,
+    } = selection;
+    use tauri::Manager;
+    // Registered before the capture so a cancel during capture or verification is not lost.
+    let cancellation = app
+        .state::<addons::Proposals>()
+        .begin(&request_id)
+        .map_err(NotebookError::other)?;
+    let run_app = app.clone();
+    let result = async {
+        let capture = on_page(&roots, &histories, root, page_id, move |root, page, _| {
+            addons::capture(root, page, stroke_ids)
+        })
+        .await?;
+        tauri::async_runtime::spawn_blocking(move || {
+            addons::invoke(
+                &run_app,
+                &addon_id,
+                &command,
+                capture,
+                cancellation,
+                review_first,
+            )
+        })
+        .await
+        .map_err(NotebookError::other)?
+        .map_err(NotebookError::from)
+    }
+    .await;
+    app.state::<addons::Proposals>().finish(&request_id);
+    let (review, direct) = result?;
+    Ok(AddonInvocation { review, direct })
+}
+
+#[tauri::command]
+pub async fn insert_content_shape(
+    roots: tauri::State<'_, AllowedRoots>,
+    histories: tauri::State<'_, NotebookHistories>,
+    app: tauri::AppHandle,
+    root: String,
+    page_id: String,
+    request: crate::addons::content::ShapeInsertion,
+) -> Result<crate::addons::content::InsertedShape, NotebookError> {
+    on_page(
+        &roots,
+        &histories,
+        root,
+        page_id,
+        move |root, page, history| {
+            crate::addons::content::insert(&app, root, page, history, request)
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn insert_addon_proposal(
+    roots: tauri::State<'_, AllowedRoots>,
+    histories: tauri::State<'_, NotebookHistories>,
+    app: tauri::AppHandle,
+    root: String,
+    page_id: String,
+    proposal: crate::helper::proposals::ProposalInsert,
+    direct: bool,
+) -> Result<Option<CommitResult>, NotebookError> {
+    on_page(
+        &roots,
+        &histories,
+        root,
+        page_id,
+        move |root, page_id, history| {
+            Ok(crate::addons::selection::insert(
+                &app,
+                root,
+                page_id,
+                history,
+                &proposal.proposal_id,
+                proposal.proposal_version,
+                direct,
+            )?
+            .map(|result| CommitResult {
+                result,
+                asset_paths: None,
+            }))
         },
     )
     .await

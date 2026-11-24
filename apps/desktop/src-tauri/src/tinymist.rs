@@ -417,23 +417,24 @@ impl Client {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             command.creation_flags(CREATE_NO_WINDOW);
         }
-        let mut child = command
-            .arg("lsp")
-            .current_dir(&root)
-            .env("TINYMIST_LOG", "error")
-            .env("HTTP_PROXY", &proxy_url)
-            .env("HTTPS_PROXY", &proxy_url)
-            .env("ALL_PROXY", &proxy_url)
-            .env("NO_PROXY", "")
-            .env("http_proxy", &proxy_url)
-            .env("https_proxy", &proxy_url)
-            .env("all_proxy", &proxy_url)
-            .env("no_proxy", "")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| format!("Could not start Tinymist {TINYMIST_VERSION}: {error}"))?;
+        let mut child = crate::sandbox::spawn(
+            command
+                .arg("lsp")
+                .current_dir(&root)
+                .env("TINYMIST_LOG", "error")
+                .env("HTTP_PROXY", &proxy_url)
+                .env("HTTPS_PROXY", &proxy_url)
+                .env("ALL_PROXY", &proxy_url)
+                .env("NO_PROXY", "")
+                .env("http_proxy", &proxy_url)
+                .env("https_proxy", &proxy_url)
+                .env("all_proxy", &proxy_url)
+                .env("no_proxy", "")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped()),
+        )
+        .map_err(|error| format!("Could not start Tinymist {TINYMIST_VERSION}: {error}"))?;
 
         let input = Arc::new(Mutex::new(
             child.stdin.take().ok_or("Tinymist stdin is unavailable")?,

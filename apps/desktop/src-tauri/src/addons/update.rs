@@ -4,10 +4,7 @@ use std::io::Read;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::Deserialize;
 
-use super::{
-    MAX_PACKAGE_BYTES, PROTOCOL_VERSION, PinnedRelease, ReleaseView, SCHEMA_VERSION, TARGET, Tool,
-    github_asset,
-};
+use super::{Addon, MAX_PACKAGE_BYTES, PROTOCOL_VERSION, PinnedRelease, TARGET, github_asset};
 
 const MAX_DESCRIPTOR: u64 = 64 * 1024;
 
@@ -30,21 +27,14 @@ impl VerifiedUpdate {
             decoder_commit: &self.decoder_commit,
         }
     }
-
-    pub fn view(&self) -> ReleaseView {
-        ReleaseView {
-            version: self.version.clone(),
-            size_bytes: self.size,
-        }
-    }
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Descriptor {
     version: String,
-    protocol_version: u64,
-    notebook_schema_version: u32,
+    protocol_version: Option<u64>,
+    notebook_schema_version: Option<u32>,
     target: String,
     source_dirty: bool,
     source_commit: String,
@@ -81,21 +71,36 @@ fn stable_version(version: &str) -> Result<[u32; 3], String> {
         .map_err(|_| "not a three-part importer version".into())
 }
 
-pub(super) fn require_newer(version: &str, installed: &str) -> Result<(), String> {
+#[cfg(test)]
+fn require_newer(version: &str, installed: &str) -> Result<(), String> {
     if stable_version(version)? <= stable_version(installed)? {
         return Err("a newer or equal importer version is already installed".into());
     }
     Ok(())
 }
 
-fn is_hash(value: &str, length: usize) -> bool {
+pub(super) fn is_hash(value: &str, length: usize) -> bool {
     value.len() == length && value.bytes().all(|c| c.is_ascii_hexdigit())
+}
+
+pub(super) fn verify_signature(
+    bytes: &[u8],
+    signature: &[u8],
+    key: &[u8; 32],
+) -> Result<(), String> {
+    VerifyingKey::from_bytes(key)
+        .map_err(|_| "invalid release verification key")?
+        .verify_strict(
+            bytes,
+            &Signature::from_slice(signature).map_err(|_| "invalid release signature length")?,
+        )
+        .map_err(|_| "invalid release signature".into())
 }
 
 /// Authenticates `bytes` with `key` and checks they describe a compatible, clean, stable release
 /// of `tool` from its own repository.
 fn verify(
-    tool: &Tool,
+    tool: &Addon,
     bytes: &[u8],
     signature: &[u8],
     key: &[u8; 32],
@@ -103,27 +108,35 @@ fn verify(
     if bytes.len() as u64 > MAX_DESCRIPTOR {
         return Err("importer update metadata is too large".into());
     }
-    VerifyingKey::from_bytes(key)
-        .map_err(|_| "invalid importer verification key")?
-        .verify_strict(
-            bytes,
-            &Signature::from_slice(signature).map_err(|_| "invalid importer signature length")?,
-        )
-        .map_err(|_| "the importer update signature is invalid; the installed version was kept")?;
+    verify_signature(bytes, signature, key)?;
     let descriptor: Descriptor = serde_json::from_slice(bytes)
         .map_err(|error| format!("invalid importer update metadata ({error})"))?;
     stable_version(&descriptor.version)?;
     if descriptor.source_dirty
         || !is_hash(&descriptor.source_commit, 40)
-        || !is_hash(&descriptor.decoder_commit, 40)
+        || if tool.imports_notebooks() {
+            !is_hash(&descriptor.decoder_commit, 40)
+        } else {
+            !descriptor.decoder_commit.is_empty()
+        }
         || !is_hash(&descriptor.archive.sha256, 64)
     {
         return Err("importer update is not a clean, identified release".into());
     }
-    if descriptor.protocol_version != PROTOCOL_VERSION
-        || descriptor.notebook_schema_version != SCHEMA_VERSION
-        || descriptor.target != TARGET
-    {
+    // Only the importer CLI protocol carries versions here. Importers may write any notebook
+    // schema this Goodtype reads; the core reader validates every imported notebook before it
+    // is published. Session addons are bound by their `goodtype-api` manifest and handshake.
+    let compatible = if tool.imports_notebooks() {
+        descriptor.protocol_version == Some(PROTOCOL_VERSION)
+            && descriptor
+                .notebook_schema_version
+                .is_some_and(super::importable_schema)
+    } else if tool.is_content() {
+        descriptor.protocol_version.is_none() && descriptor.notebook_schema_version.is_none()
+    } else {
+        true
+    };
+    if !compatible || descriptor.target != TARGET {
         return Err("the newest importer requires a different Goodtype version; the installed version was kept".into());
     }
     let name = format!("{}-{}-windows-x64.zip", tool.package, descriptor.version);
@@ -144,62 +157,83 @@ fn verify(
     })
 }
 
-fn fetch(tool: &Tool, url: &str, limit: u64) -> Result<Vec<u8>, String> {
+pub(super) fn fetch(
+    url: &str,
+    limit: u64,
+    allowed: impl Fn(&str, bool) -> bool,
+) -> Result<Vec<u8>, super::registry::Problem> {
     let mut bytes = Vec::new();
-    github_asset(tool, url, true)?
+    github_asset(url, allowed)?
         .into_reader()
         .take(limit + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| format!("the importer update check was interrupted ({error})"))?;
+        .map_err(|_| super::registry::Problem::Offline)?;
     if bytes.len() as u64 > limit {
-        return Err("importer update metadata exceeds its size limit".into());
+        return Err(super::registry::Problem::Invalid);
     }
     Ok(bytes)
 }
 
-pub(super) fn check(
-    tool: &Tool,
-    installed: Option<&str>,
-) -> Result<Option<VerifiedUpdate>, String> {
-    let bytes = fetch(tool, &tool.latest_descriptor(), MAX_DESCRIPTOR)?;
-    // This untrusted version is used only to form a fixed-repository signature URL.
-    let untrusted: Descriptor =
-        serde_json::from_slice(&bytes).map_err(|_| "malformed importer release descriptor")?;
-    stable_version(&untrusted.version)?;
-    let signature = fetch(
-        tool,
-        &format!(
-            "{}/v{}/importer-update.json.sig",
-            tool.release_url(),
-            untrusted.version
-        ),
-        64,
-    )?;
+/// The signed descriptor each kind of addon release publishes beside its ZIP. Math's published
+/// releases name theirs `recognizer-update.json`; looking for the importer name broke installing it.
+pub(super) fn descriptor_name(tool: &Addon) -> &'static str {
+    match tool.kind {
+        super::Kind::Content => "content-update.json",
+        super::Kind::Import { .. } => "importer-update.json",
+        super::Kind::Recognize { .. } => "recognizer-update.json",
+        super::Kind::Objects { .. } => "addon-update.json",
+    }
+}
+
+pub(super) fn descriptor_for(
+    tool: &Addon,
+    release: &super::registry::Release,
+) -> Result<VerifiedUpdate, String> {
+    let (folder, _) = release
+        .url
+        .rsplit_once('/')
+        .ok_or("invalid addon asset URL")?;
+    let allowed = |url: &str, redirected| super::download_url_allowed(tool, url, redirected);
+    let name = descriptor_name(tool);
+    let bytes = fetch(&format!("{folder}/{name}"), MAX_DESCRIPTOR, allowed)
+        .map_err(|problem| format!("cannot read the addon descriptor ({problem:?})"))?;
+    let signature = fetch(&format!("{folder}/{name}.sig"), 64, allowed)
+        .map_err(|problem| format!("cannot read the addon signature ({problem:?})"))?;
     let verified = verify(
         tool,
         &bytes,
         &signature,
         &tool.public_key.ok_or("no signed update key is available")?,
     )?;
-    if let Some(version) = installed.or_else(|| tool.pinned.as_ref().map(|pin| pin.version)) {
-        let ordering = stable_version(&verified.version)?.cmp(&stable_version(version)?);
-        if !ordering.is_gt() {
-            return Ok(None);
-        }
+    if verified.version != release.version
+        || verified.url != release.url
+        || verified.size != release.size
+        || !verified.sha256.eq_ignore_ascii_case(&release.sha256)
+    {
+        return Err("signed addon descriptor differs from its index entry".into());
     }
-    Ok(Some(verified))
+    Ok(verified)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::{GOODNOTES, ONENOTE};
+    use super::super::catalog::{GOODNOTES, ONENOTE};
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
     use serde_json::json;
 
-    fn descriptor(tool: &Tool) -> serde_json::Value {
+    #[test]
+    fn each_kind_reads_the_descriptor_its_releases_publish() {
+        use super::super::catalog::{CONNECTORS, ENGINEERING, MATH};
+        assert_eq!(descriptor_name(&GOODNOTES), "importer-update.json");
+        assert_eq!(descriptor_name(&MATH), "recognizer-update.json");
+        assert_eq!(descriptor_name(&ENGINEERING), "content-update.json");
+        assert_eq!(descriptor_name(&CONNECTORS), "addon-update.json");
+    }
+
+    fn descriptor(tool: &Addon) -> serde_json::Value {
         let name = format!("{}-0.1.1-windows-x64.zip", tool.package);
-        json!({"version":"0.1.1", "protocolVersion":1, "notebookSchemaVersion":SCHEMA_VERSION,
+        json!({"version":"0.1.1", "protocolVersion":1, "notebookSchemaVersion":goodtype_core::SCHEMA_VERSION,
             "target":TARGET, "sourceDirty":false, "sourceCommit":"1".repeat(40), "decoderCommit":"2".repeat(40),
             "archive":{"fileName":name, "sizeBytes":1234,
                 "sha256":"3".repeat(64), "url":format!("{}/v0.1.1/{name}", tool.release_url())}})
@@ -264,6 +298,91 @@ mod tests {
     }
 
     #[test]
+    fn content_descriptors_omit_importer_fields() {
+        use super::super::catalog::ENGINEERING;
+        let key = SigningKey::from_bytes(&[42; 32]);
+        let check = |tool: &Addon, value: &serde_json::Value| {
+            let bytes = serde_json::to_vec(value).unwrap();
+            verify(
+                tool,
+                &bytes,
+                &key.sign(&bytes).to_bytes(),
+                key.verifying_key().as_bytes(),
+            )
+        };
+        // The shape the content packs' sign_release.py writes.
+        let mut value = descriptor(&ENGINEERING);
+        let object = value.as_object_mut().unwrap();
+        object.remove("protocolVersion");
+        object.remove("notebookSchemaVersion");
+        value["decoderCommit"] = json!("");
+        assert_eq!(check(&ENGINEERING, &value).unwrap().version, "0.1.1");
+        assert!(check(&ENGINEERING, &descriptor(&ENGINEERING)).is_err());
+        value["decoderCommit"] = json!("2".repeat(40));
+        assert!(check(&ENGINEERING, &value).is_err());
+        let mut importer = descriptor(&GOODNOTES);
+        importer.as_object_mut().unwrap().remove("protocolVersion");
+        assert!(check(&GOODNOTES, &importer).is_err());
+    }
+
+    #[test]
+    fn descriptor_versions_follow_each_addon_kind() {
+        use super::super::catalog::{CONNECTORS, MATH};
+        let key = SigningKey::from_bytes(&[42; 32]);
+        let check = |tool: &Addon, value: &serde_json::Value| {
+            let bytes = serde_json::to_vec(value).unwrap();
+            verify(
+                tool,
+                &bytes,
+                &key.sign(&bytes).to_bytes(),
+                key.verifying_key().as_bytes(),
+            )
+        };
+        // Importers: protocol 1, any notebook schema the core reads, an identified decoder.
+        let mut value = descriptor(&GOODNOTES);
+        for schema in [
+            goodtype_core::BINARY_INK_SCHEMA_VERSION,
+            goodtype_core::SCHEMA_VERSION,
+        ] {
+            value["notebookSchemaVersion"] = json!(schema);
+            assert!(check(&GOODNOTES, &value).is_ok(), "schema {schema}");
+        }
+        for (field, bad) in [
+            ("notebookSchemaVersion", json!(0)),
+            (
+                "notebookSchemaVersion",
+                json!(goodtype_core::SCHEMA_VERSION + 1),
+            ),
+            ("notebookSchemaVersion", json!(null)),
+            ("protocolVersion", json!(2)),
+            ("decoderCommit", json!("")),
+        ] {
+            let mut value = descriptor(&GOODNOTES);
+            value[field] = bad;
+            assert!(check(&GOODNOTES, &value).is_err(), "{field}");
+        }
+        // Session addons, as published by math 0.1.1 and connectors 0.1.0: no decoder, and the
+        // importer versions carry no meaning (the goodtype-api manifest decides).
+        for (tool, versions) in [
+            (
+                &MATH,
+                json!({"protocolVersion": 1, "notebookSchemaVersion": 0}),
+            ),
+            (&CONNECTORS, json!({})),
+        ] {
+            let mut value = descriptor(tool);
+            let object = value.as_object_mut().unwrap();
+            object.remove("protocolVersion");
+            object.remove("notebookSchemaVersion");
+            object.extend(versions.as_object().unwrap().clone());
+            object.insert("decoderCommit".into(), json!(""));
+            assert!(check(tool, &value).is_ok(), "{}", tool.id);
+            value["decoderCommit"] = json!("2".repeat(40));
+            assert!(check(tool, &value).is_err(), "{} decoder", tool.id);
+        }
+    }
+
+    #[test]
     fn versions_are_numeric_stable_and_cannot_downgrade() {
         assert!(require_newer("0.1.10", "0.1.9").is_ok());
         assert!(require_newer("0.1.1", "0.1.1").is_err());
@@ -281,27 +400,11 @@ mod tests {
         }
     }
 
-    fn tool_from_env() -> &'static Tool {
+    fn tool_from_env() -> &'static Addon {
         match std::env::var("IMPORTER_TOOL").as_deref() {
             Ok("onenote") => &ONENOTE,
             _ => &GOODNOTES,
         }
-    }
-
-    /// `IMPORTER_TOOL=onenote|goodnotes cargo test live_update -- --ignored --nocapture`
-    #[test]
-    #[ignore = "explicit live GitHub update discovery check"]
-    fn live_update_check_authenticates_the_published_stable_release() {
-        let tool = tool_from_env();
-        let release = check(tool, Some("0.0.0"))
-            .unwrap()
-            .expect("a signed stable release");
-        require_newer(&release.version, "0.0.0").unwrap();
-        assert!(release.url.starts_with(&tool.release_url()));
-        println!(
-            "Live update discovery authenticated {} importer {} ({} bytes).",
-            tool.id, release.version, release.size
-        );
     }
 
     /// `IMPORTER_TOOL=onenote|goodnotes IMPORTER_UPDATE_FIXTURE=<downloaded release assets>`

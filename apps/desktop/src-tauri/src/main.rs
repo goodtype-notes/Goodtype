@@ -1,13 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod addons;
 mod computation;
 mod export;
 mod helper;
-mod importer;
 mod library;
 mod notebook;
 mod preset;
 mod recognition;
+pub mod sandbox;
 mod settings;
 mod store;
 mod tinymist;
@@ -25,10 +26,25 @@ fn main() {
         .manage(computation::RuntimeState::default())
         .manage(helper::Helper::default())
         .manage(tinymist::Tinymist::default())
-        .manage(importer::Importers::default())
+        .manage(addons::Importers::default())
+        .manage(addons::registry::Checks::default())
         .manage(recognition::math_process::MathProcess::default())
+        .manage(addons::session::Runtime::default())
+        .manage(addons::objects::Reactions::default())
+        .manage(addons::selection::Proposals::default())
+        .manage(addons::contributions::PendingForms::default())
         .setup(|app| {
             let handle = app.handle().clone();
+            if let Err(error) = addons::content::setup(&handle) {
+                eprintln!("Content package setup failed: {error}");
+            }
+            if let Err(error) = addons::manager::startup(&handle) {
+                eprintln!("Addon startup verification failed: {error}");
+            }
+            // Crash leftovers: scratch before any session can start, then profiles and grants.
+            addons::session::sweep_scratch(&handle);
+            let sweeper = handle.clone();
+            std::thread::spawn(move || addons::session::sweep_grants(&sweeper));
             let policy = app.state::<settings::RemotePackages>();
             if let Ok(settings) = settings::load_app_settings(handle.clone()) {
                 policy.set(settings.remote_packages);
@@ -57,6 +73,22 @@ fn main() {
             helper::proposals::helper_request_change,
             helper::proposals::helper_edit_proposal,
             notebook::insert_helper_proposal,
+            notebook::invoke_addon_selection,
+            notebook::insert_addon_proposal,
+            addons::selection::addon_selection_commands,
+            addons::manager::addon_set_field,
+            addons::contributions::addon_contributions,
+            addons::objects::addon_object_action,
+            addons::objects::addon_react,
+            addons::objects::addon_apply_reaction,
+            addons::export::addon_export,
+            addons::contributions::addon_form_preview,
+            addons::contributions::addon_form_insert,
+            addons::contributions::addon_form_add_pages,
+            addons::contributions::addon_form_dismiss,
+            addons::selection::addon_cancel,
+            addons::selection::addon_edit,
+            addons::selection::addon_dismiss,
             notebook::apply_helper_cell_proposal,
             notebook::apply_helper_page_proposal,
             helper::helper_install_relay,
@@ -83,14 +115,31 @@ fn main() {
             library::library_favourites,
             library::set_library_favourite,
             library::list_library_favourites,
-            importer::importer_status,
-            importer::importer_install,
-            importer::importer_check_update,
-            importer::importer_update,
-            importer::importer_cancel,
-            importer::importer_dismiss,
-            importer::import_pick_source,
-            importer::import_start,
+            addons::addon_catalog,
+            addons::content::addon_content,
+            notebook::insert_content_shape,
+            #[cfg(debug_assertions)]
+            addons::content::addon_sideload_content,
+            addons::addon_install,
+            addons::addon_update,
+            addons::details::addon_details,
+            addons::manager::addon_list,
+            addons::manager::addon_approve,
+            addons::manager::addon_reset_policy,
+            addons::manager::addon_set_auto_check,
+            addons::registry::addon_check_registry,
+            addons::manager::addon_set_enabled,
+            addons::manager::addon_remove,
+            addons::manager::addon_rollback,
+            addons::manager::addon_set_direct_apply,
+            addons::importer_status,
+            addons::importer_install,
+            addons::importer_check_update,
+            addons::importer_update,
+            addons::importer_cancel,
+            addons::importer_dismiss,
+            addons::import::import_pick_source,
+            addons::import::import_start,
             workspace::phase0_notebook_root,
             workspace::pick_notebook_root,
             workspace::open_recent_root,
@@ -163,7 +212,7 @@ fn main() {
             recognition::recognize_ink_text,
             recognition::recognize_ink_math,
             recognition::prepare_math_recognition,
-            importer::remove_math_recognizer,
+            addons::recognize::remove_math_recognizer,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build Goodtype")

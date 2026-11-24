@@ -7,6 +7,7 @@ import {
   isEmptyBundle,
   PASTE_STEP_PT,
   pasteOffset,
+  pastedAddonData,
   pastedShapes,
   pastedStrokes,
   type ClipboardBundle,
@@ -65,6 +66,14 @@ describe("clipboard bundles", () => {
     const [copy] = pastedShapes([shape], { dx: 12, dy: 12 }, 9, 7, () => "shape-new");
     expect(copy).toMatchObject({ id: "shape-new", x: 62, y: 72, zIndex: 9, readingOrder: 7 });
     expect(copy.geometry).toEqual(shape.geometry);
+  });
+
+  it("remaps copied refs and retains external refs only when the original is on the destination", () => {
+    const data = { connectors: { refs: ["old", "kept", "missing"], data: { routing: "straight" } } };
+    expect(pastedAddonData(data, new Map([["old", "new"]]), new Set(["kept"]))).toEqual({
+      connectors: { refs: ["new", "kept"], data: data.connectors.data },
+    });
+    expect(data.connectors.refs).toEqual(["old", "kept", "missing"]);
   });
 
   it("centres a paste on the point that was clicked", () => {

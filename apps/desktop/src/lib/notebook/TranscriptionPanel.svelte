@@ -8,16 +8,18 @@
   import { t, notice, renderMessage, type UiText } from "../i18n";
   import { errorDetails } from "../ipc/errors";
   import {
-    cancelMathRecognizerDownload,
-    installMathRecognizer,
-    mathRecognizerStatus,
     prepareMathRecognition,
     recognizeInkMath,
     recognizeInkText,
     removeMathRecognizer,
     type InkPolylines,
+    type MathContext,
   } from "../ipc/recognition";
-  import { megabytes, type ImporterStatus } from "../ipc/importer";
+  import AddonApproval from "../workspace/AddonApproval.svelte";
+  import AddonPermissions from "../workspace/AddonPermissions.svelte";
+  import ConfirmDialog from "../workspace/ConfirmDialog.svelte";
+  import { ADDON_AVAILABILITY_CHANGED, mathRecognitionAddon, type RecognitionAddon } from "../ipc/addons";
+  import { cancelImporter, importerStatus, installImporter, megabytes, type ImporterStatus } from "../ipc/importer";
   import type { Bounds } from "../ink/selection";
   import { editDistance, transcriptionSource, type TranscriptionKind } from "./transcription";
 
@@ -28,15 +30,18 @@
   type Props = {
     polylines: InkPolylines;
     bounds: Bounds;
+    context: MathContext;
     recognizers: string[];
     math: ImporterStatus | null;
+    mathAddon: RecognitionAddon | null;
     onInsert: (source: string, label: UiText) => void;
     onClose: () => void;
   };
-  let { polylines, bounds, recognizers, math, onInsert, onClose }: Props = $props();
+  let { polylines, bounds, context, recognizers, math, mathAddon, onInsert, onClose }: Props = $props();
 
   let addon = $state<ImporterStatus | null>(null);
   let addonBusy = $state(false);
+  let confirmingRemoval = $state(false);
   let kind = $state<TranscriptionKind | null>(null);
   let busy = $state(false);
   /** A status line; `problem` ones are failures the writer has to act on. */
@@ -65,19 +70,33 @@
     message = { text: notice("transcription.failed", { details: errorDetails(error) }), problem: true };
   }
 
+  let loadedAddon = $state<RecognitionAddon | null>(null);
+  /** The workspace loads the catalog entry up front, so Math shows immediately; refresh keeps it current. */
+  const recognizerAddon = $derived(loadedAddon ?? mathAddon);
+
   /** Re-read the add-on, polling only while a download or install is running. */
   async function refresh() {
     clearTimeout(pollTimer);
     try {
-      const found = await mathRecognizerStatus();
+      const entry = await mathRecognitionAddon();
+      if (disposed || !entry) return;
+      loadedAddon = entry;
+      const found = await importerStatus(entry.id);
       if (disposed) return;
       addon = found;
+      if (found.disabled && kind === "math") {
+        request++;
+        kind = null;
+        message = null;
+        busy = false;
+        warmed = false;
+      }
       if (found.installed && !warmed) {
         // Load the model now, while the writer is still deciding, not when they press Math.
         warmed = true;
         void prepareMathRecognition().catch((error) => { if (!disposed) fail(error); });
       }
-      if (found.activity.kind === "downloading" || found.activity.kind === "installing") {
+      if (["downloading", "installing", "awaitingApproval"].includes(found.activity.kind)) {
         pollTimer = setTimeout(() => void refresh(), 400);
       }
     } catch (error) {
@@ -89,14 +108,21 @@
     addon = math;
     void refresh();
     firstChoice?.focus();
-    return () => { disposed = true; clearTimeout(pollTimer); request++; };
+    window.addEventListener(ADDON_AVAILABILITY_CHANGED, refresh);
+    return () => {
+      disposed = true;
+      clearTimeout(pollTimer);
+      request++;
+      window.removeEventListener(ADDON_AVAILABILITY_CHANGED, refresh);
+    };
   });
 
   async function download() {
+    if (!recognizerAddon) return;
     addonBusy = true;
     message = null;
     try {
-      await installMathRecognizer();
+      await installImporter(recognizerAddon.id);
     } catch (error) {
       fail(error);
     } finally {
@@ -106,7 +132,8 @@
   }
 
   async function cancelDownload() {
-    try { await cancelMathRecognizerDownload(); } catch (error) { fail(error); }
+    if (!recognizerAddon) return;
+    try { await cancelImporter(recognizerAddon.id); } catch (error) { fail(error); }
     void refresh();
   }
 
@@ -138,11 +165,16 @@
         const result = await recognizeInkText(polylines, recognizer || null);
         if (id === request) await show(result.text, null);
       } else {
-        const result = await recognizeInkMath(polylines);
+        const result = await recognizeInkMath(polylines, context);
         if (id !== request) return;
         if (result.typst === null) {
           rawLatex = result.latex;
-          await show("", { text: notice("transcription.unsupported", { detail: result.unsupported ?? "" }), problem: true });
+          await show("", {
+            text: result.unsupported
+              ? notice("transcription.unsupported", { detail: result.unsupported })
+              : notice("transcription.unsupportedLatex"),
+            problem: true,
+          });
         } else {
           await show(result.typst, null);
         }
@@ -207,11 +239,13 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6.5h14M12 6.5V18M9 18h6"></path></svg>
           <span>{$t("transcription.kindText")}</span>
         </button>
-        <button type="button" class:current={kind === "math"} aria-pressed={kind === "math"}
-          disabled={busy} onclick={() => void recognize("math")}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M9.5 4.5l3 3 3-3M9.5 16.5l3 3 3-3"></path></svg>
-          <span>{$t("transcription.kindMath")}</span>
-        </button>
+        {#if recognizerAddon && !(addon ?? math)?.disabled}
+          <button type="button" class:current={kind === "math"} aria-pressed={kind === "math"}
+            disabled={busy} onclick={() => void recognize("math")}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M9.5 4.5l3 3 3-3M9.5 16.5l3 3 3-3"></path></svg>
+            <span>{$t(`${recognizerAddon.i18nPrefix}.label`)}</span>
+          </button>
+        {/if}
       </div>
       {#if recognizers.length > 1 && kind !== "math"}
         <label class="language">
@@ -233,7 +267,7 @@
       <p class="message" class:problem={message.problem} role={message.problem ? "alert" : "status"}>{renderMessage(message.text, $t)}</p>
     {/if}
 
-    {#if offering}
+    {#if offering && recognizerAddon && !(addon ?? math)?.disabled}
       <section class="offer" aria-live="polite">
         {#if addon?.activity.kind === "downloading"}
           <p class="lead">{$t("transcription.downloadingAddon")}</p>
@@ -245,11 +279,18 @@
             <span class="figure">{$t("transcription.downloadProgress", { received: megabytes(addon.activity.received), total: megabytes(addon.activity.total) })}</span>
             <button type="button" class="control" onclick={() => void cancelDownload()}>{$t("transcription.cancel")}</button>
           </div>
+        {:else if addon?.activity.kind === "awaitingApproval"}
+          {#key addon.activity.approval.token}
+            <AddonApproval id={recognizerAddon.id} approval={addon.activity.approval} {refresh} />
+          {/key}
         {:else if addon?.activity.kind === "installing"}
           <p class="lead">{$t("transcription.installingAddon")}</p>
           <div class="progress indeterminate" role="progressbar" aria-label={$t("transcription.installation")}><span></span></div>
         {:else}
-          <p class="lead">{$t("transcription.addonLead")}</p>
+          <p class="lead">{$t(`${recognizerAddon.i18nPrefix}.description`)}</p>
+          {#if addon?.release}
+            <AddonPermissions permissions={addon.catalogPermissions} />
+          {/if}
           <dl class="facts">
             <dt>{$t("transcription.factSource")}</dt>
             <dd>{addon?.release ? $t("transcription.factSourceRelease", { size: megabytes(addon.release.sizeBytes) }) : $t("transcription.factSourceNone")}</dd>
@@ -261,7 +302,9 @@
           {#if addon?.activity.kind === "installFailed"}
             <p class="message problem" role="alert">{$t("transcription.failed", { details: addon.activity.message })}</p>
           {/if}
-          {#if addon?.installedProblem}
+          {#if addon?.needsReinstall}
+            <p class="message problem" role="alert">{$t("addons.manager.status.needs-reinstall")}</p>
+          {:else if addon?.installedProblem}
             <p class="message problem" role="alert">{$t("transcription.failed", { details: addon.installedProblem })}</p>
           {/if}
           {#if addon?.release && addon.platformSupported}
@@ -291,7 +334,7 @@
       <details class="addon">
         <summary>{$t("transcription.addonInstalled", { version: addon.installed })}</summary>
         <p class="hint">{$t("transcription.addonDetail")}</p>
-        <button type="button" class="control" disabled={addonBusy || busy} onclick={() => void removeAddon()}>{$t("transcription.removeAddon")}</button>
+        <button type="button" class="control" disabled={addonBusy || busy} onclick={() => confirmingRemoval = true}>{$t("transcription.removeAddon")}</button>
       </details>
     {/if}
   </div>
@@ -301,6 +344,13 @@
     <button type="button" class="primary" disabled={!kind || busy || offering || !value.trim()} onclick={insert}>{$t("transcription.insert")}</button>
   </footer>
 </div>
+
+{#if confirmingRemoval && recognizerAddon}
+  <ConfirmDialog title={$t("addons.manager.confirmTitle", { name: $t(`${recognizerAddon.i18nPrefix}.label`) })}
+    detail={$t("addons.manager.confirmDetail")} confirmLabel={$t("addons.manager.remove")}
+    onCancel={() => confirmingRemoval = false}
+    onConfirm={() => { confirmingRemoval = false; void removeAddon(); }} />
+{/if}
 
 <style>
   .transcription {

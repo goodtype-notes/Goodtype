@@ -17,7 +17,7 @@
   import { createSelection } from "./selectionEditing.svelte";
   import { createNavigation } from "./viewportNavigation.svelte";
   import { patternLabel, shapeLabel, toolMessage, toolLabel } from "../i18n/labels";
-  import { setLanguage, t, formatNumber, displayLocale, notice, renderMessage, type UiText } from "../i18n";
+  import { setLanguage, t, locale, formatNumber, displayLocale, notice, renderMessage, type UiText } from "../i18n";
   import { errorDetails } from "../ipc/errors";
   import { onDestroy, onMount, tick, untrack } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -69,17 +69,29 @@
   import HelperCrop from "../helper/HelperCrop.svelte";
   import MixedSelection from "./MixedSelection.svelte";
   import { DEFAULT_LASSO_TARGETS } from "./lasso";
-  import { type PaletteCommand, type PaletteDock } from "./palette";
+  import { addonPaletteId, type PaletteCommand, type PaletteDock } from "./palette";
   import { newInkZIndex } from "./objectOrder";
   import { cycledTab } from "./tabs";
   import { addWidth as addRowWidth, canRemoveWidth, editWidth as editRowWidth, movePattern, moveSpacing, patternForWidth, prunePatterns, pruneSpacings, removeWidth as removeRowWidth, spacingForWidth, withWidthPattern, withWidthSpacing, widthTaken, WIDTH_BOUNDS_MM } from "./widths";
   import ConfirmDialog from "../workspace/ConfirmDialog.svelte";
   import TranscriptionPanel from "./TranscriptionPanel.svelte";
+  import AddonForm from "../workspace/addons/AddonForm.svelte";
+  import AddonCommandPanel from "./AddonCommandPanel.svelte";
+  import { completeSelectedGroups } from "./clipboard";
+  import AddonToolSurface from "./AddonToolSurface.svelte";
+  import AddonToolOptions from "./AddonToolOptions.svelte";
+  import { defaultAddonStrokeSlot, fitsAddonSegments, toolFieldPresentation, type AddonStrokeSlot } from "./addonToolSettings";
+  import { ADDON_AVAILABILITY_CHANGED, addonContributions, setAddonField, type AddonValue, addonSelectionCommands, addonText, contributionText, type AddonContribution, type AddonTool, type ContributionEntry, type SelectionCommand } from "../ipc/addons";
   import { recognitionCapabilities, type InkPolylines, type RecognitionCapabilities } from "../ipc/recognition";
   import { inkPolylines, polylineBounds, shapePolylines, transcriptionPlacement } from "./transcription";
   import ConflictDialog from "../workspace/ConflictDialog.svelte";
   import RecoveryDialog from "../workspace/RecoveryDialog.svelte";
   import SearchOverlay from "../workspace/SearchOverlay.svelte";
+  import ShapePanel from "../workspace/addons/ShapePanel.svelte";
+  import PackShapePreview from "../workspace/addons/PackShapePreview.svelte";
+  import { applyTheme, contentPacks, installedThemes, packText, shapeLibraries, type ContentPack, type PackShape, type ShapeChoice } from "../workspace/addons/content";
+  import { createTapTracker, dropPoint, loadRecent, nextStamp, previewMargin, rememberShape, saveRecent, sameShape, type ShapeDrag } from "../workspace/addons/shapePanel";
+  import AddonStore from "../workspace/addons/AddonStore.svelte";
   import SettingsPanel from "../workspace/SettingsPanel.svelte";
   import LibrarySurface from "../library/LibrarySurface.svelte";
   import { SHELF_ROOT, type ShelfLocation } from "../library/location";
@@ -273,6 +285,7 @@
     set activeInkLayerPath(value) { session.activeInkLayerPath = value; },
     get activePageId() { return session.activePageId; },
     get activeSnapshot() { return session.activeSnapshot; },
+    addCopiedGroups: (groups) => session.addCopiedGroups(groups),
     set activeSnapshot(value) { session.activeSnapshot = value; },
     get changeStrokes() { return session.changeStrokes; },
     get closeToolCard() { return closeToolCard; },
@@ -327,7 +340,8 @@
     get pageViewport() { return pageViewport; },
     set pageViewport(value) { pageViewport = value; },
     get routeHistory() { return session.routeHistory; },
-    get routeObjectPointer() { return selection.routeObjectPointer; },
+    // While stamping, a navigating finger pans or places; it never grabs the object under it.
+    get routeObjectPointer() { return shapeStamp ? () => {} : selection.routeObjectPointer; },
     get scheduleFocus() { return session.scheduleFocus; },
     get scheduleResidency() { return session.scheduleResidency; },
     get settings() { return settings; },
@@ -357,8 +371,117 @@
   let recognition = $state<RecognitionCapabilities | null>(null);
   /** The ink under review, pinned to the page it came from (ADR 0040). */
   let transcribing = $state<{ pageId: string; polylines: InkPolylines; bounds: Bounds } | null>(null);
+  /** Installed addons' ink-selection commands (ADR 0045), refreshed when availability changes. */
+  let addonCommands = $state<SelectionCommand[]>([]);
+  /** One explicit addon run, pinned to the page and committed strokes it was started on. */
+  let addonRun = $state<{ key: number; pageId: string; strokeIds: string[]; command: SelectionCommand } | null>(null);
+  let addonRuns = 0;
+  let contributions = $state.raw<AddonContribution[]>([]);
+  let moreTrigger = $state<HTMLButtonElement>();
+  let formRun = $state<{ entries: ContributionEntry[]; position?: PagePosition; pageId: string; root: string }>();
+  $effect(() => {
+    if (formRun && (formRun.pageId !== session.activePageId || formRun.root !== session.root)) formRun = undefined;
+  });
+  async function closeAddonForm() {
+    const trigger = formRun?.position ? addPageTrigger : moreTrigger;
+    formRun = undefined;
+    await tick();
+    trigger?.focus();
+  }
+
+  const entries = (surface: ContributionEntry["command"]["surface"]) =>
+    contributions.filter(addon => addon.enabled).flatMap(addon =>
+      addon.commands.filter(command => command.surface === surface).map(command => ({ addon, command })));
+  const loadAddonCommands = () => {
+    void addonSelectionCommands().then(found => (addonCommands = found)).catch(() => (addonCommands = []));
+    void addonContributions().then(found => (contributions = found)).catch(() => (contributions = []));
+  };
   let zoom = $state(1);
   let tool = $state<InkTool>("pen");
+  let activeAddonTool = $state<{ addonId: string; toolId: string } | null>(null);
+  const addonTools = $derived(contributions.filter((addon) => addon.enabled)
+    .flatMap((addon) => (addon.tools ?? []).map((tool) => ({ addon, tool }))));
+  const visibleAddonTools = $derived(addonTools.filter(({ addon, tool }) =>
+    !settings.hiddenTools.includes(addonPaletteId(addon.addonId, tool.id))));
+  const selectedAddonTool = $derived(visibleAddonTools.find(({ addon, tool }) =>
+    addon.addonId === activeAddonTool?.addonId && tool.id === activeAddonTool.toolId));
+  const toolSettings = $derived(selectedAddonTool && {
+    ...selectedAddonTool.addon,
+    settings: selectedAddonTool.addon.settings.filter((field) => selectedAddonTool.tool.settings.includes(field.id)),
+  });
+  let addonCard = $state<HTMLElement | null>(null);
+  let addonSettingPending = $state(false);
+  let addonRailWidth = $state(0);
+  let workspaceWidth = $state(0);
+  let addonSegmentsWidth = $state(0);
+  const horizontalPalette = $derived.by(() => paletteDock === "top" || paletteDock === "bottom");
+  const addonSlotId = $derived(selectedAddonTool?.tool.stroke
+    ? addonPaletteId(selectedAddonTool.addon.addonId, selectedAddonTool.tool.id) : null);
+  const addonSlot = $derived.by(() => addonSlotId ? settings.addonStrokeSlots?.[addonSlotId] : undefined);
+  const addonSegments = $derived(toolSettings?.settings.filter(field => {
+    const mode = toolFieldPresentation(toolSettings, field, $locale);
+    return mode === "icons" || mode === "text-segments";
+  }) ?? []);
+  // Reserve room for the history controls in a narrow canvas, even when they can be relocated.
+  const addonSegmentsInRail = $derived.by(() =>
+    fitsAddonSegments(paletteDock, workspaceWidth, addonRailWidth, addonSegmentsWidth));
+  const addonCardFields = $derived(toolSettings?.settings.filter(field =>
+    !addonSegmentsInRail || !addonSegments.includes(field)) ?? []);
+
+  $effect(() => {
+    if (activeAddonTool && (!selectedAddonTool || session.activeCalculation)) {
+      activeAddonTool = null;
+      closeToolCard();
+    }
+  });
+
+  function updateAddonSlot(slot: AddonStrokeSlot, recentColors = settings.recentColors) {
+    if (!addonSlotId) return;
+    changeSettings({ ...settings, recentColors,
+      addonStrokeSlots: { ...settings.addonStrokeSlots, [addonSlotId]: slot } });
+  }
+
+  async function updateAddonToolField(id: string, value: AddonValue) {
+    if (!toolSettings || addonSettingPending) return;
+    const addonId = toolSettings.addonId;
+    addonSettingPending = true;
+    try {
+      await setAddonField(addonId, id, value);
+      contributions = contributions.map(addon => addon.addonId === addonId
+        ? { ...addon, values: { ...addon.values, [id]: value } } : addon);
+    } catch {
+      session.status = notice("addons.manager.policyFailed");
+    } finally {
+      addonSettingPending = false;
+    }
+  }
+
+  function closeAddonCard() {
+    const trigger = addonCard;
+    closeToolCard();
+    trigger?.focus();
+  }
+
+  function selectAddonTool(addon: AddonContribution, chosen: AddonTool, tile: HTMLElement) {
+    if (activeAddonTool?.addonId === addon.addonId && activeAddonTool.toolId === chosen.id) {
+      const open = !addonCard;
+      closeToolCard();
+      if (open && (chosen.stroke || chosen.settings.length)) {
+        addonCard = tile;
+      }
+      return;
+    }
+    activateTool("pen");
+    closeToolCard();
+    const id = addonPaletteId(addon.addonId, chosen.id);
+    if (chosen.stroke && !settings.addonStrokeSlots?.[id]) {
+      changeSettings({ ...settings, addonStrokeSlots: {
+        ...settings.addonStrokeSlots, [id]: defaultAddonStrokeSlot(settings, penPreset - 1),
+      } });
+    }
+    activeAddonTool = { addonId: addon.addonId, toolId: chosen.id };
+    session.status = notice("workspace.active", { value1: contributionText(addon, chosen.label, $locale) });
+  }
   let strokeMetrics = $state<StrokePerformance[]>([]);
   let compileMs = $state<number | null>(null);
   let zoomFrameMs = $state<number | null>(null);
@@ -623,7 +746,7 @@
     slot: number;
     anchor: number;
   } | null>(null);
-  let shapeCard = $state<{ anchor: number } | null>(null);
+  let shapeCard = $state<{ anchor: number; trigger: HTMLElement } | null>(null);
   let eraserEditor = $state<HTMLElement | null>(null);
   let lassoEditor = $state<HTMLElement | null>(null);
   let paletteEditor = $state<{ kind: "width" | "color"; index: number; anchor: HTMLElement; adding?: boolean } | null>(null);
@@ -645,6 +768,7 @@
   }
 
   function closeToolCard() {
+    addonCard = null;
     toolCard = null;
     shapeCard = null;
     paletteEditor = null;
@@ -660,9 +784,17 @@
 
   /// First press selects the tool; pressing the one already held opens its card — the same
   /// select-then-edit gesture the swatches use. Nothing opens by accident mid-sentence.
+  /// Picking any tool, even the one already in hand, ends stamping.
+  function stopStamp() {
+    if (!shapeStamp) return;
+    shapeStamp = nextStamp(shapeStamp, { type: "tool" });
+    hideShapeGhost();
+  }
+
   function selectOrOpenTool(kind: "pen" | "highlighter", slot: number, tile: HTMLElement) {
-    const alreadyActive =
-      kind === "highlighter" ? tool === "highlighter" : tool === "pen" && penPreset === slot;
+    stopStamp();
+    const alreadyActive = !activeAddonTool &&
+      (kind === "highlighter" ? tool === "highlighter" : tool === "pen" && penPreset === slot);
     if (!alreadyActive) {
       closeToolCard();
       if (kind === "pen") activateTool("pen", slot as 1 | 2);
@@ -674,6 +806,7 @@
   }
 
   function selectEraser(tile: HTMLElement) {
+    stopStamp();
     if (tool !== "eraser") {
       closeToolCard();
       activateTool("eraser");
@@ -685,6 +818,7 @@
   }
 
   function selectLasso(tile: HTMLElement) {
+    stopStamp();
     if (!keepsSelection(tool)) { closeToolCard(); activateTool("lasso"); return; }
     const alreadyOpen = lassoEditor === tile;
     closeToolCard();
@@ -698,18 +832,21 @@
   }
 
   function selectOrOpenShape(tile: HTMLElement) {
+    stopStamp();
     paletteEditor = null;
     if (tool !== "shape") {
       closeToolCard();
       activateTool("shape");
       return;
     }
-    shapeCard = shapeCard ? null : { anchor: swatchAnchor(tile) };
+    shapeCard = shapeCard ? null : { anchor: swatchAnchor(tile), trigger: tile };
     toolCard = null;
   }
 
   function selectPlainTool(activate: () => void) {
+    stopStamp();
     closeToolCard();
+    activeAddonTool = null;
     activate();
   }
 
@@ -744,7 +881,7 @@
   const selectedInk = $derived(session.strokes.filter((stroke) => selection.selectedStrokeIds.includes(stroke.id)));
   const selectedShape = $derived(session.shapes.find((shape) => shape.id === selection.selectedShapeId) ?? null);
   const selectedShapes = $derived(session.shapes.filter(shape => shape.id === selection.selectedShapeId || selection.lassoObjectIds.includes(shape.id)));
-  const restyling = $derived(selectedInk.length > 0 || selectedShapes.length > 0);
+  const restyling = $derived(!activeAddonTool && (selectedInk.length > 0 || selectedShapes.length > 0));
   const paletteContext = $derived<"ink" | "eraser" | null>(
     restyling || tool === "pen" || tool === "highlighter" || tool === "shape"
       ? "ink"
@@ -765,6 +902,7 @@
   }
   let moreOpen = $state(false);
   let addPageOpen = $state(false);
+  let addPageTrigger = $state<HTMLButtonElement>();
   let exportOpen = $state(false);
   let exportTrigger = $state<HTMLButtonElement>();
   // Remembered across openings for the session, so a repeated export is the button plus Enter.
@@ -804,6 +942,215 @@
         ),
       });
   }
+  let addonsOpen = $state(false);
+  let shapePanelOpen = $state(false);
+  let shapePanelTrigger = $state<HTMLButtonElement>();
+  /** The tile being stamped: every tap on a page places one copy until this is cleared. */
+  let shapeStamp = $state<ShapeChoice | null>(null);
+  let shapeRecent = $state<string[]>(loadRecent());
+  let shapeFailure = $state<UiText | null>(null);
+  let packs = $state.raw<ContentPack[]>([]);
+  let packsLoaded = $state(false);
+  let packRequest = 0;
+  const themes = $derived(installedThemes(packs, $locale));
+  const themeTokens = $derived(themes.find(theme => theme.value === settings.themeId)?.tokens);
+  const packPalettes = $derived(packs.flatMap(pack => pack.palettes.map(palette => ({
+    name: packText(pack, palette.label, $locale), colors: palette.colors,
+  }))));
+
+  async function loadPacks() {
+    const request = ++packRequest;
+    try {
+      const found = await contentPacks();
+      if (request !== packRequest) return;
+      packs = found;
+      packsLoaded = true;
+    } catch { /* Keep the last successful view during a transient IPC failure. */ }
+  }
+
+  $effect(() => {
+    if (themeTokens) return applyTheme(document.documentElement.style, themeTokens);
+  });
+  $effect(() => {
+    if (settingsReady && packsLoaded && settings.themeId && !themeTokens) {
+      changeSettings({ ...settings, themeId: "" });
+    }
+  });
+
+  const shapeShelves = $derived(shapeLibraries(packs, $locale));
+  const shapePanelAvailable = $derived(shapeShelves.length > 0 && session.pageOpen && Boolean(session.root));
+  const shapePen = () => settings.penPresets[penPreset - 1] ?? DEFAULT_SETTINGS.penPresets[0];
+  const stampItem = $derived(shapeStamp
+    ? shapeShelves.flatMap(shelf => shelf.items).find(row => sameShape(row.choice, shapeStamp))?.item ?? null
+    : null);
+
+  function toggleShapePanel() {
+    if (shapePanelOpen) { closeShapePanel(); return; }
+    addPageOpen = false;
+    closeToolCard();
+    shapeFailure = null;
+    shapePanelOpen = true;
+  }
+
+  function closeShapePanel() {
+    shapePanelOpen = false;
+    shapeStamp = nextStamp(shapeStamp, { type: "close" });
+    hideShapeGhost();
+    void tick().then(() => shapePanelTrigger?.focus());
+  }
+
+  $effect(() => {
+    if (!shapePanelAvailable && shapePanelOpen) { shapePanelOpen = false; shapeStamp = null; hideShapeGhost(); }
+  });
+  $effect(() => { if (session.activeCalculation || (shapeStamp && !stampItem)) shapeStamp = null; });
+
+  /// Docked above or below the palette's band, never over the palette itself.
+  let shapePanelInset = $state({ top: 12, bottom: 12 });
+  function measureShapePanelInset() {
+    const area = workspace?.getBoundingClientRect();
+    const bar = paletteElement?.getBoundingClientRect();
+    if (!area || !bar || paletteDock === "left" || paletteDock === "right") shapePanelInset = { top: 12, bottom: 12 };
+    else if (paletteDock === "bottom") shapePanelInset = { top: 12, bottom: Math.max(12, area.bottom - bar.top + 12) };
+    else shapePanelInset = { top: Math.max(12, bar.bottom - area.top + 12), bottom: 12 };
+  }
+  $effect(() => {
+    if (!shapePanelOpen || paletteDragging) return;
+    void paletteDock;
+    void session.activeCalculation;
+    void tick().then(measureShapePanelInset);
+    window.addEventListener("resize", measureShapePanelInset);
+    return () => window.removeEventListener("resize", measureShapePanelInset);
+  });
+
+  /// The visible part of the active page, for a placement made from the keyboard.
+  function visiblePageCentre() {
+    const view = pageViewport?.getBoundingClientRect();
+    const frame = pageFrame?.getBoundingClientRect();
+    const left = view && frame ? Math.max(view.left, frame.left) : 0;
+    const right = view && frame ? Math.min(view.right, frame.right) : 0;
+    const top = view && frame ? Math.max(view.top, frame.top) : 0;
+    const bottom = view && frame ? Math.min(view.bottom, frame.bottom) : 0;
+    return right > left && bottom > top ? navigation.pagePointAt((left + right) / 2, (top + bottom) / 2) : null;
+  }
+
+  /// One placement is one Rust insertion and one undo step. `at` is a client point on page
+  /// `pageId`; without it the item lands in the middle of what is visible.
+  async function placePackShape(choice: ShapeChoice, at: { x: number; y: number; pageId: string } | null, select: boolean) {
+    if (session.pageInputLocked || !session.root) return;
+    shapeFailure = null;
+    try {
+      if (at && at.pageId !== session.activePageId) {
+        await session.activatePage(at.pageId);
+        await tick();
+        if (session.activePageId !== at.pageId) return;
+      }
+      if (session.activeCalculation) return;
+      const point = at ? dropPoint(navigation, pageFrame?.getBoundingClientRect(), at.x, at.y) : visiblePageCentre();
+      if (at && !point) return;
+      const pen = shapePen();
+      await session.insertContentShape({ ...choice, scale: 1, point: point ?? undefined, penColor: pen.color, penWidthPt: pen.widthPt }, select);
+      shapeRecent = rememberShape(shapeRecent, choice);
+      saveRecent(shapeRecent);
+    } catch {
+      shapeFailure = notice("contentPacks.insertFailed");
+    }
+  }
+
+  // The ghost follows hover and drags through its style directly, so moving the pointer never
+  // touches reactive state or IPC; only which item it shows is state.
+  let shapeGhost = $state.raw<PackShape | null>(null);
+  let shapeGhostElement = $state<HTMLElement>();
+  let shapeGhostAt = { x: 0, y: 0 };
+  let shapeDragging = false;
+  const placeGhost = (element: HTMLElement | undefined) => {
+    if (element) element.style.transform = `translate(${shapeGhostAt.x}px, ${shapeGhostAt.y}px) translate(-50%, -50%)`;
+  };
+  function showShapeGhost(item: PackShape, x: number, y: number) {
+    shapeGhostAt = { x, y };
+    if (shapeGhost !== item) shapeGhost = item;
+    placeGhost(shapeGhostElement);
+  }
+  function hideShapeGhost() {
+    if (shapeGhost) shapeGhost = null;
+  }
+
+  /// The page a stamp press lands on, or null when it is on chrome, a control or a cell page.
+  function stampPage(target: EventTarget | null): string | null {
+    if (!(target instanceof Element) || !target.closest(".page-frame")) return null;
+    if (target.closest(".shape-panel, .selection-actions, .page-number, .calculation-stack-item, button, input, textarea, [contenteditable=true], .cm-editor")) return null;
+    return target.closest<HTMLElement>("[data-page-id]")?.dataset.pageId ?? null;
+  }
+  const stampTaps = createTapTracker();
+  let stampPointer: number | null = null;
+
+  function surroundPointerDown(event: PointerEvent) {
+    const pageId = shapeStamp ? stampPage(event.target) : null;
+    if (pageId && (event.pointerType !== "mouse" || event.button === 0)) {
+      stampTaps.down(event.pointerId, event.clientX, event.clientY, event.timeStamp, pageId);
+      // Pen, mouse and a drawing finger would otherwise write or grab objects. A finger that only
+      // navigates keeps its pan, pinch and history taps; it places on lift if it stayed put.
+      if (event.pointerType !== "touch" || navigation.fingerDraws(event)) {
+        stampPointer = event.pointerId;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+    } else if (shapeStamp && event.pointerType === "touch") stampTaps.cancel();
+    navigation.workspacePointerDown(event);
+  }
+
+  function surroundPointerMove(event: PointerEvent) {
+    if (shapeStamp) {
+      stampTaps.move(event.pointerId, event.clientX, event.clientY);
+      if (!shapeDragging) {
+        if (stampItem && event.pointerType !== "touch" && stampPage(event.target)) showShapeGhost(stampItem, event.clientX, event.clientY);
+        else hideShapeGhost();
+      }
+      if (stampPointer === event.pointerId) { event.stopPropagation(); return; }
+    }
+    navigation.workspacePointerMove(event);
+  }
+
+  function surroundPointerEnd(event: PointerEvent) {
+    if (stampTaps.owns(event.pointerId)) {
+      const tap = stampTaps.up(event.pointerId, event.clientX, event.clientY, event.timeStamp, event.type !== "pointerup");
+      if (tap && shapeStamp) void placePackShape(shapeStamp, tap, false);
+    }
+    if (stampPointer === event.pointerId) {
+      stampPointer = null;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    navigation.workspacePointerEnd(event);
+  }
+
+  function dragPackShape(drag: ShapeDrag) {
+    if (drag.phase === "move") {
+      shapeDragging = true;
+      showShapeGhost(drag.row.item, drag.x, drag.y);
+      return;
+    }
+    shapeDragging = false;
+    hideShapeGhost();
+    if (drag.phase !== "drop") return;
+    const pageId = stampPage(document.elementFromPoint(drag.x, drag.y));
+    if (pageId) void placePackShape(drag.row.choice, { x: drag.x, y: drag.y, pageId }, true);
+  }
+  let addonReturn: HTMLElement | null = null;
+  let workspaceElement: HTMLElement;
+  function openAddons(fromSettings = false) {
+    addonReturn = !fromSettings && document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    settingsOpen = false;
+    settingsInitialGroup = "appearance";
+    addonsOpen = true;
+  }
+  async function closeAddons() {
+    addonsOpen = false;
+    await tick();
+    (addonReturn?.isConnected ? addonReturn : workspaceElement)?.focus();
+  }
+
   let settingsOpen = $state(false);
   let settingsInitialGroup = $state("appearance");
   let settingsReady = $state(false);
@@ -857,6 +1204,10 @@
         })
         .catch(() => {});
       void recognitionCapabilities().then(found => (recognition = found)).catch(() => {});
+      loadAddonCommands();
+      window.addEventListener(ADDON_AVAILABILITY_CHANGED, loadAddonCommands);
+      window.addEventListener(ADDON_AVAILABILITY_CHANGED, loadPacks);
+      void loadPacks();
       const appWindow = getCurrentWindow();
       void appWindow
         .onCloseRequested(windowClose.handle)
@@ -884,6 +1235,8 @@
     window.removeEventListener("keydown", historyShortcut);
     window.removeEventListener("paste", selection.handlePaste);
     window.removeEventListener("resize", onResizeToolbar);
+    window.removeEventListener(ADDON_AVAILABILITY_CHANGED, loadAddonCommands);
+    window.removeEventListener(ADDON_AVAILABILITY_CHANGED, loadPacks);
   });
 
   $effect(() => {
@@ -1049,6 +1402,11 @@
         // status bar and the tab.
         entries: [
           ...($helper?.enabled ? [{ kind: "action" as const, id: "ask-ai", icon: "M5 5h14v10H10l-5 4Z", label: $t("helper.askAboutPage"), onSelect: $codexStatus?.available ? askAboutPage : explainAISetup }] : []),
+          ...(entries("insert-form").length && !session.activeSnapshot?.page.calculation ? [{
+            kind: "action" as const, id: "addon-insert", label: $t("addons.contributions.insertTitle"),
+            icon: "M12 5v14M5 12h14",
+            onSelect: () => { formRun = { entries: entries("insert-form"), pageId: session.activePageId, root: session.root }; },
+          }] : []),
           { kind: "action", id: "duplicate", label: $t("workspace.duplicatePage"), icon: "M9 9h10v12H9zM5 15V3h10v2", onSelect: session.duplicateActivePage },
         ],
       },
@@ -1162,6 +1520,13 @@
         title: group.title,
         sources: group.templates.map(template),
       })),
+      ...packs.filter(pack => pack.templates.length).map(pack => ({
+        id: pack.id,
+        title: packText(pack, "name", $locale),
+        sources: pack.templates.map(item => ({
+          ...template(item.template), label: packText(pack, item.label, $locale),
+        })),
+      })),
     ];
   }
 
@@ -1192,6 +1557,9 @@
   }
 
   function activateTool(next: InkTool, preset?: 1 | 2) {
+    if (activeAddonTool) closeToolCard();
+    activeAddonTool = null;
+    stopStamp();
     if (next === "eraser" && tool !== "eraser") toolBeforeEraser = { tool, preset: penPreset };
     if (next !== tool || (next === "pen" && preset !== undefined && preset !== penPreset)) {
       closeToolCard();
@@ -1241,25 +1609,25 @@
   });
 
   const activeWidthChips = $derived(
-    tool === "highlighter" && !restyling ? settings.highlighterWidths : settings.penWidths,
+    addonSlot?.widths ?? (tool === "highlighter" && !restyling ? settings.highlighterWidths : settings.penWidths),
   );
   const activeColorChips = $derived(
-    tool === "highlighter" && !restyling ? settings.highlighterSwatches : settings.penSwatches,
+    addonSlot?.colors ?? (tool === "highlighter" && !restyling ? settings.highlighterSwatches : settings.penSwatches),
   );
   // A mixed selection shares no width or colour, so nothing on the row reads as selected.
   const activeWidth = $derived(
-    restyling
+    addonSlot?.style.strokeWidthPt ?? (restyling
       ? (selectionStyle.widthPt ?? Number.NaN)
       : tool === "highlighter"
         ? settings.highlighter.widthPt
-        : settings.penPresets[penPreset - 1].widthPt,
+        : settings.penPresets[penPreset - 1].widthPt),
   );
   const activeInkColor = $derived(
-    restyling
+    addonSlot?.style.strokeColor ?? (restyling
       ? (selectionStyle.color ?? "")
       : tool === "highlighter"
         ? settings.highlighter.color
-        : settings.penPresets[penPreset - 1].color,
+        : settings.penPresets[penPreset - 1].color),
   );
 
   function nearestChip(chips: readonly number[], value: number): number {
@@ -1270,6 +1638,10 @@
 
   /// Picking a pen chip takes its pattern too: the pattern belongs to that width, not the pen.
   function setActiveWidth(widthPt: number) {
+    if (addonSlot) {
+      updateAddonSlot({ ...addonSlot, style: { ...addonSlot.style, strokeWidthPt: widthPt } });
+      return;
+    }
     if (restyling) {
       // A chip is a whole stroke — width, pattern and spacing — so picking it hands all three to
       // the selection, as it does to the pen.
@@ -1299,6 +1671,10 @@
   }
 
   function setActiveSpacing(spacing: number) {
+    if (addonSlot) {
+      updateAddonSlot({ ...addonSlot, style: { ...addonSlot.style, patternSpacing: spacing } });
+      return;
+    }
     if (restyling) {
       selection.restyleSelection({ patternSpacing: spacing });
       return;
@@ -1312,6 +1688,10 @@
 
   /// Sets the pattern of the chip being edited and draws with it, leaving the other widths alone.
   function setActivePattern(pattern: StrokePattern) {
+    if (addonSlot) {
+      updateAddonSlot({ ...addonSlot, style: { ...addonSlot.style, pattern } });
+      return;
+    }
     if (restyling) {
       selection.restyleSelection({ pattern });
       return;
@@ -1331,6 +1711,11 @@
   /// Point the active tool at a colour, and remember it as recently used. This changes which
   /// colour the pen writes with; it does not touch the swatch row.
   function setActiveColor(color: string) {
+    if (addonSlot) {
+      updateAddonSlot({ ...addonSlot, style: { ...addonSlot.style, strokeColor: color } },
+        withRecentColor(settings.recentColors, color));
+      return;
+    }
     if (restyling) {
       changeSettings({ ...settings, recentColors: withRecentColor(settings.recentColors, color) });
       selection.restyleSelection({ color });
@@ -1352,6 +1737,11 @@
   /// Replace the swatch at `index` for the active tool, and follow it with the active colour so
   /// editing the chip you are drawing with changes your ink immediately.
   function editSwatch(index: number, color: string) {
+    if (addonSlot) {
+      updateAddonSlot({ ...addonSlot, colors: addonSlot.colors.map((swatch, i) => i === index ? color : swatch),
+        style: { ...addonSlot.style, strokeColor: color } }, withRecentColor(settings.recentColors, color));
+      return;
+    }
     const key = tool === "highlighter" ? "highlighterSwatches" : "penSwatches";
     const swatches = settings[key].map((existing, position) =>
       position === index ? color : existing,
@@ -1364,6 +1754,13 @@
 
   /// Append a colour to the active tool's swatch row and select it.
   function addSwatch(color: string) {
+    if (addonSlot) {
+      const colors = addonSlot.colors.some(swatch => swatch.toLowerCase() === color.toLowerCase())
+        ? addonSlot.colors : [...addonSlot.colors, color].slice(0, MAX_SWATCHES);
+      updateAddonSlot({ ...addonSlot, colors, style: { ...addonSlot.style, strokeColor: color } },
+        withRecentColor(settings.recentColors, color));
+      return;
+    }
     const key = tool === "highlighter" ? "highlighterSwatches" : "penSwatches";
     if (settings[key].some((existing) => existing.toLowerCase() === color.toLowerCase())) {
       setActiveColor(color);
@@ -1423,6 +1820,11 @@
    */
   /// A new chip arrives whole: its width, and for a pen its pattern and spacing, in one write.
   function addWidth(widthPt: number, pattern: StrokePattern = "solid", spacing = 1) {
+    if (addonSlot) {
+      updateAddonSlot({ ...addonSlot, widths: addRowWidth(addonSlot.widths, widthPt, MAX_WIDTHS),
+        style: { ...addonSlot.style, strokeWidthPt: widthPt, pattern, patternSpacing: spacing } });
+      return;
+    }
     const widths = settings[widthKey()];
     const next = addRowWidth(widths, widthPt, MAX_WIDTHS);
     if (next === widths) session.status = notice("workspace.thePaletteHoldsAtMostWidths", { "MAX_WIDTHS": MAX_WIDTHS });
@@ -1435,6 +1837,11 @@
   }
 
   function editWidth(index: number, widthPt: number) {
+    if (addonSlot) {
+      updateAddonSlot({ ...addonSlot, widths: editRowWidth(addonSlot.widths, index, widthPt, MAX_WIDTHS),
+        style: { ...addonSlot.style, strokeWidthPt: widthPt } });
+      return;
+    }
     const previous = settings[widthKey()][index];
     const moves = tool !== "highlighter" && previous !== undefined;
     const patterns = moves
@@ -1452,6 +1859,11 @@
   }
 
   function removeWidth(index: number) {
+    if (addonSlot) {
+      const widths = removeRowWidth(addonSlot.widths, index);
+      updateAddonSlot({ ...addonSlot, widths, style: { ...addonSlot.style, strokeWidthPt: nearestChip(widths, activeWidth) } });
+      return;
+    }
     const widths = settings[widthKey()];
     const remaining = removeRowWidth(widths, index);
     if (remaining === widths) {
@@ -1462,6 +1874,10 @@
   }
 
   function removeSwatch(index: number) {
+    if (addonSlot) {
+      updateAddonSlot({ ...addonSlot, colors: addonSlot.colors.filter((_, position) => position !== index) });
+      return;
+    }
     const key = tool === "highlighter" ? "highlighterSwatches" : "penSwatches";
     if (settings[key].length <= 1) {
       session.status = notice("workspace.thePaletteKeepsAtLeastOneColor");
@@ -1554,6 +1970,43 @@
     transcribing = { pageId: session.activePageId, polylines, bounds };
   }
 
+  /** Ink-only selections on a canvas page; lassoed objects are never sent to an addon. */
+  function selectionAddonCommands() {
+    if (!tauriAvailable || session.activeCalculation) return [];
+    const ids = [...selection.lassoObjectIds, selection.selectedShapeId, selection.selectedImageId, selection.selectedTypstId]
+      .filter((id): id is string => id !== null);
+    const objects = session.activeSnapshot?.page.objects ?? [];
+    ids.push(...completeSelectedGroups(objects, new Set(ids)).map(({ id }) => id));
+    const selected = new Set(ids);
+    const owners = new Set(session.activeSnapshot?.page.objects
+      .filter((object) => selected.has(object.id))
+      .flatMap((object) => Object.keys(object.addonData ?? {})));
+    if (owners.size) return [...contributions.filter((addon) => addon.enabled && owners.has(addon.addonId))
+      .flatMap((addon) => addon.commands.filter((command) => command.surface === "own-object").map((command) => {
+        const label = contributionText(addon, command.label, $locale);
+        return { id: `${addon.addonId}-${command.id}`, label,
+          onSelect: () => void session.applyAddonObjectAction(addon.addonId,
+            { kind: "command", id: command.id, selected: ids }, label) };
+      })), ...[...owners].map((addon) => ({
+      id: `detach-${addon}`,
+      label: $t("addons.detach", { addon }),
+      onSelect: () => void session.detachAddon(addon, ids),
+    }))];
+    if (!selection.selectedStrokeIds.length || ids.length) return [];
+    return addonCommands.map(command => ({
+      id: `${command.addonId}-${command.command}`,
+      label: addonText(command.label, $locale),
+      onSelect: () => {
+        transcribing = null;
+        addonRun = { key: ++addonRuns, pageId: session.activePageId, strokeIds: [...selection.selectedStrokeIds], command };
+      },
+    }));
+  }
+
+  $effect(() => {
+    if (addonRun && addonRun.pageId !== session.activePageId) addonRun = null;
+  });
+
   function insertTranscription(source: string, label: UiText) {
     const review = transcribing;
     transcribing = null;
@@ -1567,7 +2020,19 @@
   });
 
   function historyShortcut(event: KeyboardEvent) {
-    if (event.defaultPrevented) return;
+    if (formRun || event.defaultPrevented || addonsOpen) return;
+    if (event.key === "Escape" && activeAddonTool) {
+      if (addonCard) closeAddonCard();
+      else activateTool(tool);
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "Escape" && shapeStamp) {
+      event.preventDefault();
+      shapeStamp = nextStamp(shapeStamp, { type: "escape" });
+      hideShapeGhost();
+      return;
+    }
     // Every shortcut below edits, navigates or replaces the page; none may race a replacing reply.
     if (session.pageInputLocked) return;
     if (event.ctrlKey || event.metaKey) {
@@ -1720,6 +2185,7 @@
   const ZOOM_STEP = 1.4;
 
   function currentToolLabel() {
+    if (selectedAddonTool) return contributionText(selectedAddonTool.addon, selectedAddonTool.tool.label, $locale);
     if (tool === "pen") return $t("workspace.pen2", { "penPreset": penPreset });
     if (tool === "select") return $t("workspace.inkSelection");
     return toolLabel(tool, $t);
@@ -1734,6 +2200,7 @@
   }
 
   function currentToolDetail() {
+    if (selectedAddonTool) return "";
     if (tool === "pen") return nibDetail(settings.penPresets[penPreset - 1]);
     if (tool === "highlighter") return nibDetail(settings.highlighter);
     if (tool === "eraser") return $t(settings.eraserMode === "precise" ? "workspace.preciseErasing" : "workspace.wholeStrokes");
@@ -1847,7 +2314,7 @@
   {/if}
 {/snippet}
 
-<main tabindex="-1" class="workspace-app" class:ai-open={aiPanelOpen} onpointerdowncapture={event => {
+<main bind:this={workspaceElement} inert={addonsOpen} tabindex="-1" class="workspace-app" class:ai-open={aiPanelOpen} onpointerdowncapture={event => {
     if (event.target instanceof Element && event.target.closest(".active-page") && !event.target.closest(".helper-crop, .selection-actions") && tool !== "lasso") region = null;
     selection.closeObjectSelection(event);
   }} onfocusout={() => session.scheduleFocus()} onwheel={navigation.wheelZoom}>
@@ -1871,6 +2338,7 @@
       <LibrarySurface
         {tauriAvailable}
         onSettings={() => (settingsOpen = true)}
+        onAddons={() => openAddons()}
         coverRevision={session.coverRevision}
         showNotebookSetup={showInitialSetup}
         location={shelfLocation}
@@ -1904,6 +2372,8 @@
           </button>
           {#if exportOpen}
             <ExportMenu
+              formats={entries("export")}
+              onAddonExport={(entry, current) => void session.exportAddon(entry, current)}
               choice={exportChoice}
               pageNumber={session.pageNumber}
               pageCount={session.pageCount}
@@ -1917,9 +2387,16 @@
       {:else}
         <button class="text-action" type="button" onclick={session.reopen} disabled={session.busy}>{$t("workspace.reopenNotebook")}</button>
       {/if}
+      {#if shapePanelAvailable}
+        <button bind:this={shapePanelTrigger} class="icon-button" class:active={shapePanelOpen} type="button"
+          aria-label={$t("contentPacks.shapes")} aria-pressed={shapePanelOpen} title={$t("contentPacks.shapes")}
+          disabled={session.busy} onclick={toggleShapePanel}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="7.5" r="3.5" /><path d="M13.5 4h6.5v6.5h-6.5z" /><path d="m7.5 13.5 4 6.5h-8z" /><path d="M14 17h6M17 14v6" /></svg>
+        </button>
+      {/if}
       {#if session.pageOpen}
         <div class="add-page-anchor">
-          <button class="icon-button" class:active={addPageOpen} type="button" aria-label={$t("workspace.addPage")} aria-expanded={addPageOpen} title={$t("workspace.addPage")} disabled={session.busy} onclick={() => (addPageOpen = !addPageOpen)}>
+          <button bind:this={addPageTrigger} class="icon-button" class:active={addPageOpen} type="button" aria-label={$t("workspace.addPage")} aria-expanded={addPageOpen} title={$t("workspace.addPage")} disabled={session.busy} onclick={() => (addPageOpen = !addPageOpen)}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6"></path><path d="M18 9.5v9"></path><path d="M13.5 14h9"></path></svg>
           </button>
           {#if addPageOpen}
@@ -1942,6 +2419,7 @@
               onSizeChange={(next) => (addPageSizeId = next)}
               onOrientationChange={(next) => (addPageOrientation = next)}
               onClose={() => (addPageOpen = false)}
+              generators={entries("page-generator").length ? generatorButtons : undefined}
             />
           {/if}
         </div>
@@ -1952,7 +2430,7 @@
       <button class="icon-button" class:active={sideEditorOpen} type="button" aria-label={$t("workspace.pageTextAndTypstSourceView")} aria-pressed={sideEditorOpen} title={$t("workspace.editorViewCtrlShiftE")} onclick={toggleSideEditor}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"></rect><path d="M10 4.5v15"></path></svg>
       </button>
-      <button class="icon-button" class:active={moreOpen} type="button" aria-label={$t("workspace.moreNotebookActions")} aria-expanded={moreOpen} data-preserve-selection data-helper-activity-trigger onclick={() => (moreOpen = !moreOpen)}>
+      <button class="icon-button" class:active={moreOpen} bind:this={moreTrigger} type="button" aria-label={$t("workspace.moreNotebookActions")} aria-expanded={moreOpen} data-preserve-selection data-helper-activity-trigger onclick={() => (moreOpen = !moreOpen)}>
         <svg class="solid-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="19" cy="12" r="1.7"></circle></svg>
       </button>
     </div>
@@ -2033,11 +2511,12 @@
       class="workspace-surround"
       bind:this={workspace}
       aria-label={$t("workspace.fixedPageWorkspace")}
-      onpointerdowncapture={navigation.workspacePointerDown}
+      onpointerdowncapture={surroundPointerDown}
       oncontextmenu={selection.canvasContextMenu}
-      onpointermovecapture={navigation.workspacePointerMove}
-      onpointerupcapture={navigation.workspacePointerEnd}
-      onpointercancelcapture={navigation.workspacePointerEnd}
+      onpointermovecapture={surroundPointerMove}
+      onpointerupcapture={surroundPointerEnd}
+      onpointercancelcapture={surroundPointerEnd}
+      onpointerleave={() => { if (!shapeDragging) hideShapeGhost(); }}
       onlostpointercapture={navigation.releasePagePointer}
     >
       <div class="page-scroll-content" bind:this={pageViewport} onscroll={() => { session.lastScrollAt = performance.now(); selection.scheduleSelectionToolbar(); session.scheduleFocus(session.FOCUS_SETTLE_MS); }}>
@@ -2121,7 +2600,7 @@
                     pageWidthPt={box.widthPt}
                     pageHeightPt={box.heightPt}
                     {zoom}
-                    interactive={active}
+                    interactive={active && !activeAddonTool}
                     root={session.root}
                     sharedStyle={session.sharedStyleSource}
                     pageTextBaselineGrid={settings.pageTextBaselineGrid}
@@ -2213,6 +2692,22 @@
                         }
                       : undefined}
                   />
+                  {#if active && selectedAddonTool}
+                    {@const activeTool = selectedAddonTool}
+                    {@const label = contributionText(activeTool.addon, activeTool.tool.label, $locale)}
+                    {#key `${entry.id}/${activeTool.addon.addonId}/${activeTool.tool.id}`}
+                      <AddonToolSurface tool={activeTool.tool} {label} {zoom} style={addonSlot?.style}
+                        objects={session.activeSnapshot?.page.objects ?? []}
+                        pointAt={navigation.pagePointAt}
+                        onApply={(points) => {
+                          if (session.pageInputLocked) return;
+                          const pen = shapePen();
+                          void session.applyAddonObjectAction(activeTool.addon.addonId,
+                            { kind: "tool", id: activeTool.tool.id, points, ...(addonSlot ? { style: addonSlot.style }
+                              : { pen: { strokeColor: pen.color, strokeWidthPt: pen.widthPt } }) }, label);
+                        }} />
+                    {/key}
+                  {/if}
                   {#if active && (region || (aiPanelOpen && codexSelection?.share.root === session.root && codexSelection.share.pageId === session.activePageId && !summaryDraft && !editorEntry))}
                     <HelperCrop crop={aiPanelOpen && codexSelection ? codexSelection.share.cropPt : region!} page={session.activeGeometry} {zoom} editable={aiPanelOpen}
                       onCommit={crop => { if (codexSelection) codexSelection = {...codexSelection, share: {...codexSelection.share, cropPt:crop}}; if(region) region=crop; cropVersion++; }} />
@@ -2303,9 +2798,18 @@
         </div>
       {/if}
 
+      {#if shapePanelOpen && !session.activeCalculation}
+        <ShapePanel libraries={shapeShelves} recent={shapeRecent} stamp={shapeStamp} failure={shapeFailure}
+          dock={paletteDock === "right" ? "left" : "right"}
+          --shape-panel-top={`${shapePanelInset.top}px`} --shape-panel-bottom={`${shapePanelInset.bottom}px`}
+          onStamp={choice => { shapeFailure = null; shapeStamp = nextStamp(shapeStamp, { type: "tile", choice }); if (!shapeStamp) hideShapeGhost(); }}
+          onPlace={choice => void placePackShape(choice, null, true)}
+          onDrag={dragPackShape} onClose={closeShapePanel} />
+      {/if}
+
       {#if !session.activeCalculation}
       <NotebookPalette {workspace} {settings} {changeSettings} onStatus={next => { session.status = next; }}
-        bind:paletteDock bind:paletteElement bind:paletteDragging {closeToolCard}
+        bind:paletteDock bind:paletteElement bind:paletteDragging bind:baseRailWidth={addonRailWidth} bind:railAvailableWidth={workspaceWidth} {closeToolCard}
         onUndo={session.undo} onRedo={session.redo}
         undoDisabled={session.busy || session.pendingTransactions > 0 || !session.canUndo}
         redoDisabled={session.busy || session.pendingTransactions > 0 || !session.canRedo}>
@@ -2335,9 +2839,9 @@
                 <WidthPanel embedded widthPt={Number.isFinite(activeWidth) ? activeWidth : settings.penWidths[0]} kind={tool === "highlighter" && !restyling ? "highlighter" : "pen"}
                   minimumMm={WIDTH_BOUNDS_MM[tool === "highlighter" && !restyling ? "highlighter" : "pen"].minimum}
                   maximumMm={WIDTH_BOUNDS_MM[tool === "highlighter" && !restyling ? "highlighter" : "pen"].maximum}
-                  pattern={restyling ? selectionStyle.pattern : inkPattern()}
+                  pattern={addonSlot?.style.pattern ?? (restyling ? selectionStyle.pattern : inkPattern())}
                   onPatternChange={penLike ? setActivePattern : undefined}
-                  spacing={restyling ? selectionStyle.spacing : inkPatternSpacing()}
+                  spacing={addonSlot?.style.patternSpacing ?? (restyling ? selectionStyle.spacing : inkPatternSpacing())}
                   onSpacingChange={penLike ? setActiveSpacing : undefined}
                   canRemove={!restyling && paletteEditor.index >= 0 && canRemoveWidth(activeWidthChips)}
                   adding={paletteEditor.adding}
@@ -2347,7 +2851,7 @@
                   onRemove={() => { if (paletteEditor) removeWidth(paletteEditor.index); closePaletteEditor(); }}
                   onClose={closePaletteEditor} />
               {:else}
-                <ColorPanel embedded value={activeInkColor} recent={settings.recentColors}
+                <ColorPanel embedded value={activeInkColor} recent={settings.recentColors} palettes={packPalettes}
                   mode={paletteEditor.adding ? "add" : "edit"}
                   canRemove={paletteEditor.index >= 0 && activeColorChips.length > 1}
                   onPick={(color) => { if (!paletteEditor) return; if (paletteEditor.adding) addSwatch(color); else if (paletteEditor.index >= 0) editSwatch(paletteEditor.index, color); else setActiveColor(color); closePaletteEditor(); }}
@@ -2387,6 +2891,17 @@
             />
           </div>
         {/if}
+        {#if addonCard && selectedAddonTool && toolSettings}
+            <ToolCard dock={paletteDock} tool="addon" anchor={addonCard}
+              label={contributionText(toolSettings, selectedAddonTool.tool.label, $locale)}
+              addonStyle={addonSlot?.style}
+              onPatternChange={setActivePattern} onSpacingChange={setActiveSpacing}
+              onOpacityChange={(opacity) => { if (addonSlot) updateAddonSlot({ ...addonSlot, style: { ...addonSlot.style, opacity } }); }}
+              onClose={closeAddonCard}>
+              <AddonToolOptions addon={toolSettings} fields={addonCardFields}
+                disabled={addonSettingPending} onChange={updateAddonToolField} />
+            </ToolCard>
+        {/if}
         {#if toolCard && toolCardPreset}
           <div class="palette-panel-anchor card" style:--anchor={`${toolCard.anchor}px`}>
             <ToolCard
@@ -2422,21 +2937,30 @@
             expandedCommand={expandedPaletteCommand}
             horizontal={paletteDock === "top" || paletteDock === "bottom"}
             onActivate={(command, tile) => paletteCommands[command](tile)}
+            addonTools={visibleAddonTools} {activeAddonTool} addonCardOpen={!!addonCard} onAddonTool={selectAddonTool}
           />
 
-          {#if paletteContext}
+          {#if toolSettings && addonSegments.length && horizontalPalette}
+            <div class="addon-segments" class:measuring={!addonSegmentsInRail} inert={!addonSegmentsInRail}>
+              <div class="addon-tracks" bind:clientWidth={addonSegmentsWidth}>
+                <AddonToolOptions addon={toolSettings} fields={addonSegments} rail
+                  disabled={addonSettingPending} onChange={updateAddonToolField} />
+              </div>
+            </div>
+          {/if}
+          {#if addonSlot || (!activeAddonTool && paletteContext)}
             <PalettePocket
-              kind={paletteContext}
+              kind={addonSlot ? "ink" : paletteContext ?? "ink"}
               horizontal={paletteDock === "top" || paletteDock === "bottom"}
               widths={activeWidthChips}
               {activeWidth}
               colors={activeColorChips}
               activeColor={activeInkColor}
-              opacity={tool === "highlighter" ? settings.highlighterOpacity : 1}
+              opacity={addonSlot?.style.opacity ?? (tool === "highlighter" ? settings.highlighterOpacity : 1)}
               eraserSizes={ERASER_SIZE_OPTIONS}
               eraserSize={settings.eraserSize}
-              pattern={restyling ? selectionStyle.pattern : inkPattern()}
-              patternOf={tool === "pen" || restyling ? (width) => patternForWidth(settings.penWidthPatterns, width) : undefined}
+              pattern={addonSlot?.style.pattern ?? (restyling ? selectionStyle.pattern : inkPattern())}
+              patternOf={!addonSlot && (tool === "pen" || restyling) ? (width) => patternForWidth(settings.penWidthPatterns, width) : undefined}
               tag={restyling ? $t("workspace.selection") : undefined}
               matchPattern={restyling}
               expandedEditor={paletteEditor?.adding ? null : paletteEditor?.kind ?? null}
@@ -2454,6 +2978,7 @@
             />
           {/if}        {/snippet}
 
+      {#if !activeAddonTool}
       {#if selection.contextMenu}
         <div class="context-actions" use:dismissable={{ onClose: () => (selection.contextMenu = null), swallow: true }}>
           {#if selection.selectedStrokeIds.length > 0 || selection.groupedStrokeIds.length > 0 || selection.lassoObjectIds.length > 0}
@@ -2475,6 +3000,7 @@
               onDuplicate={selection.fromContext(selection.duplicateSelection)}
               onDelete={selection.fromContext(() => selection.deleteSelection())}
               onTranscribe={canTranscribe() ? selection.fromContext(openTranscription) : undefined}
+              addonCommands={selectionAddonCommands().map(command => ({ ...command, onSelect: selection.fromContext(command.onSelect) }))}
             />
           {:else if selection.selectedImageId || selection.selectedTypstId || selection.selectedShapeId}
             <SelectionActions
@@ -2500,6 +3026,7 @@
               pasteDisabled={!selection.clipboard}
               onDuplicate={selection.fromContext(selection.duplicateSelection)}
               onDelete={selection.fromContext(() => selection.deleteSelection())}
+              addonCommands={selectionAddonCommands().map(command => ({ ...command, onSelect: selection.fromContext(command.onSelect) }))}
             />
           {:else}
             <SelectionActions
@@ -2533,6 +3060,7 @@
               : undefined}
           onConvert={!selection.lassoObjectIds.length && selection.selectedStrokeIds.length === 1 ? session.convertSelectedInkToShape : undefined}
           onTranscribe={canTranscribe() ? openTranscription : undefined}
+          addonCommands={selectionAddonCommands()}
           onShare={shareAction}
           onAI={settings.aiHelper.enabled ? codexAction ?? explainAISetup : undefined}
           onCopy={() => void selection.copySelection()}
@@ -2560,9 +3088,11 @@
           onCopy={() => void selection.copySelection()}
           onDuplicate={() => void selection.duplicateSelection()}
           onDelete={() => void selection.deleteSelection()}
+          addonCommands={selectionAddonCommands()}
         />
       {/if}
 
+      {/if}
       </NotebookPalette>
       {/if}
     </section>
@@ -2604,11 +3134,35 @@
     <TranscriptionPanel
       polylines={transcribing.polylines}
       bounds={transcribing.bounds}
+      context={{ root: session.root, page: { widthPt: session.activeGeometry.widthPt, heightPt: session.activeGeometry.heightPt } }}
       recognizers={recognition?.recognizers ?? []}
       math={recognition?.math ?? null}
+      mathAddon={recognition?.mathAddon ?? null}
       onInsert={insertTranscription}
       onClose={() => (transcribing = null)}
     />
+  {/if}
+  {#if formRun && formRun.pageId === session.activePageId && formRun.root === session.root}
+    {@const run = formRun}
+    <AddonForm entries={run.entries} root={run.root} pageId={run.pageId}
+      geometry={run.position ? addPageGeometry : null} flush={session.persist}
+      commit={(preview, direct) => session.commitAddonForm(preview.id, direct, run.position)}
+      onClose={closeAddonForm} />
+  {/if}
+  {#if addonRun && addonRun.pageId === session.activePageId}
+    {#key addonRun.key}
+      <AddonCommandPanel
+        root={session.root}
+        pageId={addonRun.pageId}
+        strokeIds={addonRun.strokeIds}
+        command={addonRun.command}
+        flush={session.persist}
+        insert={session.insertAddonProposal}
+        changeMark={() => `${session.revision}:${session.editGeneration}`}
+        undo={session.undo}
+        onClose={() => (addonRun = null)}
+      />
+    {/key}
   {/if}
   {#if session.confirmingPageDelete !== null}
     <ConfirmDialog
@@ -2634,10 +3188,11 @@
   {#if settingsOpen}
     <SettingsPanel
       initialGroup={settingsInitialGroup}
+      {themes}
       selectedBlockFont={selection.selectedTypstId ? blockFont(session.typstBlocks.find(block => block.id === selection.selectedTypstId)?.source ?? "") : null}
       onFontChange={changeInlineFont}
       {settings}
-      actions={{ openMetrics: () => (metricsOpen = true), changePython: () => { settingsOpen = false; void calculations.changePython(); } }}
+      actions={{ browseAddons: () => openAddons(true), openMetrics: () => (metricsOpen = true), changePython: () => { settingsOpen = false; void calculations.changePython(); } }}
       onChange={changeSettings}
       onClose={() => { settingsOpen = false; settingsInitialGroup = "appearance"; }}
     />
@@ -2668,6 +3223,28 @@
   <p class="screen-reader-status" aria-live="polite">{renderMessage(session.status, $t)}</p>
   {/if}
 </main>
+{#snippet generatorButtons(position: PagePosition)}
+  {#each contributions.filter(addon => addon.enabled && addon.commands.some(command => command.surface === "page-generator")) as addon (addon.addonId)}
+    <div class="generator-group" role="group" aria-label={contributionText(addon, "name", $locale)}>
+      <span>{contributionText(addon, "name", $locale)}</span>
+      {#each addon.commands.filter(command => command.surface === "page-generator") as command (command.id)}
+        <button type="button" onclick={() => {
+          formRun = { entries: [{ addon, command }], position, pageId: session.activePageId, root: session.root };
+          addPageOpen = false;
+        }}>{contributionText(addon, command.label, $locale)}</button>
+      {/each}
+    </div>
+  {/each}
+{/snippet}
+{#if addonsOpen}<AddonStore onClose={closeAddons} />{/if}
+{#if shapeGhost}
+  {@const pen = shapePen()}
+  {@const margin = previewMargin(shapeGhost, pen.widthPt)}
+  <div class="shape-ghost" aria-hidden="true" bind:this={shapeGhostElement} use:placeGhost
+    style:width={`${(shapeGhost.widthPt + 2 * margin) * zoom}px`} style:height={`${(shapeGhost.heightPt + 2 * margin) * zoom}px`}>
+    <PackShapePreview item={shapeGhost} color={pen.color} width={pen.widthPt} />
+  </div>
+{/if}
 
 <style>
   :global(*) { box-sizing: border-box; }
@@ -2759,6 +3336,15 @@
 
   .workspace-split.panel-right {
     flex-direction: row-reverse;
+  }
+
+  .shape-ghost {
+    position: fixed;
+    z-index: 60;
+    top: 0;
+    left: 0;
+    opacity: 0.5;
+    pointer-events: none;
   }
 
   .workspace-surround {
@@ -2904,6 +3490,28 @@
 
   /* Where a popout from the bar hangs. `--anchor` is the tapped tile's centre within the bar;
      this knows only the four docks, and the thing it holds knows only its own contents. */
+  .addon-segments {
+    flex: none;
+    margin-left: 3px;
+  }
+
+  .addon-tracks {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: max-content;
+    padding-left: 7px;
+    border-left: 1px solid var(--edge);
+  }
+
+  .addon-segments.measuring {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 0;
+    overflow: clip;
+    visibility: hidden;
+  }
+
   .palette-panel-anchor {
     position: absolute;
     bottom: calc(100% + 10px);

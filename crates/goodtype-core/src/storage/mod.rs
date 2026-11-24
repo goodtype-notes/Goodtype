@@ -26,6 +26,8 @@ mod validate;
 mod write;
 
 #[cfg(test)]
+mod addon_data_tests;
+#[cfg(test)]
 mod fixtures;
 
 pub use crate::object::{MAX_IMAGE_BYTES, MAX_PDF_BYTES};
@@ -35,15 +37,17 @@ pub use calculations::{
 };
 pub use delta::{PageDelta, commit_page_delta, commit_page_delta_with_precondition};
 pub use history::{
-    HistoryResult, NotebookHistory, commit_notebook, commit_notebook_with_precondition, focus_page,
-    history_preflight, observe_notebook, observe_page, redo_notebook, undo_notebook,
+    HistoryResult, NotebookHistory, amend_notebook, commit_notebook,
+    commit_notebook_with_precondition, commit_notebook_with_undo, focus_page, history_preflight,
+    observe_notebook, observe_page, redo_notebook, undo_notebook,
 };
 pub use pages::{
-    CalculationExecutionPlan, CalculationStep, NotebookStructureHistory, PagePosition,
-    StructureHistoryResult, advance_structure, calculation_execution_plan, create_calculation_page,
-    create_notebook, create_page, create_page_with_text, delete_page, delete_pages, duplicate_page,
-    import_calculation_page, import_pdf_pages, observe_structure, open_notebook, open_page,
-    redo_structure, reorder_pages, save_notebook, undo_structure,
+    CalculationExecutionPlan, CalculationStep, GeneratedPage, NotebookStructureHistory,
+    PagePosition, StructureHistoryResult, add_generated_pages, advance_structure,
+    calculation_execution_plan, create_calculation_page, create_notebook, create_page,
+    create_page_with_text, delete_page, delete_pages, duplicate_page, import_calculation_page,
+    import_pdf_pages, observe_structure, open_notebook, open_page, redo_structure, reorder_pages,
+    save_notebook, undo_structure,
 };
 pub use proposal::*;
 pub use recovery::{
@@ -51,11 +55,12 @@ pub use recovery::{
     restore_recovery_candidate,
 };
 pub use search::{SearchHit, search_notebook};
+pub use validate::raise_schema_version;
 pub(crate) use validate::validate_ink_layer;
 pub use write::{
     TypstStyleEntry, install_reviewed_typst_style, install_typst_style, list_typst_style_entries,
-    list_typst_styles, read_pdf_reference, remove_typst_style, store_pasted_image,
-    store_pdf_reference, update_typst_style, write_typst_style,
+    list_typst_styles, read_pdf_reference, read_pdf_reference_bounded, remove_typst_style,
+    store_pasted_image, store_pdf_reference, update_typst_style, write_typst_style,
 };
 
 /// The store's size budget, in one place.

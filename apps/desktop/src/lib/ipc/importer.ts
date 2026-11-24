@@ -1,9 +1,11 @@
+import type { RegistryProblem } from "./addons";
 import { get } from "svelte/store";
 import { locale } from "../i18n";
 import { translate, formatNumber } from "../i18n";
 import { invoke } from "@tauri-apps/api/core";
+import { importAddons, type AddonApproval, type AddonPermission } from "./addons";
 
-// The optional Goodnotes and OneNote importers (ADR 0029, 0032). Rust owns the download, the
+// The optional import addons (ADR 0029, 0032, 0045). Rust owns the download, the
 // installation, the source path and the process; this side only asks and shows.
 
 export type NotebookOutcomeStatus = "imported" | "failed" | "needsArtwork" | "cancelled" | "alreadyThere";
@@ -33,6 +35,7 @@ export type ImporterActivity =
   | { kind: "checking" }
   | { kind: "downloading"; received: number; total: number }
   | { kind: "installing" }
+  | { kind: "awaitingApproval"; approval: AddonApproval }
   | { kind: "installFailed"; message: string }
   | { kind: "importing"; done: number; total: number; cancelling: boolean }
   | { kind: "publishing" }
@@ -44,17 +47,19 @@ export type ImporterStatus = {
   /** The tested release this Goodtype version would download; null while none is published. */
   release: { version: string; sizeBytes: number } | null;
   installed: string | null;
+  disabled: boolean;
+  catalogPermissions: AddonPermission[];
+  needsReinstall: boolean;
   installedProblem: string | null;
   source: { name: string; sizeBytes: number } | null;
   activity: ImporterActivity;
   update: { version: string; sizeBytes: number } | null;
   updateChecked: boolean;
-  updateProblem: string | null;
+  updateProblem: RegistryProblem | null;
 };
 
 /** The optional importers. Each keeps its own installation, chosen file and job in Rust. */
-export type ImporterId = "goodnotes" | "onenote";
-export const IMPORTERS: ImporterId[] = ["goodnotes", "onenote"];
+export type ImporterId = string;
 
 export const importerStatus = (tool: ImporterId) => invoke<ImporterStatus>("importer_status", { tool });
 
@@ -84,13 +89,13 @@ export const startImport = (
 
 /** Every importer's status, for the Library toolbar and for choosing which tab to open. */
 export async function allImporterStatus(): Promise<Record<ImporterId, ImporterStatus>> {
-  const [goodnotes, onenote] = await Promise.all(IMPORTERS.map(importerStatus));
-  return { goodnotes, onenote };
+  const sources = await importAddons();
+  return Object.fromEntries(await Promise.all(sources.map(async ({ id }) => [id, await importerStatus(id)] as const)));
 }
 
 /** True while a download, install or import is running. */
 export function importerBusy(activity: ImporterActivity): boolean {
-  return ["checking", "downloading", "installing", "importing", "publishing"].includes(activity.kind);
+  return ["checking", "downloading", "installing", "awaitingApproval", "importing", "publishing"].includes(activity.kind);
 }
 
 export function megabytes(bytes: number): string {

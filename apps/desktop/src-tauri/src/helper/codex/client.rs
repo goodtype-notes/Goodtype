@@ -39,7 +39,7 @@ impl Client {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x0800_0000);
         }
-        let mut child = command.spawn().map_err(|e| e.to_string())?;
+        let mut child = crate::sandbox::spawn(&mut command).map_err(|e| e.to_string())?;
         #[cfg(windows)]
         let job = match Job::new(&child) {
             Ok(job) => job,
@@ -295,7 +295,7 @@ pub fn version(path: &Path) -> Result<String, String> {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000);
     }
-    let out = cmd.output().map_err(|e| e.to_string())?;
+    let out = crate::sandbox::output(&mut cmd).map_err(|e| e.to_string())?;
     if !out.status.success() || out.stdout.len() > 1024 {
         return Err("version check failed".into());
     }

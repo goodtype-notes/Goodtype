@@ -1,0 +1,37 @@
+import type { MessageKey } from "../i18n";
+
+const PROBLEMS = {
+  "addon-needs-update": "addonCommand.problem.needsUpdate",
+  "addon-cancelled": "addonCommand.problem.cancelled",
+  "addon-timeout": "addonCommand.problem.timeout",
+  "addon-unavailable": "addonCommand.problem.unavailable",
+  "addon-sandbox-failed": "addonCommand.problem.sandboxFailed",
+  "addon-invalid-response": "addonCommand.problem.invalidResponse",
+  "addon-invalid-selection": "addonCommand.problem.invalidSelection",
+  "addon-unsupported": "addonCommand.problem.unsupported",
+  "addon-command-failed": "addonCommand.problem.failed",
+  "addon-compile-failed": "addonCommand.problem.compileFailed",
+  "addon-does-not-fit": "addonCommand.problem.doesNotFit",
+  "addon-too-many-proposals": "addonCommand.problem.tooMany",
+  "addon-storage-exceeded": "addonCommand.problem.storageExceeded",
+  flush_failed: "addonCommand.problem.flushFailed",
+  proposal_changed: "addonCommand.problem.stale",
+} as const satisfies Record<string, MessageKey>;
+
+/** Map a closed Rust code inside an error's details to a localized status; never show raw text. */
+export function addonProblem(details: string): MessageKey {
+  if (/stale|revision_conflict|changed since/i.test(details)) return "addonCommand.problem.stale";
+  const code = Object.keys(PROBLEMS).find((key) => details.includes(key)) as keyof typeof PROBLEMS | undefined;
+  return code ? PROBLEMS[code] : "addonCommand.problem.failed";
+}
+
+export type AddonPhase = "running" | "review" | "applied" | "failed";
+
+/**
+ * What an unmounting panel owes Rust. A run still in flight is cancelled; a proposal that was
+ * neither inserted nor directly applied is dismissed, so a rerun, page switch or close never
+ * leaves it counting against the pending limit.
+ */
+export function panelCleanup(phase: AddonPhase, reviewId: string | null, settled: boolean) {
+  return { cancel: phase === "running", dismiss: reviewId !== null && !settled && phase !== "applied" ? reviewId : null };
+}

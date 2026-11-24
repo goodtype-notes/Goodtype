@@ -31,6 +31,7 @@ pub struct NotebookHistory {
     current_page_id: Option<String>,
     current_revision: Option<u64>,
     current_fingerprint: Option<u64>,
+    last_commit: Option<std::time::Instant>,
 }
 
 impl NotebookHistory {
@@ -63,7 +64,26 @@ impl NotebookHistory {
         );
         self.redo.clear();
         self.redo_bytes = 0;
+        self.last_commit = Some(std::time::Instant::now());
         self.record(saved, fingerprint);
+    }
+
+    /// Previous state and timing of the latest retained user edit on this revision.
+    pub fn amendment_base(
+        &self,
+        revision: u64,
+        base_revision: u64,
+    ) -> Option<(&NotebookSnapshot, std::time::Instant)> {
+        if self.current_revision != Some(revision) || !self.redo.is_empty() {
+            return None;
+        }
+        let base = self
+            .undo
+            .iter()
+            .rev()
+            .find(|entry| entry.snapshot.page.revision == base_revision)
+            .or_else(|| self.undo.last())?;
+        Some((&base.snapshot, self.last_commit?))
     }
 
     /// Drop both stacks. They describe a page that is no longer the one on disk, so replaying
@@ -73,6 +93,7 @@ impl NotebookHistory {
         self.redo.clear();
         self.undo_bytes = 0;
         self.redo_bytes = 0;
+        self.last_commit = None;
     }
 
     fn describes(&self, snapshot: &NotebookSnapshot, fingerprint: u64) -> bool {
@@ -144,12 +165,31 @@ pub fn commit_notebook(
     commit_notebook_with_precondition(selected_root, history, snapshot, None)
 }
 
+/// Commit a normal page change only if it can be undone.
+pub fn commit_notebook_with_undo(
+    selected_root: &Path,
+    history: &mut NotebookHistory,
+    snapshot: NotebookSnapshot,
+) -> Result<HistoryResult, StorageError> {
+    commit_notebook_inner(selected_root, history, snapshot, None, true)
+}
+
 /// Caller must hold the notebook lock throughout this operation.
 pub fn commit_notebook_with_precondition(
     selected_root: &Path,
     history: &mut NotebookHistory,
     snapshot: NotebookSnapshot,
     precondition: Option<super::ProposalPrecondition>,
+) -> Result<HistoryResult, StorageError> {
+    commit_notebook_inner(selected_root, history, snapshot, precondition, false)
+}
+
+fn commit_notebook_inner(
+    selected_root: &Path,
+    history: &mut NotebookHistory,
+    snapshot: NotebookSnapshot,
+    precondition: Option<super::ProposalPrecondition>,
+    require_undo: bool,
 ) -> Result<HistoryResult, StorageError> {
     let root = canonical_root(selected_root)?;
     let current = open_page(selected_root, &snapshot.page.id)?;
@@ -159,19 +199,63 @@ pub fn commit_notebook_with_precondition(
         ));
     }
     ensure_current(&root, history, &current, snapshot.page.revision)?;
-    commit_current_with_precondition(&root, history, current, snapshot, precondition)
+    commit_current_with_precondition(
+        &root,
+        history,
+        current,
+        snapshot,
+        precondition,
+        require_undo,
+    )
 }
 
 pub(super) fn commit_current_with_precondition(
     root: &Path,
     history: &mut NotebookHistory,
     current: NotebookSnapshot,
-    mut snapshot: NotebookSnapshot,
+    snapshot: NotebookSnapshot,
     precondition: Option<super::ProposalPrecondition>,
+    require_undo: bool,
 ) -> Result<HistoryResult, StorageError> {
     if let Some(condition) = &precondition {
         super::check_proposal_base(root, &current, &condition.base)?;
     }
+    let mut snapshot = prepared(&current, snapshot)?;
+    snapshot.page.revision = next_revision(&current)?;
+    if (require_undo
+        || precondition
+            .as_ref()
+            .is_some_and(|condition| condition.require_retained_history))
+        && !history_preflight(history, &current, &snapshot)
+    {
+        return Err(StorageError::HistoryNotRetained);
+    }
+    let (saved, fingerprint) = save_and_return(root, &current, snapshot)?;
+    history.advance(current, &saved, fingerprint);
+    Ok(history_result(saved, history))
+}
+
+/// What every page write does to a candidate before it lands on `current`: refs cleanup, version
+/// checks, the notebook's own manifest and the schema the content needs.
+fn prepared(
+    current: &NotebookSnapshot,
+    mut snapshot: NotebookSnapshot,
+) -> Result<NotebookSnapshot, StorageError> {
+    // A deleted object leaves every `refs` list in the same commit (ADR 0046).
+    let kept = snapshot
+        .page
+        .objects
+        .iter()
+        .map(|object| object.fields().id.clone())
+        .collect::<std::collections::HashSet<_>>();
+    let deleted = current
+        .page
+        .objects
+        .iter()
+        .map(|object| object.fields().id.as_str())
+        .filter(|id| !kept.contains(*id))
+        .collect::<std::collections::HashSet<_>>();
+    crate::addon_data::remove_refs(&mut snapshot.page.objects, &deleted);
     validate_page_bundle_versions(&snapshot)?;
     // A preloaded neighbouring page may carry a timestamp from before another page saved.
     // Keep the current manifest and only advance its bookkeeping time.
@@ -185,16 +269,34 @@ pub(super) fn commit_current_with_precondition(
     // and the page about to be written. The manifest states the version and the page and its ink
     // layers move with it, so a partially upgraded notebook is not representable.
     raise_schema_version(&mut snapshot);
-    snapshot.page.revision = next_revision(&current)?;
-    if precondition
-        .as_ref()
-        .is_some_and(|condition| condition.require_retained_history)
-        && !history_preflight(history, &current, &snapshot)
-    {
-        return Err(StorageError::HistoryNotRetained);
+    Ok(snapshot)
+}
+
+/// Fold `snapshot` into the newest undo step instead of adding one (ADR 0046 reactions).
+///
+/// Only valid while that step is still the newest thing on the page: `snapshot` must be based on
+/// the current revision, nothing may have been undone since, and there must be a step to amend.
+/// Undo then returns to the state before the step, and redo to the amended state.
+pub fn amend_notebook(
+    selected_root: &Path,
+    history: &mut NotebookHistory,
+    snapshot: NotebookSnapshot,
+) -> Result<HistoryResult, StorageError> {
+    let root = canonical_root(selected_root)?;
+    let current = open_page(selected_root, &snapshot.page.id)?;
+    if current.page.calculation.is_some() {
+        return Err(invalid_error(
+            "computational pages use calculation transactions",
+        ));
     }
-    let (saved, fingerprint) = save_and_return(root, &current, snapshot)?;
-    history.advance(current, &saved, fingerprint);
+    ensure_current(&root, history, &current, snapshot.page.revision)?;
+    if history.undo.is_empty() || !history.redo.is_empty() {
+        return Err(invalid_error("there is no undo step to amend"));
+    }
+    let mut snapshot = prepared(&current, snapshot)?;
+    snapshot.page.revision = next_revision(&current)?;
+    let (saved, fingerprint) = save_and_return(&root, &current, snapshot)?;
+    history.record(&saved, fingerprint);
     Ok(history_result(saved, history))
 }
 
@@ -260,6 +362,7 @@ fn restore_notebook(
             current.without_assets(),
         );
     }
+    history.last_commit = None;
     history.record(&restored, fingerprint);
     Ok(history_result(restored, history))
 }

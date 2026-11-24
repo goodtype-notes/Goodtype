@@ -96,7 +96,7 @@ pub struct SourceRef<'a> {
     pub path: &'a str,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectFields {
     pub id: String,
@@ -109,9 +109,16 @@ pub struct ObjectFields {
     pub group_id: Option<String>,
     pub created_at: String,
     pub modified_at: String,
+    /// Per-addon dependencies and opaque data (ADR 0046). Absent on everything else, so pages that
+    /// never met an addon serialize exactly as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub addon_data: Option<crate::addon_data::AddonData>,
+    /// Connection points in object-local points, only on shapes and groups.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ports: Option<Vec<crate::ShapePoint>>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(
     tag = "type",
     rename_all = "snake_case",
@@ -299,6 +306,16 @@ impl PageObject {
         fields.group_id = remap.optional_object(fields.group_id.as_deref())?;
         fields.created_at = remap.timestamp().to_owned();
         fields.modified_at = remap.timestamp().to_owned();
+        // A duplicated page copies every object, so every reference follows its copy.
+        if let Some(data) = &mut fields.addon_data {
+            for entry in data.values_mut() {
+                entry.refs = entry
+                    .refs
+                    .iter()
+                    .map(|id| remap.object(id))
+                    .collect::<Result<_, _>>()?;
+            }
+        }
 
         Ok(match self {
             Self::Typst {

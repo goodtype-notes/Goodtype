@@ -26,6 +26,8 @@ pub(super) fn fields(id: &str, reading_order: u32) -> ObjectFields {
         group_id: None,
         created_at: "2026-07-23T00:00:00Z".into(),
         modified_at: "2026-07-23T00:00:00Z".into(),
+        addon_data: None,
+        ports: None,
     }
 }
 

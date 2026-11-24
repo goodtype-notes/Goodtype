@@ -25,9 +25,10 @@ Goodtype keeps your notebooks as plain files on your own disk. No account, no sy
 > [!WARNING]
 > **Goodtype is in alpha and the notebook format is not stable.**
 >
-> Current builds read notebook schemas 1 through 4. Adding a computational page uses schema 4;
-> older builds cannot open those notebooks. Ordinary notebooks keep schema 3. A confirmed page save lazily migrates older
-> ink to schema 3 and preserves the original JSON files. Older builds cannot read schema 3.
+> Current builds read notebook schemas 1 through 5. Adding a computational page uses schema 4.
+> A page with addon data or stored ports uses schema 5. Older builds cannot read a newer schema.
+> Ordinary notebooks keep schema 3. A confirmed page save lazily migrates older ink to schema 3
+> and preserves the original JSON files.
 > Future alpha versions may still change the format; keep a separate copy of important work.
 > The [ink format specification](./formats/ink-v1.md) documents binary storage and migration.
 
@@ -54,8 +55,8 @@ Goodtype keeps your notebooks as plain files on your own disk. No account, no sy
   for other supported content. OneNote sections, `.onepkg` packages and web exports bring across
   typed text as Typst (equations as Typst math), handwriting as ink, and pictures; tall pages are
   split at clear gaps. Each source uses an optional importer
-  ([Goodnotes](https://github.com/Just8it/Goodtype-Goodnodes-importer),
-  [OneNote](https://github.com/Just8it/Goodtype-OneNote-Importer)) downloaded when you ask.
+  ([Goodnotes](https://github.com/goodtype-notes/Goodtype-Goodnotes-Importer),
+  [OneNote](https://github.com/goodtype-notes/Goodtype-OneNote-Importer)) downloaded when you ask.
   Conversion runs locally and preserves the originals; some features of each app are not supported.
 - **Mixed selection** with lasso filters for handwriting, highlighting, shapes, images and Typst
   blocks, so you can move, resize, duplicate or delete them together.
@@ -120,7 +121,7 @@ Goodtype currently targets Windows 10 and 11.
   **Desktop development with C++** and a Windows 10 or 11 SDK
 
 ```powershell
-git clone https://github.com/Just8it/Goodtype.git
+git clone https://github.com/goodtype-notes/Goodtype.git
 cd Goodtype
 pnpm install --frozen-lockfile
 cargo xtask doctor    # checks your toolchain

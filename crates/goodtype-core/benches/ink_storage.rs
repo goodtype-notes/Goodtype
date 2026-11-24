@@ -428,6 +428,8 @@ fn snapshot_with_block(layer: InkLayer) -> NotebookSnapshot {
             group_id: None,
             created_at: "2026-09-07T00:00:00Z".into(),
             modified_at: "2026-09-07T00:00:00Z".into(),
+            addon_data: None,
+            ports: None,
         },
         source_path: BENCH_BLOCK.into(),
         layout_width_pt: 220.0,

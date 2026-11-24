@@ -109,6 +109,7 @@ export type HelperPermission = "allow" | "ask" | "never";
 export type HelperPermissions = { pages: HelperPermission; presets: HelperPermission; pageNames: HelperPermission };
 
 export type AppSettings = {
+  themeId: string;
   aiHelper: { enabled: boolean; usage: "low" | "balanced" | "detailed"; webSearch: boolean; codexPath: string | null; codexModel: string | null; allowedMcpServers: string[]; permissions: HelperPermissions };
   uiLanguage: "en" | "de";
   /** Resolved into ordinary Typst source when a new movable text block is created. */
@@ -182,10 +183,12 @@ export type AppSettings = {
   eraserReach: EraserReach;
   eraserMode: EraserMode;
   /** Palette tiles taken off the bar. Their keyboard shortcuts keep working. */
-  hiddenTools: PaletteCommand[];
+  hiddenTools: (PaletteCommand | `addon:${string}/${string}`)[];
+  addonStrokeSlots: Record<string, import("./notebook/addonToolSettings").AddonStrokeSlot>;
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  themeId: "",
   aiHelper: { enabled: false, usage: "balanced", webSearch: true, codexPath: null, codexModel: null, allowedMcpServers: [], permissions: { pages: "ask", presets: "ask", pageNames: "allow" } },
   uiLanguage: "en",
   inlineTextFont: "",
@@ -242,6 +245,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   eraserReach: "everything",
   eraserMode: "stroke",
   hiddenTools: [],
+  addonStrokeSlots: {},
 };
 
 /** End taper for a highlighter that has it switched on, as a fraction of stroke length. */

@@ -24,7 +24,7 @@ pub type Strokes = Vec<Vec<[f64; 2]>>;
 pub struct Capabilities {
     /// Installed handwriting recognizers, by their Windows display name. Empty means no text.
     pub recognizers: Vec<String>,
-    pub math: crate::importer::ImporterStatus,
+    pub math: crate::addons::ImporterStatus,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,9 +87,11 @@ fn origin(strokes: &Strokes) -> (f64, f64) {
 #[tauri::command]
 pub async fn recognition_capabilities(
     app: tauri::AppHandle,
-    importers: tauri::State<'_, crate::importer::Importers>,
+    importers: tauri::State<'_, crate::addons::Importers>,
 ) -> Result<Capabilities, String> {
-    let math = crate::importer::importer_status(app, importers, "math".into()).await?;
+    let math =
+        crate::addons::importer_status(app, importers, crate::addons::recognize::MATH.id.into())
+            .await?;
     let recognizers = tauri::async_runtime::spawn_blocking(native::capabilities)
         .await
         .map_err(|e| e.to_string())?;
@@ -100,6 +102,10 @@ pub async fn recognition_capabilities(
 pub async fn prepare_math_recognition(app: tauri::AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         use tauri::Manager;
+        // A session install starts on explicit invocation, so prewarming never precedes a grant.
+        if crate::addons::selection::is_session_math(&app) {
+            return Ok(());
+        }
         app.state::<math_process::MathProcess>().prepare(&app)
     })
     .await
@@ -125,14 +131,55 @@ pub async fn recognize_ink_text(
     .map_err(|error| error.to_string())?
 }
 
+/// Where a recognition request comes from. A warm session worker never crosses notebooks or
+/// switches between the writer's own panel and an assistant grant.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MathContext {
+    pub root: String,
+    pub page: goodtype_core::PageGeometry,
+}
+
 #[tauri::command]
 pub async fn recognize_ink_math(
     app: tauri::AppHandle,
     selection: math_process::MathSelection,
+    context: MathContext,
+) -> Result<MathRecognition, String> {
+    recognize_math(app, selection, context, "notebook").await
+}
+
+/// Shared by the panel and the read-only AI bridge transcription. Neither mutates the page.
+pub async fn recognize_math(
+    app: tauri::AppHandle,
+    selection: math_process::MathSelection,
+    context: MathContext,
+    grant: &'static str,
 ) -> Result<MathRecognition, String> {
     selection.validate()?;
     tauri::async_runtime::spawn_blocking(move || {
         use tauri::Manager;
+        if let Some(result) = crate::addons::selection::session_math(
+            &app,
+            &selection,
+            &context.page,
+            grant,
+            std::path::Path::new(&context.root),
+        )? {
+            // The addon translated in its own build; unsupported output carries the LaTeX only.
+            return Ok(match result {
+                Ok(typst) => MathRecognition {
+                    typst: Some(typst),
+                    unsupported: None,
+                    latex: String::new(),
+                },
+                Err(latex) => MathRecognition {
+                    typst: None,
+                    unsupported: Some(String::new()),
+                    latex,
+                },
+            });
+        }
         let latex = app
             .state::<math_process::MathProcess>()
             .recognize(&app, selection)?;

@@ -8,11 +8,11 @@
   type PaletteDrag = { pointerId: number; size: number };
   let { workspace, settings, changeSettings, onStatus, closeToolCard, onUndo, onRedo,
     undoDisabled, redoDisabled, paletteDock = $bindable("bottom"), paletteElement = $bindable(),
-    paletteDragging = $bindable(false), cards, tools, children }:
+    paletteDragging = $bindable(false), baseRailWidth = $bindable(0), railAvailableWidth = $bindable(0), cards, tools, children }:
     { workspace: HTMLElement | undefined; settings: AppSettings; changeSettings: (next: AppSettings) => void;
       onStatus: (text: UiText) => void; closeToolCard: () => void; onUndo: () => void; onRedo: () => void;
       undoDisabled: boolean; redoDisabled: boolean; paletteDock?: PaletteDock; paletteElement?: HTMLElement;
-      paletteDragging?: boolean; cards: Snippet; tools: Snippet; children: Snippet } = $props();
+      paletteDragging?: boolean; baseRailWidth?: number; railAvailableWidth?: number; cards: Snippet; tools: Snippet; children: Snippet } = $props();
   let workspaceChrome = $state<HTMLElement>();
   let historyElement = $state<HTMLElement>();
   // The instrument bar snaps magnetically to the nearest workspace edge: horizontal along the
@@ -170,6 +170,10 @@
         (Number.parseFloat(style.paddingLeft) || 0) -
         (Number.parseFloat(style.paddingRight) || 0);
       const gap = Number.parseFloat(style.columnGap) || 0;
+      const segments = rail.querySelector<HTMLElement>(".addon-segments:not(.measuring)");
+      const primaryGap = Number.parseFloat(getComputedStyle(rail.querySelector(".palette-primary") ?? rail).columnGap) || 0;
+      baseRailWidth = rail.offsetWidth - (segments ? segments.offsetWidth + 3 + primaryGap : 0);
+      railAvailableWidth = available;
       chromeCrowded = rail.scrollWidth + pill.scrollWidth + gap * 2 > available;
     };
     measure();

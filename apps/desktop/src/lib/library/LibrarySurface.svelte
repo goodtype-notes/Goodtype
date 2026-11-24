@@ -7,9 +7,9 @@
   import NotebookSetup from "./NotebookSetup.svelte";
   import type { NotebookSetup as NotebookSetupValue } from "../page/presets";
   import NotebookCover from "./NotebookCover.svelte";
+  import { importAddons, type ImportAddon } from "../ipc/addons";
   import ImportPanel from "./ImportPanel.svelte";
   import {
-    IMPORTERS,
     allImporterStatus,
     importerBusy,
     type ImporterId,
@@ -54,6 +54,7 @@
     onStatus,
     showNotebookSetup = false,
     onSettings,
+    onAddons,
   }: {
     tauriAvailable: boolean;
     coverRevision?: number;
@@ -77,6 +78,7 @@
     onLocationChange?: (location: ShelfLocation) => void;
     onStatus: (message: UiText) => void;
     showNotebookSetup?: boolean;
+    onAddons?: () => void;
     onSettings?: () => void;
   } = $props();
 
@@ -123,22 +125,24 @@
   let menu = $state<"new" | "sort" | null>(null);
   let entryMenu = $state<string | null>(null);
   let prompt = $state<Prompt | null>(null);
-  /// The import panel (Goodnotes or OneNote). Jobs run in Rust, so it reopens on its own when the
+  /// The import panel. Jobs run in Rust, so it reopens on its own when the
   /// Library comes back while an import is running or has a result waiting.
   let importing = $state(false);
   /// The source the panel opens on: the one with a job, else the one used last this session.
-  let importTool = $state<ImporterId>("goodnotes");
+  let importTool = $state<ImporterId>("");
+  let importSources = $state.raw<ImportAddon[]>([]);
   /// While the panel is closed: a job still running, or a finished one with a result to read.
   let importJob = $state<"running" | "done" | null>(null);
   let importPoll: ReturnType<typeof setInterval> | undefined;
 
   /** The source whose job needs attention: running first, then a result waiting to be read. */
   function sourceWithJob(statuses: Record<ImporterId, ImporterStatus>): ImporterId | null {
+    const ids = Object.keys(statuses);
     const kind = (id: ImporterId) => statuses[id].activity.kind;
     return (
-      IMPORTERS.find((id) => importerBusy(statuses[id].activity)) ??
-      IMPORTERS.find((id) => kind(id) === "finished" || kind(id) === "importFailed") ??
-      IMPORTERS.find((id) => kind(id) !== "idle") ??
+      ids.find((id) => importerBusy(statuses[id].activity)) ??
+      ids.find((id) => kind(id) === "finished" || kind(id) === "importFailed") ??
+      ids.find((id) => kind(id) !== "idle") ??
       null
     );
   }
@@ -151,10 +155,21 @@
   async function openImport() {
     stopImportPoll();
     try {
-      importTool = sourceWithJob(await allImporterStatus()) ?? importTool;
+      importSources = await importAddons();
+    } catch (error) {
+      failure = message(error);
+      return;
+    }
+    try {
+      const statuses = await allImporterStatus();
+      importSources = importSources.filter(({ id }) => !statuses[id]?.disabled);
+      importTool = sourceWithJob(statuses) ?? importTool;
     } catch {
       // The panel reports a status it cannot read itself.
     }
+    const first = importSources[0];
+    if (!first) return;
+    if (!importSources.some(({ id }) => id === importTool)) importTool = first.id;
     importJob = null;
     importing = true;
   }
@@ -171,12 +186,12 @@
     const check = async () => {
       try {
         const statuses = await allImporterStatus();
-        if (IMPORTERS.some((id) => importerBusy(statuses[id].activity))) {
+        if (Object.values(statuses).some(({ activity }) => importerBusy(activity))) {
           importJob = "running";
           return;
         }
         stopImportPoll();
-        const kinds = IMPORTERS.map((id) => statuses[id].activity.kind);
+        const kinds = Object.values(statuses).map(({ activity }) => activity.kind);
         if (kinds.includes("finished") || kinds.includes("importFailed")) {
           if (importJob === "running") void reload();
           importJob = "done";
@@ -224,9 +239,10 @@
       if (libraryRoot) {
         await reload();
         void allImporterStatus()
-          .then((statuses) => {
+          .then(async (statuses) => {
             const source = sourceWithJob(statuses);
             if (source) {
+              importSources = (await importAddons()).filter(({ id }) => !statuses[id]?.disabled);
               importTool = source;
               importing = true;
             }
@@ -748,8 +764,16 @@
          you would have to put the pen down for. Jumping between branches is what Favoriten and
          search are for, and moving is a drag onto a crumb or a folder tile. -->
 
-    {#if onSettings}
+    {#if onSettings || onAddons}
       <div class="rail-footer">
+        {#if onAddons}
+          <button type="button" class="settings-link" aria-label={$t("addons.manager.title")} title={$t("addons.manager.title")} onclick={onAddons}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 7 8-4 8 4v10l-8 4-8-4zM4 7l8 4 8-4m-8 4v10m-4-16 8 4" /></svg>
+            <span>{$t("addons.manager.title")}</span>
+            <svg class="settings-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+          </button>
+        {/if}
+        {#if onSettings}
         <button type="button" class="settings-link" aria-haspopup="dialog"
           aria-label={$t("library.settings")} title={$t("library.settings")} onclick={onSettings}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -759,6 +783,7 @@
           <span>{$t("library.settings")}</span>
           <svg class="settings-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
         </button>
+        {/if}
       </div>
     {/if}
   </aside>
@@ -1097,6 +1122,7 @@
 {#if importing && libraryRoot}
   <ImportPanel
     bind:tool={importTool}
+    sources={importSources}
     folder={path}
     folderName={crumbs.at(-1)?.name ?? $t("library.library")}
     onClose={closeImport}

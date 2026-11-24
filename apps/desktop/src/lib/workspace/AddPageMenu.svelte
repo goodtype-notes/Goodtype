@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from "svelte";
   import { t, formatNumber, displayLocale } from "../i18n";
   import { dismissable } from "./dismiss";
   import { sourceBehavior, resolvePosition, type AddPageGroup, type AddPageSource, type AddPageWhere } from "./addPage";
@@ -20,6 +21,7 @@
    * Position and paper are remembered by the caller rather than reset each time it opens.
    */
   let {
+    generators,
     where,
     groups,
     tones,
@@ -39,6 +41,7 @@
     onOrientationChange,
     onClose,
   }: {
+    generators?: Snippet<[import("../model").PagePosition]>;
     where: AddPageWhere;
     groups: AddPageGroup[];
     /** Paper colours. Every template below is shown in whichever one is selected. */
@@ -206,7 +209,7 @@
   /// Enter commits from wherever the writer is, and Tab stays inside the panel so a keyboard
   /// writer cannot land behind it on the page it is covering.
   function keydown(event: KeyboardEvent) {
-    if (event.key === "Enter" && !(event.target as HTMLElement).closest(".add")) {
+    if (event.key === "Enter" && !(event.target as HTMLElement).closest(".add, .generators")) {
       event.preventDefault();
       commit(event.shiftKey);
       return;
@@ -373,6 +376,9 @@
     <!-- Column B. Filters and the import sit in a fixed band; only the papers scroll. -->
     <div class="library">
       <div class="band">
+        {#if generators}
+          <div class="generators">{@render generators(resolvePosition(canPlaceRelative ? where : "last", currentPageId))}</div>
+        {/if}
         <div class="filters" role="group" aria-label={$t("workspace.paperKind")}>
           <button
             type="button"
@@ -502,6 +508,9 @@
 
 <style>
   .muted { opacity: var(--disabled); }
+  .generators { display: flex; flex-wrap: wrap; gap: 6px; margin-block-end: 8px; }
+  .generators :global(.generator-group) { display: grid; gap: 4px; color: var(--muted); font-size: var(--text-sm); }
+  .generators :global(button) { min-height: var(--control); padding-inline: 8px; border: 0; background: var(--wash); color: var(--text); border-radius: var(--radius); font: inherit; cursor: pointer; }
   .calculation-preview { box-sizing: border-box; padding: 18%; width: 100%; }
   .code-line { display: block; width: 85%; height: 4px; background: #8d9da8; margin-bottom: 7px; }
   .code-line.short { width: 55%; }

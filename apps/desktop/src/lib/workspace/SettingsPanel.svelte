@@ -1,4 +1,9 @@
 <script lang="ts">
+  import ConfirmDialog from "./ConfirmDialog.svelte";
+  import AddonSettings from "./addons/AddonSettings.svelte";
+  import { matchesField } from "./addons/formModel";
+  import { locale as addonLocale } from "../i18n";
+  import { addonContributions, type AddonContribution, listAddons, resetAddonPolicy, setAddonAutoCheck, setAddonDirectApply, type AddonManager } from "../ipc/addons";
   import CodexSettings from "../helper/CodexSettings.svelte";
   import HelperSetup from "../helper/HelperSetup.svelte";
   import { onMount, tick, untrack } from "svelte";
@@ -35,6 +40,7 @@
     selectedBlockFont = null,
     onFontChange,
     initialGroup = "appearance",
+    themes = [],
   }: {
     settings: AppSettings;
     /** What the entries that *do* something rather than store something should call. */
@@ -44,6 +50,7 @@
     selectedBlockFont?: string | null;
     onFontChange?: (font: string) => void;
     initialGroup?: string;
+    themes?: { value: string; label: string }[];
   } = $props();
 
   let fonts = $state<string[]>(["DejaVu Sans Mono", "Libertinus Serif", "New Computer Modern"]);
@@ -52,7 +59,61 @@
     if (!("__TAURI_INTERNALS__" in window)) return;
     void typstFontFamilies().then(value => { fonts = value; }).catch(() => { fontLoadFailed = true; });
   });
-  const groups = $derived(settingGroups($t, [...new Set([...fonts, settings.inlineTextFont, selectedBlockFont].filter((font): font is string => Boolean(font)))], settings.aiHelper.enabled));
+  let contributions = $state.raw<AddonContribution[]>([]);
+  let addonManager = $state.raw<AddonManager>();
+  const groups = $derived(settingGroups($t, [...new Set([...fonts, settings.inlineTextFont, selectedBlockFont].filter((font): font is string => Boolean(font)))], settings.aiHelper.enabled, themes, contributions, $addonLocale));
+  let addonError = $state<"loadFailed" | "policyFailed" | null>(null);
+  let confirmReset = $state(false);
+  let policyPending = $state(false);
+
+  let addonRequest = 0;
+  async function refreshAddons() {
+    const request = ++addonRequest;
+    void addonContributions().then(found => { if (request === addonRequest) contributions = found; }).catch(() => {});
+    try {
+      const next = await listAddons();
+      if (request !== addonRequest) return;
+      addonManager = next;
+      if (addonError === "loadFailed") addonError = null;
+    } catch {
+      if (request === addonRequest) addonError = "loadFailed";
+    }
+  }
+
+  async function resetPolicy() {
+    confirmReset = false;
+    policyPending = true;
+    addonError = null;
+    try {
+      await resetAddonPolicy();
+      await refreshAddons();
+    } catch {
+      addonError = "policyFailed";
+    } finally {
+      policyPending = false;
+    }
+  }
+
+  $effect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    void refreshAddons();
+  });
+
+  async function toggleAddonPolicy(preference: "autoCheck" | "allowDirectApply") {
+    if (!addonManager || policyPending) return;
+    policyPending = true;
+    addonError = null;
+    try {
+      if (preference === "autoCheck") await setAddonAutoCheck(!addonManager.autoCheck);
+      else await setAddonDirectApply(null, !addonManager.allowDirectApply);
+      await refreshAddons();
+    } catch {
+      addonError = "policyFailed";
+    } finally {
+      policyPending = false;
+    }
+  }
+
   let groupId = $state(untrack(() => initialGroup));
   $effect(() => { if (!groups.some(group => group.id === groupId)) groupId = "appearance"; });
   let query = $state("");
@@ -63,6 +124,9 @@
     groups.find((entry) => entry.id === groupId) ?? groups[0],
   );
   const hits = $derived(searchSettings(query, groups));
+  const addonHits = $derived(contributions.filter(addon => addon.settings.some(field => matchesField(addon, field, query, $addonLocale))));
+  const addonHitCount = $derived(addonHits.reduce((count, addon) => count +
+    addon.settings.filter(field => matchesField(addon, field, query, $addonLocale)).length, 0));
   const searching = $derived(query.trim().length > 0);
 
   function apply(item: SettingItem, value: boolean | string | number) {
@@ -132,6 +196,20 @@
       disabled={item.control.locked?.(settings) ?? false}
       onclick={() => apply(item, !on)}
     ><span></span></button>
+  {:else if item.control.kind === "addonPolicy"}
+    {@const preference = item.control.preference}
+    {@const enabled = addonManager?.[preference] ?? (preference === "autoCheck")}
+    <button type="button" role="switch" aria-checked={enabled}
+      aria-label={item.label} aria-describedby={item.hint ? item.id + "-hint" : undefined}
+      class="toggle" class:on={enabled}
+      disabled={!addonManager || addonManager.recovery || policyPending} onclick={() => void toggleAddonPolicy(preference)}><span></span></button>
+    {#if addonManager?.recovery && preference === "allowDirectApply"}
+      <p role="alert" class="hint">{$t("addons.manager.recovery")}</p>
+      <button type="button" class="run" disabled={policyPending} onclick={() => confirmReset = true}>
+        {$t("addons.manager.resetPolicy")}
+      </button>
+    {/if}
+    {#if addonError}<p role="alert" class="hint">{$t(`addons.manager.${addonError}`)}</p>{/if}
   {:else if item.control.kind === "action"}
     {@const control = item.control}
     <button type="button" class="run" onclick={() => control.run(actions)}>{control.buttonLabel}</button>
@@ -177,11 +255,11 @@
 {/snippet}
 
 {#snippet setting(item: SettingItem, where?: string)}
-  <div class="setting" class:stacked={item.control.kind !== "toggle"}>
+  <div class="setting" class:stacked={item.control.kind !== "toggle" && item.control.kind !== "addonPolicy"}>
     <div class="words">
       <span class="name">{item.label}</span>
       {#if where}<span class="where">{where}</span>{/if}
-      {#if item.hint}<span class="hint">{item.hint}</span>{/if}
+      {#if item.hint}<span class="hint" id={item.id + "-hint"}>{item.hint}</span>{/if}
     </div>
     {@render control(item)}
   </div>
@@ -248,12 +326,15 @@
       <div class="pane">
         {#if searching}
           <div class="pane-head">
-            <h2>{$t("counts.results", { count: hits.length })}</h2>
+            <h2>{$t("counts.results", { count: hits.length + addonHitCount })}</h2>
           </div>
-          {#if hits.length}
+          {#if hits.length || addonHitCount}
             <div class="settings">
               {#each hits as hit (hit.item.id)}
                 {@render setting(hit.item, hit.group.title)}
+              {/each}
+              {#each addonHits as addon (addon.addonId)}
+                <AddonSettings {addon} {query} disabled={addonManager?.recovery} />
               {/each}
             </div>
           {:else}
@@ -267,7 +348,10 @@
             {#if group.blurb}<p class="blurb">{group.blurb}</p>{/if}
           </div>
           <div class="settings">
-            {#each group.items as item (item.id)}
+            {#each group.items as item, index (item.id)}
+              {#if item.section && item.section !== group.items[index - 1]?.section}
+                <h3 class="setting-section">{item.section}</h3>
+              {/if}
               {@render setting(item)}
             {/each}
             {#if group.id === "aiHelper" && settings.aiHelper.enabled}<CodexSettings {settings} {onChange} /><HelperSetup />{/if}
@@ -277,6 +361,12 @@
     </div>
   </div>
 </div>
+
+{#if confirmReset}
+  <ConfirmDialog title={$t("addons.manager.resetTitle")} detail={$t("addons.manager.resetDetail")}
+    confirmLabel={$t("addons.manager.resetPolicy")} onCancel={() => confirmReset = false}
+    onConfirm={() => void resetPolicy()} />
+{/if}
 
 <style>
   .select-shell { position: relative; display: inline-flex; width: min(360px, 100%); }
@@ -467,6 +557,8 @@
     font-size: var(--text-sm);
     line-height: 1.5;
   }
+
+  .setting-section { margin: 18px 0 6px; color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
 
   .settings { display: flex; flex-direction: column; }
 
