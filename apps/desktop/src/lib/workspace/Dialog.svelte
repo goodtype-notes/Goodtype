@@ -71,7 +71,7 @@
   }
 </script>
 
-<div class="scrim" role="presentation" onpointerdown={event => { if (event.target === event.currentTarget && canDismiss) onClose?.(); }}>
+<div class="scrim" data-ui="solid" role="presentation" onpointerdown={event => { if (event.target === event.currentTarget && canDismiss) onClose?.(); }}>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
     bind:this={panel}
