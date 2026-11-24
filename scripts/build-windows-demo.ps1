@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("local", "dev", "stable")]
+    [ValidateSet("local", "dev")]
     [string]$Channel = "local"
 )
 
