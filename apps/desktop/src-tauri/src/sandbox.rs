@@ -161,3 +161,8 @@ pub fn minimal_environment() -> Result<BTreeMap<OsString, OsString>, String> {
     }
     Ok(environment)
 }
+
+#[cfg(not(windows))]
+pub fn minimal_environment() -> Result<BTreeMap<OsString, OsString>, String> {
+    Err("Sandbox launch is unsupported on this platform".into())
+}
