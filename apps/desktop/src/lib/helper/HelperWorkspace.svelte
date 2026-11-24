@@ -10,8 +10,11 @@
   import { helperCodexStatus, helperStatus, helperActivity, helperContextReply, helperAnswerConnection, helperRevoke, listenHelper, type SessionInfo, type ScopeRequest, type ActivityEntry } from "../ipc/helper";
   import { t, formatNumber, formatDate } from "../i18n";
   type Review = Snippet<[((proposal: Proposal, text: string) => Promise<void>) | undefined, boolean]>;
-  let { session, pages = [], activityOpen = $bindable(false), panelOpen = $bindable(false), hasConversation = false, conversation, available, onError }: { pages?: {id:string;number?:number;title?:string}[]; session: ContextSession & { readonly pageInputLocked?: boolean; readonly pageEntries?: {id:string}[]; insertHelperProposal:(p:Proposal)=>Promise<void>; goToPageNumber?: (number: number) => Promise<void> }; activityOpen?: boolean; panelOpen?: boolean; hasConversation?: boolean; conversation?: Snippet<[Review]>; available: boolean; onError: () => void } = $props();
+  let { session, pages = [], activityOpen = $bindable(false), panelOpen = $bindable(false), hasConversation = false, waiting = $bindable(false), conversation, available, onError }: { pages?: {id:string;number?:number;title?:string}[]; session: ContextSession & { readonly pageInputLocked?: boolean; readonly pageEntries?: {id:string}[]; insertHelperProposal:(p:Proposal)=>Promise<void>; goToPageNumber?: (number: number) => Promise<void> }; activityOpen?: boolean; panelOpen?: boolean; hasConversation?: boolean; waiting?: boolean; conversation?: Snippet<[Review]>; available: boolean; onError: () => void } = $props();
   let proposals=$state<Proposal[]>([]), selected=$state<string|null>(null), discarded=$state(false);
+  /// Something in the panel needs the writer: a live conversation or a proposal not yet reviewed. The
+  /// header's AI toggle shows a dot for it while the panel is hidden.
+  $effect(() => { waiting = Boolean($helper?.enabled && (hasConversation || proposals.some(p => p.status === "pending" || p.status === "stale") || discarded)); });
   const reviewed=$derived(proposals.find(p=>p.id===selected));
   $effect(()=>{proposalPreview.set(reviewed && ["pending", "change_requested"].includes(reviewed.status) && reviewed.kind !== "preset_install" && !reviewed.edit && !reviewed.newPage?reviewed:null);return()=>proposalPreview.set(null);});
   let applied = $state(false);
@@ -143,9 +146,6 @@
     <div class="panel-body">{@render review(undefined, false)}{#if !reviewed}<p class="hint">{$t("codex.selectHint")}</p>{/if}</div>
   {/if}
 </aside>
-{#if $helper?.enabled && !panelOpen && (hasConversation || proposals.some(p => p.status === "pending" || p.status === "stale") || discarded)}
-  <button class="reopen-ai" type="button" data-preserve-selection onclick={() => panelOpen=true}>{$t("codex.openPanel")}</button>
-{/if}
 <style>
 
 .helper-card, .helper-activity { position: fixed; z-index: 70; top: 64px; right: 16px; width: 420px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 90px); overflow: auto; padding: 16px; border: 1px solid var(--edge); border-radius: var(--radius-lg); background: var(--panel); color: var(--text); font-size: var(--text-md); line-height: 1.5; box-shadow: var(--shadow-panel); overflow-wrap: anywhere; }
@@ -173,7 +173,5 @@ time { display: block; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
 .ai-panel[hidden] { display: none; }
 .ai-panel header { min-height: 44px; padding-left: 16px; }
 .panel-body { min-height: 0; flex: 1; overflow-y: auto; padding: 16px; }
-.reopen-ai { position: fixed; z-index: 44; right: 12px; bottom: 46px; background: var(--panel); border: 1px solid var(--edge); box-shadow: var(--shadow-menu); }
-.reopen-ai:hover:not(:disabled) { background: var(--wash); border-color: var(--edge-strong); }
 .applied { color: var(--sage-text); font-size: var(--text-sm); }
 </style>
