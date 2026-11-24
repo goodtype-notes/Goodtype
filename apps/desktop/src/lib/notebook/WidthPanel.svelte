@@ -125,7 +125,7 @@
 
 <!-- Embedded, the card owns dismissal: the outside-press listener would fire on the card's own
      header and close the sub-view out from under the writer. -->
-<aside use:dismissable={embedded ? () => {} : onClose} class:embedded class="width-panel" aria-label={$t("workspace.strokeWidth")}>
+<aside use:dismissable={embedded ? () => {} : onClose} class:embedded class="width-panel" data-ui="solid" aria-label={$t("workspace.strokeWidth")}>
   <!-- Drawn at the width it will be, so the number is checked against a mark rather than trusted. -->
   <div class="sample">
     <svg viewBox="0 0 220 42" aria-hidden="true"><path d="M20 28C48 3 66 4 91 24S133 39 153 20S181 5 200 17" fill="none" stroke="currentColor" stroke-linecap="round"
@@ -176,13 +176,14 @@
   .width-panel {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    width: 220px;
+    gap: 12px;
+    width: 232px;
     padding: 12px;
     border: 1px solid var(--edge);
     border-radius: var(--radius-lg);
     background: var(--panel);
     box-shadow: var(--shadow-panel);
+    color: var(--text);
   }
 
   .width-panel.embedded {
@@ -197,16 +198,17 @@
     display: grid;
     height: 52px;
     border-radius: var(--radius);
-    background: rgb(0 0 0 / 25%);
+    background: var(--inset);
     place-items: center;
   }
   .sample svg { width: 100%; height: 42px; color: var(--text); }
 
   /* One strip, not three tiles: the choice is small, so the control is too. */
-  .segments { display: grid; grid-template-columns: repeat(3, 1fr); padding: 3px; border: 1px solid var(--edge); border-radius: var(--radius); background: rgb(0 0 0 / 18%); gap: 3px; }
-  .segments button { display: grid; height: 30px; place-items: center; border: 0; border-radius: calc(var(--radius) - 2px); background: transparent; color: var(--muted); cursor: pointer; }
-  .segments button:hover { color: var(--text); background: var(--wash); }
-  .segments button.current { background: var(--accent-fill); color: var(--text); box-shadow: inset 0 0 0 1px var(--blueprint); }
+  .segments { display: grid; grid-template-columns: repeat(3, 1fr); padding: 3px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); gap: 2px; }
+  .segments button { display: grid; height: 30px; place-items: center; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; transition: background var(--fast) ease, color var(--fast) ease; }
+  .segments button:hover:not(.current) { color: var(--text); background: var(--wash); }
+  .segments button:active { background: var(--wash-strong); }
+  .segments button.current { background: var(--accent-fill); color: var(--text); box-shadow: inset 0 0 0 1px var(--accent-edge); }
   .segments button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
   .segments svg { width: 34px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
 
@@ -224,14 +226,15 @@
 
   .primary,
   .remove {
-    height: 30px;
-    padding: 0 11px;
+    height: var(--control);
+    padding: 0 16px;
     border: 0;
     border-radius: var(--radius);
     font: inherit;
     font-size: var(--text-md);
     white-space: nowrap;
     cursor: pointer;
+    transition: background var(--fast) ease;
   }
 
   .primary {
@@ -240,20 +243,32 @@
     font-weight: 600;
   }
 
+  .primary:hover:not(:disabled) { background: var(--blueprint-hover); }
   .primary:disabled { opacity: var(--disabled); cursor: default; }
 
-  .note { margin: 0; color: var(--muted); font-size: var(--text-sm); }
+  .note { margin: 0; color: var(--muted); font-size: var(--text-sm); line-height: 1.4; }
 
-  /* Destructive, so it reads as a quiet word rather than a button competing with Apply. */
+  /* Destructive, so it reads as a quiet word (oxide text, no fill) rather than a button
+     competing with Apply. */
   .remove {
-    padding: 0 6px;
+    height: var(--control-dense);
+    padding: 0 8px;
     background: transparent;
-    color: var(--oxide);
+    color: var(--oxide-text);
   }
   .remove:hover { background: var(--wash); }
 
   button:focus-visible {
     outline: 2px solid var(--blueprint-light);
     outline-offset: 2px;
+  }
+
+  @media (pointer: coarse) {
+    .primary, .remove { min-height: var(--control-touch); }
+    .segments button { height: var(--control-touch); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .segments button, .primary, .remove { transition: none; }
   }
 </style>

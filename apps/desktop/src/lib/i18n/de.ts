@@ -1246,6 +1246,8 @@ export const de = {
     "paletteFromAddons": "Aus Add-ons",
     "linePattern": "Linienmuster",
     "patternSpacing": "Musterabstand",
+    "shapeGroupWhat": "Was gezeichnet wird",
+    "shapeGroupBehaviour": "Zeichenverhalten",
     "keepProportions": "Proportionen beibehalten",
     "snapEnds": "Enden einrasten",
     "snapEndsHint": "Linienenden rasten an nahen Enden und Ecken ein. Alt gedrückt halten, um frei zu platzieren.",

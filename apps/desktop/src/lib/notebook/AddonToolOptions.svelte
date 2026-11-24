@@ -18,7 +18,7 @@
   {@const value = addon.values[field.id] ?? field.default}
   {@const mode = toolFieldPresentation(addon, field, $locale)}
   {#if field.type === "choice"}
-    <div class="choice" class:rail>
+    <div class="choice" class:rail data-ui="solid">
       {#if !rail}<span class="label">{label}</span>{/if}
       <div class="options" class:list={mode === "list"} role="group" aria-label={label}>
         {#each field.choices as option (option.value)}
@@ -41,22 +41,25 @@
 {/each}
 
 <style>
-  .choice { display: grid; gap: 5px; min-width: 0; }
+  .choice { display: grid; gap: 4px; min-width: 0; }
   .label { color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
-  .options { display: flex; padding: 2px; gap: 2px; border-radius: var(--radius); background: var(--inset); }
+  .options { display: flex; padding: 3px; gap: 2px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); }
   .options.list { flex-direction: column; }
   button {
-    flex: 1; min-height: var(--control-dense); padding: 3px 7px; border: 0;
+    flex: 1; min-height: var(--control-dense); padding: 3px 8px; border: 0;
     border-radius: var(--radius); background: transparent; color: var(--muted);
     font: inherit; font-size: var(--text-md); cursor: pointer;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
   .rail button { white-space: nowrap; }
   button.icon { display: grid; min-width: var(--control-dense); place-items: center; }
   .list button { text-align: start; }
-  button:hover:not(:disabled) { background: var(--wash); color: var(--text); }
-  button[aria-pressed="true"] { background: var(--accent-fill); box-shadow: inset 0 0 0 1px var(--accent-edge); color: var(--text); }
+  button:hover:not(:disabled):not([aria-pressed="true"]) { background: var(--wash); color: var(--text); }
+  button:active:not(:disabled) { background: var(--wash-strong); }
+  button[aria-pressed="true"] { background: var(--accent-fill); box-shadow: inset 0 0 0 1px var(--accent-edge); color: var(--text); font-weight: 600; }
   button:focus-visible { position: relative; outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
-  button:disabled { opacity: var(--disabled); cursor: not-allowed; }
+  button:disabled { opacity: var(--disabled); cursor: default; }
   svg { width: var(--icon-dense); height: var(--icon-dense); fill: none; stroke: currentColor;
     stroke-width: var(--stroke-dense); stroke-linecap: round; stroke-linejoin: round; }
+  @media (prefers-reduced-motion: reduce) { button { transition: none; } }
 </style>

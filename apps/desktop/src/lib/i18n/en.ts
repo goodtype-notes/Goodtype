@@ -1245,6 +1245,8 @@ export const en = {
     "paletteFromAddons": "From addons",
     "linePattern": "Line pattern",
     "patternSpacing": "Pattern spacing",
+    "shapeGroupWhat": "What to draw",
+    "shapeGroupBehaviour": "How it draws",
     "keepProportions": "Keep proportions",
     "snapEnds": "Snap ends",
     "snapEndsHint": "Line ends meet nearby ends and corners. Hold Alt to place freely.",
