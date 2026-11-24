@@ -30,28 +30,33 @@
 </svelte:head>
 
 <style>
+  /* A floating notice: the menu recipe's surface, one quiet secondary action. It sits above the
+     status bar so it never covers the save state. */
   .addon-notice.visible {
     position: fixed;
     z-index: 50;
-    inset: auto 1rem 2rem auto;
+    inset: auto 16px 48px auto;
     display: flex;
     align-items: center;
-    gap: .75rem;
-    padding: .5rem .75rem;
+    gap: 12px;
+    padding: 6px 6px 6px 16px;
     color: var(--text);
     background: var(--panel);
     border: 1px solid var(--edge);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-menu);
+    font: var(--text-md) var(--font-ui);
   }
-  .addon-notice button { color: inherit; background: transparent; border: 1px solid var(--edge); }
+  .addon-notice button { min-height: var(--control); padding: 0 14px; border: 0; border-radius: var(--radius); color: var(--text); background: var(--wash); font: inherit; cursor: pointer; }
+  .addon-notice button:hover { background: var(--wash-strong); }
+  .addon-notice button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 
   /* One scrollbar for the whole app. The platform's own is a 17px tray with stepper arrows at
      both ends, which is wider than some of the controls it sits beside and belongs to a different
-     decade of Windows than the rest of this chrome. Overlay-thin, and it fades into the panel it
-     scrolls rather than framing it. */
+     decade of Windows than the rest of this chrome. Thin and solid, from the ladder. */
   :global(*) {
     scrollbar-width: thin;
-    scrollbar-color: rgb(255 255 255 / 16%) transparent;
+    scrollbar-color: var(--edge-strong) transparent;
   }
 
   :global(::-webkit-scrollbar) {
@@ -67,12 +72,12 @@
   :global(::-webkit-scrollbar-thumb) {
     border: 2px solid transparent;
     border-radius: 999px;
-    background: rgb(255 255 255 / 16%);
+    background: var(--edge-strong);
     background-clip: padding-box;
   }
 
   :global(::-webkit-scrollbar-thumb:hover) {
-    background: rgb(255 255 255 / 30%);
+    background: var(--muted);
     background-clip: padding-box;
   }
 

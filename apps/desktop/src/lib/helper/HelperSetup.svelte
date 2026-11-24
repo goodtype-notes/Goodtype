@@ -19,11 +19,12 @@
 </details>
 <style>
   details { padding: 16px 0; border-top: 1px solid var(--edge-soft); font-size: var(--text-md); }
-  summary { cursor: pointer; color: var(--muted); }
+  summary { cursor: pointer; color: var(--muted); border-radius: var(--radius); }
+  summary:hover { color: var(--text); }
   section { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding-top: 12px; overflow-wrap: anywhere; }
   p { margin: 0; color: var(--muted); font-size: var(--text-sm); line-height: 1.5; }
-  code { display: block; width: 100%; padding: 10px; border-radius: var(--radius); background: var(--inset); font-size: var(--text-sm); line-height: 1.5; user-select: text; }
-  button { min-height: var(--control); padding: 8px 12px; background: var(--wash); color: var(--text); border: 0; border-radius: var(--radius); cursor: pointer; font-size: var(--text-sm); font-weight: 600; }
+  code { display: block; width: 100%; padding: 8px 12px; border-radius: var(--radius); background: var(--inset); font-family: var(--font-code); font-size: var(--text-sm); line-height: 1.5; user-select: text; }
+  button { min-height: var(--control); padding: 0 16px; background: var(--wash); color: var(--text); border: 0; border-radius: var(--radius); cursor: pointer; font: inherit; font-size: var(--text-md); font-weight: 400; }
   button:hover { background: var(--wash-strong); }
   button:focus-visible, summary:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
   @media (pointer: coarse) { button, summary { min-height: var(--control-touch); } }

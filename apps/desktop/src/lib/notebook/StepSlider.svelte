@@ -128,7 +128,7 @@
     gap: 8px;
   }
 
-  .name { color: var(--text); font-size: var(--text-md); }
+  .name { color: var(--text); font-size: var(--text-md); line-height: 1.4; }
 
   .value {
     color: var(--muted);
@@ -148,17 +148,17 @@
     padding: 0;
     border: 0;
     border-radius: var(--radius);
-    background: rgb(0 0 0 / 22%);
+    background: var(--wash);
     color: var(--muted);
     cursor: pointer;
     place-items: center;
     touch-action: none;
   }
 
-  .nudge:hover:not(:disabled) { background: var(--wash); color: var(--text); }
-  .nudge:active:not(:disabled) { background: var(--accent-fill); color: var(--text); }
+  .nudge:hover:not(:disabled) { background: var(--wash-strong); color: var(--text); }
+  .nudge:active:not(:disabled) { background: var(--wash-strong); color: var(--text); }
   .nudge:disabled { opacity: var(--disabled); cursor: default; }
-  .nudge svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.8; }
+  .nudge svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: var(--stroke-dense); }
 
   .nudge:focus-visible,
   .track input:focus-visible {

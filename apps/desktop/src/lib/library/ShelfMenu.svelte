@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { dismissable } from "../workspace/dismiss";
+  import { floatInView } from "../workspace/floating";
 
   /**
    * A small popover for the shelf: the New menu, the sort menu, a tile's own menu.
@@ -89,6 +90,7 @@
 <div
   bind:this={menuElement}
   use:dismissable={onClose}
+  use:floatInView={{ align: align === "left" ? "start" : "end" }}
   class="menu"
   class:left={align === "left"}
   role="menu"
@@ -126,14 +128,14 @@
     top: calc(100% + 6px);
     right: 0;
     width: max-content;
-    min-width: 190px;
-    padding: 7px;
+    min-width: 200px;
+    padding: 4px;
     border: 1px solid var(--edge);
     border-radius: var(--radius-lg);
     background: var(--panel);
     box-shadow: var(--shadow-menu);
     transform-origin: top right;
-    animation: menu-in 120ms cubic-bezier(0.16, 1, 0.3, 1);
+    animation: menu-in var(--enter) ease-out;
   }
 
   .menu.left {
@@ -144,9 +146,9 @@
 
   .subject {
     overflow: hidden;
-    padding: 8px 10px 10px;
-    border-bottom: 1px solid var(--wash);
-    margin-bottom: 5px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--edge-soft);
+    margin-bottom: 4px;
     color: var(--text);
     font-size: var(--text-md);
     font-weight: 600;
@@ -160,7 +162,7 @@
     align-items: center;
     width: 100%;
     min-height: var(--control);
-    padding: 7px 11px;
+    padding: 0 12px;
     border: 0;
     border-radius: var(--radius);
     background: transparent;
@@ -178,7 +180,7 @@
 
   button:focus-visible {
     outline: 2px solid var(--blueprint-light);
-    outline-offset: 2px;
+    outline-offset: -2px;
   }
 
   button:disabled {
@@ -187,7 +189,7 @@
   }
 
   .destructive {
-    color: var(--oxide);
+    color: var(--oxide-text);
   }
 
   .grow {
@@ -208,7 +210,7 @@
   @keyframes menu-in {
     from {
       opacity: 0;
-      transform: translateY(-3px) scale(0.985);
+      transform: translateY(-4px);
     }
   }
 

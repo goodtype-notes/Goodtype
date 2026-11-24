@@ -68,4 +68,16 @@ describe("placeFloatingToolbar", () => {
       ),
     ).toEqual({ left: 12, top: 100, side: "below" });
   });
+
+  it("takes the other side rather than landing on the tool palette", () => {
+    const anchor = { left: 400, top: 300, right: 600, bottom: 400, width: 200, height: 100 };
+    // A palette docked where the bar would go above the selection.
+    const palette = { left: 300, top: 230, right: 700, bottom: 280 };
+    expect(placeFloatingToolbar(anchor, toolbar, boundary, 10, 12, [palette]))
+      .toEqual({ left: 334, top: 360, side: "below" });
+    // Blocked both ways (the selection sits under the palette): step below the palette.
+    const covering = { left: 300, top: 280, right: 700, bottom: 420 };
+    expect(placeFloatingToolbar(anchor, toolbar, boundary, 10, 12, [covering]))
+      .toEqual({ left: 334, top: 380, side: "below" });
+  });
 });

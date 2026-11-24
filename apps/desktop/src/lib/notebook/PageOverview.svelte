@@ -402,6 +402,7 @@
 <aside
   {id}
   class="page-overview"
+ 
   class:reduced-motion={reducedMotion}
   aria-label={$t("pageOverview.label")}
   onkeydown={panelKeydown}
@@ -413,8 +414,8 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
       </button>
     </div>
-    <label class="jump">
-      <span>{$t("workspace.goToPage")}</span>
+    <label class="jump" title={$t("pageOverview.hint")}>
+      <span class="jump-label">{$t("workspace.goToPage")}</span>
       <input
         type="number"
         min="1"
@@ -424,7 +425,7 @@
       />
       <span class="of">{$t("workspace.of", { pageCount: pages.length })}</span>
     </label>
-    <p class="hint" id={`${id}-hint`}>{$t("pageOverview.hint")}</p>
+    <p class="visually-hidden" id={`${id}-hint`}>{$t("pageOverview.hint")}</p>
   </header>
 
   <div
@@ -506,15 +507,15 @@
     display: flex;
     width: min(304px, calc(100vw - 48px));
     flex-direction: column;
-    border-left: 1px solid var(--edge);
+    border-left: 1px solid var(--edge-soft);
     background: var(--panel);
-    box-shadow: var(--shadow-panel);
     color: var(--text);
+    font-family: var(--font-ui);
     animation: overview-in var(--enter) ease-out;
   }
 
   @keyframes overview-in {
-    from { opacity: 0; transform: translateX(6px); }
+    from { opacity: 0; transform: translateX(4px); }
   }
 
   @keyframes overview-fade {
@@ -533,11 +534,11 @@
     flex-direction: column;
     padding: 12px;
     border-bottom: 1px solid var(--edge-soft);
-    gap: 8px;
+    gap: 12px;
   }
 
   .title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; }
+  h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; line-height: 1.25; }
 
   button { border: 0; font: inherit; cursor: pointer; }
   button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
@@ -555,6 +556,7 @@
   }
 
   .icon:hover { background: var(--wash); color: var(--text); }
+  .icon:active { background: var(--wash-strong); }
   .icon svg {
     width: var(--icon-dense);
     height: var(--icon-dense);
@@ -566,14 +568,15 @@
   }
 
   .jump { display: flex; align-items: center; color: var(--muted); font-size: var(--text-sm); gap: 8px; }
+  .jump-label { font-weight: 600; }
   .jump input {
     box-sizing: border-box;
-    width: 56px;
-    height: var(--control-dense);
-    padding: 0 6px;
+    width: 64px;
+    height: var(--control);
+    padding: 0 8px;
     border: 1px solid var(--edge);
     border-radius: var(--radius);
-    background: var(--charcoal);
+    background: var(--inset);
     caret-color: var(--blueprint-light);
     color: var(--text);
     font: inherit;
@@ -584,9 +587,8 @@
   }
 
   .jump input:hover { border-color: var(--edge-strong); }
-  .jump input:focus-visible { border-color: var(--blueprint); outline: none; }
-  .of { color: var(--quiet); font-variant-numeric: tabular-nums; }
-  .hint { margin: 0; color: var(--quiet); font-size: var(--text-sm); }
+  .jump input:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
+  .of { color: var(--quiet); font-weight: 400; font-variant-numeric: tabular-nums; }
 
   .grid {
     display: grid;
@@ -612,13 +614,17 @@
     color: var(--muted);
     touch-action: pan-y;
     user-select: none;
-    gap: 6px;
+    gap: 8px;
     transition: background var(--fast) ease;
   }
 
   .tile:hover { background: var(--wash); }
-  .tile.current { background: var(--accent-fill); box-shadow: inset 0 0 0 1px var(--accent-edge); color: var(--text); }
-  .tile.moving { background: var(--accent-tint); }
+  .tile:active { background: var(--wash-strong); }
+  /* The page in view is the current item; a picked page is one of a set. */
+  .tile.current { background: var(--accent-fill); color: var(--text); font-weight: 600; }
+  .tile.picked { background: var(--accent-fill); box-shadow: inset 0 0 0 1px var(--accent-edge); color: var(--text); }
+  /* Pages being dragged are marked, not lifted. */
+  .tile.moving { background: var(--accent-tint); box-shadow: inset 0 0 0 1px var(--accent-edge); }
 
   /* The insertion line sits in the middle of the 12px gap beside the tile. */
   .tile.insert-before::before,
@@ -635,19 +641,18 @@
   .tile.insert-before::before { left: -7px; }
   .tile.insert-after::after { right: -7px; }
 
+  /* Paper content: a thumbnail of the page, 3px corners and a hairline edge instead of a shadow. */
   .paper {
     position: relative;
     display: grid;
     width: 100%;
     max-height: 220px;
     overflow: hidden;
-    border-radius: 2px;
+    border-radius: 3px;
     background: var(--paper);
-    box-shadow: var(--shadow-page);
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 40%);
     place-items: center;
   }
-
-  .tile.picked .paper { outline: 2px solid var(--blueprint); outline-offset: 1px; }
 
   .paper img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
   .kind { color: var(--quiet); font-size: var(--text-sm); }
@@ -657,10 +662,10 @@
     top: 4px;
     right: 4px;
     display: grid;
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
-    /* The ring around the paper is the tile's one blue; the badge only confirms it. */
+    /* The tile's ring is its one blue; the badge only confirms it. */
     background: var(--panel);
     color: var(--text);
     place-items: center;
@@ -674,7 +679,7 @@
     display: flex;
     flex: none;
     align-items: center;
-    padding: 10px 12px;
+    padding: 12px;
     border-top: 1px solid var(--edge-soft);
     gap: 8px;
   }
@@ -687,20 +692,20 @@
     padding: 0 12px;
     border-radius: var(--radius);
     font-size: var(--text-md);
-    font-weight: 600;
     transition: background var(--fast) ease;
   }
 
-  .secondary { background: var(--wash); color: var(--text); }
+  .secondary { background: var(--wash); color: var(--text); font-weight: 400; }
   .secondary:hover { background: var(--wash-strong); }
-  .danger { background: var(--oxide); color: var(--on-accent); }
+  .danger { background: var(--oxide); color: var(--on-accent); font-weight: 600; }
   .danger:hover:not([aria-disabled="true"]) { background: var(--oxide-hover); }
-  .danger[aria-disabled="true"] { opacity: var(--disabled); cursor: not-allowed; }
+  .danger[aria-disabled="true"] { opacity: var(--disabled); cursor: default; }
 
   .visually-hidden {
     position: absolute;
     width: 1px;
     height: 1px;
+    margin: 0;
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;

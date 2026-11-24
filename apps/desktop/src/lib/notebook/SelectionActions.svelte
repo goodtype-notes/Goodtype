@@ -167,6 +167,7 @@
   bind:this={element}
   class:ready
   class="selection-actions"
+ 
   role="toolbar"
   style:left={`${left}px`}
   style:top={`${top}px`}
@@ -244,8 +245,8 @@
     display: flex;
     visibility: hidden;
     align-items: center;
-    gap: 3px;
-    padding: 5px;
+    gap: 4px;
+    padding: 4px;
     pointer-events: auto;
     border: 1px solid var(--edge);
     border-radius: var(--radius-lg);
@@ -255,17 +256,20 @@
   .selection-actions.ready { visibility: visible; }
   button {
     display: grid;
-    width: var(--control);
-    height: var(--control);
+    width: 40px;
+    height: 40px;
     padding: 0;
     border: 0;
     border-radius: var(--radius);
     background: transparent;
-    color: var(--text);
+    color: var(--muted);
     cursor: pointer;
     place-items: center;
+    touch-action: manipulation;
+    transition: background var(--fast), color var(--fast);
   }
-  button:hover:not(:disabled), button.active { background: var(--wash); }
+  button:hover:not(:disabled), button.active { background: var(--wash); color: var(--text); }
+  button:active:not(:disabled) { background: var(--wash-strong); }
   button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
   button:disabled { opacity: var(--disabled); cursor: default; }
   svg {
@@ -280,4 +284,6 @@
   svg.solid { fill: currentColor; stroke: none; }
   .more-popover { position: fixed; inset: auto; margin: 0; padding: 0; border: 0; background: transparent; overflow: visible; }
   .more-popover :global(.overflow-menu) { position: relative; top: auto; right: auto; max-height: calc(100vh - 24px); overflow-y: auto; }
+  @media (pointer: coarse) { button { width: var(--control-touch); height: var(--control-touch); } }
+  @media (prefers-reduced-motion: reduce) { button { transition: none; } }
 </style>

@@ -10,8 +10,11 @@
   import { helperCodexStatus, helperStatus, helperActivity, helperContextReply, helperAnswerConnection, helperRevoke, listenHelper, type SessionInfo, type ScopeRequest, type ActivityEntry } from "../ipc/helper";
   import { t, formatNumber, formatDate } from "../i18n";
   type Review = Snippet<[((proposal: Proposal, text: string) => Promise<void>) | undefined, boolean]>;
-  let { session, pages = [], activityOpen = $bindable(false), panelOpen = $bindable(false), hasConversation = false, conversation, available, onError }: { pages?: {id:string;number?:number;title?:string}[]; session: ContextSession & { readonly pageInputLocked?: boolean; readonly pageEntries?: {id:string}[]; insertHelperProposal:(p:Proposal)=>Promise<void>; goToPageNumber?: (number: number) => Promise<void> }; activityOpen?: boolean; panelOpen?: boolean; hasConversation?: boolean; conversation?: Snippet<[Review]>; available: boolean; onError: () => void } = $props();
+  let { session, pages = [], activityOpen = $bindable(false), panelOpen = $bindable(false), hasConversation = false, waiting = $bindable(false), conversation, available, onError }: { pages?: {id:string;number?:number;title?:string}[]; session: ContextSession & { readonly pageInputLocked?: boolean; readonly pageEntries?: {id:string}[]; insertHelperProposal:(p:Proposal)=>Promise<void>; goToPageNumber?: (number: number) => Promise<void> }; activityOpen?: boolean; panelOpen?: boolean; hasConversation?: boolean; waiting?: boolean; conversation?: Snippet<[Review]>; available: boolean; onError: () => void } = $props();
   let proposals=$state<Proposal[]>([]), selected=$state<string|null>(null), discarded=$state(false);
+  /// Something in the panel needs the writer: a live conversation or a proposal not yet reviewed. The
+  /// header's AI toggle shows a dot for it while the panel is hidden.
+  $effect(() => { waiting = Boolean($helper?.enabled && (hasConversation || proposals.some(p => p.status === "pending" || p.status === "stale") || discarded)); });
   const reviewed=$derived(proposals.find(p=>p.id===selected));
   $effect(()=>{proposalPreview.set(reviewed && ["pending", "change_requested"].includes(reviewed.status) && reviewed.kind !== "preset_install" && !reviewed.edit && !reviewed.newPage?reviewed:null);return()=>proposalPreview.set(null);});
   let applied = $state(false);
@@ -143,34 +146,32 @@
     <div class="panel-body">{@render review(undefined, false)}{#if !reviewed}<p class="hint">{$t("codex.selectHint")}</p>{/if}</div>
   {/if}
 </aside>
-{#if $helper?.enabled && !panelOpen && (hasConversation || proposals.some(p => p.status === "pending" || p.status === "stale") || discarded)}
-  <button class="reopen-ai" type="button" data-preserve-selection onclick={() => panelOpen=true}>{$t("codex.openPanel")}</button>
-{/if}
 <style>
 
 .helper-card, .helper-activity { position: fixed; z-index: 70; top: 64px; right: 16px; width: 420px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 90px); overflow: auto; padding: 16px; border: 1px solid var(--edge); border-radius: var(--radius-lg); background: var(--panel); color: var(--text); font-size: var(--text-md); line-height: 1.5; box-shadow: var(--shadow-panel); overflow-wrap: anywhere; }
 .helper-activity { z-index: 69; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
-header { display: flex; flex: none; align-items: center; gap: 8px; padding: 4px 6px 4px 12px; min-height: var(--control); border-bottom: 1px solid var(--edge-soft); }
-h2 { flex: 1; margin: 0; font-size: var(--text-md); font-weight: 600; }
+header { display: flex; flex: none; align-items: center; gap: 4px; padding: 4px 8px 4px 16px; min-height: var(--control); border-bottom: 1px solid var(--edge-soft); }
+h2 { flex: 1; margin: 0; font-size: var(--text-lg); font-weight: 600; line-height: 1.25; }
 .activity-body { min-height: 0; padding: 12px; overflow-y: auto; overscroll-behavior: contain; }
-p { margin: 0 0 10px; }
+p { margin: 0 0 12px; }
 .hint, time { color: var(--muted); font-size: var(--text-sm); }
 .client { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--edge-soft); }
+.client button { margin: 0; }
 .client p { min-width: 0; margin: 0; }
-button { min-height: var(--control); padding: 8px 12px; border: 0; border-radius: var(--radius); background: var(--wash); color: var(--text); cursor: pointer; }
-button:hover { background: var(--wash-strong); }
-.chrome { display: grid; width: var(--control-dense); min-height: var(--control-dense); padding: 0; background: transparent; color: var(--muted); place-items: center; }
-.chrome:hover { background: var(--wash); color: var(--text); }
+button { min-height: var(--control); padding: 0 16px; border: 0; border-radius: var(--radius); background: var(--wash); color: var(--text); font: inherit; font-size: var(--text-md); font-weight: 400; cursor: pointer; }
+button:hover:not(:disabled) { background: var(--wash-strong); }
+button:disabled { opacity: var(--disabled); cursor: default; }
+.helper-card button { margin: 0 8px 0 0; }
+.chrome { display: grid; width: var(--control-dense); min-height: var(--control-dense); padding: 0; margin: 0; background: transparent; color: var(--muted); place-items: center; }
+.chrome:hover:not(:disabled) { background: var(--wash); color: var(--text); }
 .chrome svg { width: var(--icon-dense); height: var(--icon-dense); fill: none; stroke: currentColor; stroke-width: var(--stroke-dense); stroke-linecap: round; }
 button:focus-visible, aside:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 article { padding: 12px 0 2px; border-top: 1px solid var(--edge-soft); }
-time { display: block; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+time { display: block; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
 @media (pointer: coarse) { button, .chrome { min-height: var(--control-touch); } .chrome { width: var(--control-touch); } }
-.ai-panel { position: fixed; z-index: 45; top: 58px; right: 0; bottom: 34px; display: flex; flex-direction: column; width: min(400px, 100vw); background: var(--panel); color: var(--text); border-left: 1px solid var(--edge); font-size: var(--text-md); line-height: 1.5; }
+.ai-panel { position: fixed; z-index: 45; top: 58px; right: 0; bottom: 34px; display: flex; flex-direction: column; width: min(400px, 100vw); background: var(--panel); color: var(--text); border-left: 1px solid var(--edge-soft); font-size: var(--text-md); line-height: 1.5; }
 .ai-panel[hidden] { display: none; }
 .ai-panel header { min-height: 44px; padding-left: 16px; }
 .panel-body { min-height: 0; flex: 1; overflow-y: auto; padding: 16px; }
-.reopen-ai { position: fixed; z-index: 44; right: 12px; bottom: 46px; background: var(--panel); border: 1px solid var(--edge); box-shadow: var(--shadow-menu); }
-.reopen-ai:hover { background: var(--panel); border-color: var(--edge-strong); }
 .applied { color: var(--sage-text); font-size: var(--text-sm); }
 </style>

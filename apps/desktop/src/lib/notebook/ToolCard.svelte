@@ -142,6 +142,7 @@
 
 <div
   class="tool-card"
+ 
   class:anchored={!!anchor}
   use:placePalettePopup={anchor ? { anchor, dock, onDismiss: onClose } : undefined}
   class:point-down={dock === "bottom"}
@@ -316,13 +317,15 @@
     padding: 0 6px 0 12px;
     border-bottom: 1px solid var(--edge-soft);
     gap: 8px;
+    margin-top: 4px;
   }
 
   .name {
     overflow: hidden;
     flex: 1;
-    font-size: var(--text-md);
+    font-size: var(--text-lg);
     font-weight: 600;
+    line-height: 1.25;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -348,6 +351,7 @@
   }
 
   .chrome:hover { background: var(--wash); color: var(--text); }
+  .chrome:active { background: var(--wash-strong); }
   .chrome svg {
     width: var(--icon-dense);
     height: var(--icon-dense);
@@ -363,14 +367,14 @@
     min-height: 0;
     flex-direction: column;
     padding: 12px;
-    gap: 13px;
+    gap: 12px;
     overflow-y: auto;
   }
 
   section {
     display: flex;
     flex-direction: column;
-    gap: 7px;
+    gap: 8px;
   }
 
   .section-label {
@@ -380,13 +384,14 @@
     gap: 8px;
   }
 
-  /* Sentence case, like every other label in the palette menus. */
+  /* Field label: sentence case, 12px/600 muted. */
   .eyebrow {
     color: var(--muted);
     font-size: var(--text-sm);
+    font-weight: 600;
   }
 
-  .eyebrow .hint { color: var(--quiet); }
+  .eyebrow .hint { color: var(--quiet); font-weight: 400; }
 
   .section-label .value {
     color: var(--muted);
@@ -417,6 +422,7 @@
     padding: 8px 4px;
     gap: 4px;
     border: 1px solid var(--edge);
+    transition: background var(--fast) ease, border-color var(--fast) ease;
     border-radius: var(--radius);
     background: transparent;
     color: var(--muted);
@@ -435,15 +441,16 @@
     stroke-width: var(--stroke);
   }
 
-  .nib:hover { background: var(--wash); }
-  .nib.current { border-color: var(--accent-edge); background: var(--accent-fill); color: var(--text); }
+  .nib:hover { background: var(--wash); border-color: var(--edge-strong); }
+  .nib:active { background: var(--wash-strong); }
+  .nib.current { border-color: var(--accent-edge); background: var(--accent-fill); color: var(--text); font-weight: 600; }
 
   .divider { height: 1px; flex: none; background: var(--edge-soft); }
 
   /* One setting per band, divided the same way in the pen and highlighter cards. */
-  .rows { gap: 10px; }
+  .rows { gap: 12px; }
   /* Global so a StepSlider, whose root is styled in its own component, is divided too. */
-  .rows > :global(:not(:first-child)) { padding-top: 10px; border-top: 1px solid var(--edge-soft); }
+  .rows > :global(:not(:first-child)) { padding-top: 12px; border-top: 1px solid var(--edge-soft); }
 
   .row {
     display: flex;
@@ -454,7 +461,7 @@
   }
 
   .row.stacked { display: grid; gap: 5px; }
-  .stacked .row-name { color: var(--muted); font-size: var(--text-sm); }
+  .stacked .row-name { color: var(--text); }
   .stacked .segmented button { flex: 1; min-height: var(--control-dense); }
 
   .row-name {
@@ -492,25 +499,32 @@
 
   .toggle.on { background: var(--blueprint); }
   .toggle.on span { background: var(--text); transform: translateX(14px); }
+  .toggle:hover:not(.on) { background: var(--edge-strong); }
 
   .segmented {
     display: flex;
     flex: none;
-    padding: 2px;
+    padding: 3px;
+    border: 1px solid var(--edge);
     border-radius: var(--radius);
     background: var(--inset);
     gap: 2px;
   }
 
   .segmented button {
-    padding: 4px 7px;
+    min-height: 26px;
+    padding: 4px 8px;
     border: 0;
     border-radius: var(--radius);
     background: transparent;
     color: var(--muted);
+    font: inherit;
     font-size: var(--text-sm);
     cursor: pointer;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
+
+  .segmented button:hover:not(.current) { background: var(--wash); color: var(--text); }
 
   .segmented button.current { background: var(--accent-fill); box-shadow: inset 0 0 0 1px var(--accent-edge); color: var(--text); font-weight: 600; }
 
@@ -524,6 +538,8 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .toggle span { transition: none; }
+    .toggle span,
+    .nib,
+    .segmented button { transition: none; }
   }
 </style>

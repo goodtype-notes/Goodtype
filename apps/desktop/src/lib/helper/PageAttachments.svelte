@@ -83,29 +83,34 @@
   {/if}
 </div>
 <style>
-  input { width: 100%; min-width: 0; min-height: var(--control); padding: 6px; background: var(--surround); border: 1px solid var(--edge); border-radius: var(--radius); font: inherit; color: var(--text); }
-  input:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 1px; }
-  .range { display: flex; gap: 4px; margin-top: 6px; }
+  input { width: 100%; min-width: 0; min-height: var(--control); padding: 0 12px; background: var(--inset); border: 1px solid var(--edge); border-radius: var(--radius); font: inherit; font-size: var(--text-md); color: var(--text); }
+  input:hover { border-color: var(--edge-strong); }
+  input::placeholder { color: var(--quiet); }
+  input:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
+  .range { display: flex; gap: 4px; margin: 6px 0 0; }
   .range button { flex: none; }
-  .picker-actions { display: flex; justify-content: space-between; position: sticky; bottom: -6px; background: var(--panel); border-top: 1px solid var(--edge); }
+  .picker-actions { display: flex; justify-content: space-between; position: sticky; bottom: -6px; margin-top: 6px; padding-top: 6px; background: var(--panel); border-top: 1px solid var(--edge-soft); }
   .attachments { display: contents; }
-  button { display: inline-flex; align-items: center; gap: 4px; min-height: var(--control); padding: 0 6px; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); font: inherit; font-weight: 400; font-size: var(--text-sm); cursor: pointer; }
+  button { display: inline-flex; align-items: center; gap: 4px; min-height: var(--control); padding: 0 8px; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); font: inherit; font-weight: 400; font-size: var(--text-md); cursor: pointer; }
   button:hover { background: var(--wash); color: var(--text); }
   button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
   .entry:focus-visible { outline-offset: -2px; }
   svg { flex: none; width: var(--icon-dense); height: var(--icon-dense); fill: none; stroke: currentColor; stroke-width: var(--stroke-dense); stroke-linecap: round; stroke-linejoin: round; }
   .page-chip { background: var(--panel); color: var(--text); display: inline-flex; min-width: 0; border: 1px solid var(--edge); border-radius: var(--radius); }
-  .page-chip button { min-height: var(--control-dense); color: var(--text); }
-  .more { min-height: var(--control-dense); }
+  .page-chip button { min-height: var(--control-dense); font-size: var(--text-sm); color: var(--text); }
+  .more { min-height: var(--control-dense); padding: 0 8px; font-size: var(--text-sm); }
   .preview { overflow: hidden; white-space: nowrap; }
-  .remove { padding: 0 3px; }
+  .remove { padding: 0 4px; color: var(--muted); }
   .picker { position: fixed; inset: auto 12px 230px auto; width: min(350px, calc(100vw - 24px)); max-height: min(300px, calc(100dvh - 300px)); margin: 0; padding: 6px; overflow: auto; border: 1px solid var(--edge); border-radius: var(--radius-lg); background: var(--panel); color: var(--text); box-shadow: var(--shadow-menu); font: inherit; }
   p { margin: 6px; color: var(--muted); font-size: var(--text-sm); }
-  .entry { min-height: var(--control); width: 100%; text-align: left; padding: 6px; color: var(--text); }
+  .entry { min-height: var(--control); width: 100%; text-align: left; padding: 6px 8px; gap: 8px; color: var(--text); }
+  .entry[aria-checked=true] { background: var(--accent-fill); }
+  .entry[aria-checked=true]:hover { background: var(--accent-fill); }
   .entry[aria-disabled=true] { color: var(--muted); cursor: not-allowed; }
   .text { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
   small { color: var(--muted); font-size: var(--text-sm); }
-  .check { display: grid; place-items: center; width: 16px; height: 16px; flex: none; border: 1px solid var(--muted); border-radius: 3px; color: var(--blueprint-light); }
+  .entry[aria-checked=true] small { color: var(--muted); }
+  .check { display: grid; place-items: center; width: 16px; height: 16px; flex: none; border: 1px solid var(--quiet); border-radius: 3px; color: var(--blueprint-light); }
   [aria-checked=true] .check { border-color: var(--blueprint-light); }
   @media (pointer: coarse) { button { min-height: var(--control-touch); } }
 </style>

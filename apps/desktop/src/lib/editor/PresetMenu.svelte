@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from "../i18n";
   import { tick } from "svelte";
+  import { floatInView } from "../workspace/floating";
   import type { PresetDiagnostic, PresetSummary } from "../page/presets";
   import { DEFAULT_PRESET_PATH, presetPresentation, pagePresetOptions, pagePresetState } from "../page/presets";
 
@@ -204,11 +205,11 @@
   >
     <span class="dot" class:custom={tone === "custom"} class:off={tone === "off"} aria-hidden="true"></span>
     <span class="name">{label}</span>
-    <span class="caret" aria-hidden="true">▾</span>
+    <svg class="caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
   </button>
 
   {#if open}
-    <div class="menu" bind:this={list} role="menu" tabindex="-1" aria-label={$t("editor.pagePreset")} onkeydown={keys}>
+    <div class="menu" bind:this={list} use:floatInView={{ anchor: chip, align: "end", gap: 4 }} role="menu" tabindex="-1" aria-label={$t("editor.pagePreset")} onkeydown={keys}>
       <div class="scope" role="group" aria-label={$t("editor.applyTo")}>
         <button
           type="button"
@@ -244,7 +245,7 @@
                 : undefined}
               onclick={() => pick(entry)}
             >
-              <span class="tick" aria-hidden="true">{checked(entry.action) ? "✓" : ""}</span>
+              <span class="tick" aria-hidden="true">{#if checked(entry.action)}<svg viewBox="0 0 24 24"><path d="m6 12.5 4 4 8-9" /></svg>{/if}</span>
               <span class="text">
                 <span class="entry-name">{entry.name}</span>
                 {#if entry.problem}
@@ -300,12 +301,17 @@
     color: var(--muted);
     font: var(--text-md)/1 var(--font-ui);
     cursor: pointer;
-    gap: 7px;
+    gap: 8px;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
   .chip:hover:not(:disabled) {
     background: var(--wash);
     color: var(--text);
+  }
+
+  .chip:active:not(:disabled) {
+    background: var(--wash-strong);
   }
 
   .chip:focus-visible {
@@ -314,7 +320,7 @@
   }
 
   .chip:disabled {
-    cursor: not-allowed;
+    cursor: default;
     opacity: var(--disabled);
   }
 
@@ -324,12 +330,13 @@
     white-space: nowrap;
   }
 
+  /* The status dot: on a preset, a hand-written header, or nothing. */
   .dot {
     width: 6px;
     height: 6px;
     flex: none;
-    border-radius: 2px;
-    background: var(--blueprint);
+    border-radius: 50%;
+    background: var(--sage);
   }
 
   .dot.custom {
@@ -341,36 +348,49 @@
   }
 
   .caret {
+    width: var(--icon-dense);
+    height: var(--icon-dense);
     flex: none;
-    color: var(--quiet);
-    font-size: var(--text-xs);
+    fill: none;
+    stroke: var(--quiet);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: var(--stroke-dense);
   }
 
   .menu {
     position: absolute;
     z-index: 20;
-    top: calc(100% + 6px);
+    top: calc(100% + 4px);
     right: 0;
-    width: 264px;
+    width: 280px;
     max-width: calc(100vw - 24px);
-    padding: 6px;
+    padding: 4px;
     border: 1px solid var(--edge);
     border-radius: var(--radius-lg);
     background: var(--panel);
     box-shadow: var(--shadow-menu);
     color: var(--text);
+    font-family: var(--font-ui);
+    animation: menu-in var(--enter) ease-out;
   }
 
+  @keyframes menu-in {
+    from { opacity: 0; transform: translateY(-4px); }
+  }
+
+  /* Segmented control: which scope the list below applies to. */
   .scope {
     display: flex;
-    padding: 2px;
+    padding: 3px;
+    border: 1px solid var(--edge);
     border-radius: var(--radius);
-    background: rgb(0 0 0 / 22%);
+    background: var(--inset);
     gap: 2px;
   }
 
   .scope button {
-    height: 24px;
+    height: var(--control-dense);
     flex: 1;
     border: 0;
     border-radius: var(--radius);
@@ -378,16 +398,24 @@
     color: var(--muted);
     font: var(--text-sm)/1 var(--font-ui);
     cursor: pointer;
+    transition: background var(--fast) ease, color var(--fast) ease;
+  }
+
+  .scope button:hover:not([aria-checked="true"]) {
+    background: var(--wash);
+    color: var(--text);
   }
 
   .scope button[aria-checked="true"] {
-    background: var(--edge);
+    background: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
     color: var(--text);
+    font-weight: 600;
   }
 
   .menu-item:focus-visible {
     outline: 2px solid var(--blueprint-light);
-    outline-offset: -1px;
+    outline-offset: -2px;
   }
 
   .menu:focus-visible {
@@ -396,7 +424,7 @@
 
   ul {
     max-height: 268px;
-    margin: 6px 0 0;
+    margin: 4px 0 0;
     padding: 0;
     list-style: none;
     overflow-y: auto;
@@ -405,26 +433,51 @@
   .entry {
     display: flex;
     width: 100%;
+    min-height: var(--control);
     align-items: flex-start;
-    padding: 6px 6px 6px 4px;
+    padding: 8px 12px 8px 8px;
     border: 0;
     border-radius: var(--radius);
     background: transparent;
     color: inherit;
-    font: var(--text-md)/1.35 var(--font-ui);
+    font: var(--text-md)/1.4 var(--font-ui);
     text-align: left;
     cursor: pointer;
-    gap: 6px;
+    gap: 4px;
+    transition: background var(--fast) ease;
   }
 
   .entry:hover {
     background: var(--wash);
   }
 
+  .entry:active {
+    background: var(--wash-strong);
+  }
+
+  /* The checked preset is the one in force. */
+  .entry[aria-checked="true"] .entry-name {
+    font-weight: 600;
+  }
+
   .tick {
-    width: 13px;
+    display: grid;
+    width: var(--icon-dense);
+    height: var(--icon-dense);
     flex: none;
+    margin-top: 2px;
     color: var(--blueprint-light);
+    place-items: center;
+  }
+
+  .tick svg {
+    width: var(--icon-dense);
+    height: var(--icon-dense);
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: var(--stroke-dense);
   }
 
   .text {
@@ -435,11 +488,10 @@
   }
 
   .hint {
-    overflow: hidden;
     color: var(--quiet);
     font-size: var(--text-sm);
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
   }
 
   /* A problem or warning is essential information, so it reads in muted rather than quiet. */
@@ -449,19 +501,19 @@
     align-items: baseline;
     color: var(--muted);
     font-size: var(--text-sm);
-    line-height: 1.35;
+    line-height: 1.4;
     overflow-wrap: anywhere;
-    gap: 6px;
+    gap: 8px;
   }
 
-  /* The chip's square status dot, reused: amber for a warning, oxide for an unusable preset. */
+  /* The status dot, reused: amber for a warning, oxide for an unusable preset. */
   .mark {
     width: 6px;
     height: 6px;
     flex: none;
     align-self: flex-start;
-    margin-top: calc(0.675em - 3px);
-    border-radius: 2px;
+    margin-top: calc(0.7em - 3px);
+    border-radius: 50%;
   }
 
   .mark.warning {
@@ -489,20 +541,27 @@
 
   .detail {
     max-height: 7.5rem;
-    margin: 0 4px 4px 23px;
-    padding: 6px 8px;
+    margin: 0 4px 4px 28px;
+    padding: 8px;
     border-top: 1px solid var(--edge-soft);
     color: var(--muted);
-    font: var(--text-sm)/1.45 var(--font-code);
+    font: var(--text-sm)/1.4 var(--font-code);
     overflow-wrap: anywhere;
     overflow-y: auto;
     user-select: text;
   }
 
   .footnote {
-    margin: 6px 2px 2px;
+    margin: 4px 8px 4px;
+    padding-top: 8px;
+    border-top: 1px solid var(--edge-soft);
     color: var(--quiet);
     font-size: var(--text-sm);
     line-height: 1.4;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .menu { animation: none; }
+    .chip, .scope button, .entry { transition: none; }
   }
 </style>

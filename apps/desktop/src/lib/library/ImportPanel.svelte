@@ -504,7 +504,8 @@
     background: none;
     color: var(--muted);
     font: inherit;
-    font-size: 20px;
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
     font-weight: 600;
     cursor: pointer;
     transition: color var(--fast) ease-out;
@@ -520,7 +521,7 @@
     background: var(--blueprint);
     content: "";
     transform: scaleX(0);
-    transition: transform var(--enter) cubic-bezier(0.16, 1, 0.3, 1);
+    transition: transform var(--enter) ease-out;
   }
 
   .sources button:hover {

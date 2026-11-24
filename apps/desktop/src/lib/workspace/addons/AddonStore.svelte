@@ -548,18 +548,19 @@
   .store :global(::selection) { background: var(--accent-select); }
   header, .title, .tools { display: flex; align-items: center; gap: 12px; min-width: 0; }
   header { justify-content: space-between; padding: 12px 24px; border-bottom: 1px solid var(--edge-soft); }
-  h1, h2 { margin: 0; font-size: 20px; font-weight: 600; }
-  input { width: min(26vw, 280px); min-width: 145px; height: var(--control); padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); color: var(--text); font: inherit; caret-color: var(--blueprint-light); }
+  h1, h2 { margin: 0; font-family: var(--font-display); font-size: var(--text-xl); font-weight: 600; line-height: 1.25; }
+  input { width: min(26vw, 280px); min-width: 145px; height: var(--control); padding: 0 12px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); color: var(--text); font: inherit; caret-color: var(--blueprint-light); }
   input::placeholder { color: var(--quiet); }
-  input:focus { border-color: var(--blueprint); }
+  input:hover { border-color: var(--edge-strong); }
   .registry, .status, footer, .tile-status { color: var(--muted); font-size: var(--text-sm); }
   .registry { text-align: end; }
   .scroll { flex: 1; overflow: auto; scrollbar-color: var(--edge-strong) var(--surround); }
   .page { width: min(100%, 1228px); margin: 0 auto; padding: 24px; box-sizing: border-box; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); gap: 16px; align-items: start; }
   .empty { grid-column: 1 / -1; color: var(--muted); }
-  .tile { position: relative; min-width: 0; padding: 8px; background: var(--panel); border: 1px solid var(--edge); border-radius: var(--radius-lg); }
-  .tile:hover { background-color: var(--wash-strong); }
+  /* Cards sit in the layout, so the ladder separates them: no outline, no shadow. */
+  .tile { position: relative; min-width: 0; padding: 8px; background: var(--panel); border-radius: var(--radius-lg); transition: background var(--fast) ease; }
+  .tile:hover { background-color: var(--wash); }
   .tile:hover .meta { color: var(--muted); }
   .tile-content { padding: 8px 4px 2px; }
   .tile-open { display: block; text-align: start; padding: 0; font-weight: 600; }
@@ -610,12 +611,14 @@
   .tile .chrome svg { width: 16px; height: 16px; stroke-width: var(--stroke-dense); }
   .chrome:hover:not(:disabled), .quiet-action:hover:not(:disabled), .switch-row:hover:not(:disabled) { background: var(--wash); }
   .chrome:hover:not(:disabled) { color: var(--text); }
-  .primary, .secondary, .permissions :global(button) { min-height: var(--control); padding: 0 14px; font-weight: 600; }
+  .tile .chrome:hover:not(:disabled) { background: var(--wash-strong); }
+  .primary, .secondary, .permissions :global(button) { min-height: var(--control); padding: 0 14px; }
+  .primary, .permissions :global(.primary) { font-weight: 600; }
   .primary, .permissions :global(.primary) { background: var(--blueprint); color: var(--on-accent); }
   .primary:hover:not(:disabled), .permissions :global(.primary:hover:not(:disabled)) { background: var(--blueprint-hover); }
   .secondary, .permissions :global(.control) { background: var(--wash); }
   .secondary:hover:not(:disabled), .permissions :global(.control:hover:not(:disabled)) { background: var(--wash-strong); }
-  .quiet-action { position: relative; padding: 4px 6px; color: inherit; text-decoration: underline; }
+  .quiet-action { position: relative; min-height: var(--control-dense); padding: 0 8px; color: var(--blueprint-light); }
   .remove, .problem, .permissions :global(.problem) { color: var(--oxide-text); }
   .problem { position: relative; font-size: var(--text-sm); }
   .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: start; width: 100%; min-height: var(--control); padding: 0 4px; }
@@ -625,5 +628,6 @@
   .switch-row[aria-checked="true"] span::before { background: var(--text); transform: translateX(14px); }
   @media (max-width: 899px) { .detail { grid-template-columns: minmax(0, 1fr); gap: 20px; } .detail aside { position: static; grid-row: 1; } }
   @media (max-width: 620px) { header { flex-wrap: wrap; } .tools { flex: 1; justify-content: space-between; } }
-  @media (prefers-reduced-motion: reduce) { .switch-row span::before { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .switch-row span::before, .tile { transition: none; } }
 </style>
+

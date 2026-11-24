@@ -368,86 +368,95 @@
     background: var(--panel);
     box-shadow: var(--shadow-panel);
     color: var(--text);
+    font-family: var(--font-ui);
     font-size: var(--text-md);
+    line-height: 1.4;
   }
   .transcription:focus-visible { outline: none; }
 
-  header { display: flex; height: var(--control); flex: none; align-items: center; padding: 0 6px 0 12px; border-bottom: 1px solid var(--edge-soft); gap: 8px; }
-  h2 { flex: 1; margin: 0; font-size: var(--text-md); font-weight: 600; }
-  .chrome { display: grid; width: var(--control-dense); height: var(--control-dense); padding: 0; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; place-items: center; }
+  header { display: flex; height: var(--control); flex: none; align-items: center; padding: 0 8px 0 12px; border-bottom: 1px solid var(--edge-soft); gap: 8px; }
+  h2 { flex: 1; margin: 0; font-size: var(--text-lg); font-weight: 600; line-height: 1.25; }
+  .chrome { display: grid; width: var(--control-dense); height: var(--control-dense); padding: 0; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; place-items: center; transition: background var(--fast) ease, color var(--fast) ease; }
   .chrome:hover { background: var(--wash); color: var(--text); }
-  .chrome svg { width: var(--icon-dense); height: var(--icon-dense); fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: var(--stroke-dense); }
+  .chrome:active { background: var(--wash-strong); }
+  .chrome svg { width: var(--icon-dense); height: var(--icon-dense); fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: var(--stroke-dense); }
 
-  .body { display: flex; min-height: 0; flex-direction: column; padding: 12px; gap: 13px; overflow-y: auto; }
-  section { display: flex; flex-direction: column; gap: 7px; }
-  .section-label { color: var(--muted); font-size: var(--text-sm); }
+  .body { display: flex; min-height: 0; flex-direction: column; padding: 12px; gap: 12px; overflow-y: auto; }
+  section { display: flex; flex-direction: column; gap: 8px; }
+  .section-label { color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
 
-  .original { display: block; width: 100%; height: 88px; flex: none; border-radius: var(--radius); background: var(--paper); }
+  /* The writer's own ink on paper: content, so its colour is not a UI token. */
+  .original { display: block; width: 100%; height: 88px; flex: none; border-radius: 3px; background: var(--paper); }
   .original polyline { fill: none; stroke: #1d2430; stroke-linecap: round; stroke-linejoin: round; }
 
-  .kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .kinds button { display: flex; min-height: var(--control-touch); align-items: center; padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; gap: 8px; font-size: var(--text-md); transition: background var(--fast) ease, border-color var(--fast) ease, color var(--fast) ease; }
+  /* Option grid: tiles with an icon and a label keep a 1px edge at rest; the chosen one is selected. */
+  .kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .kinds button { display: flex; min-height: var(--control-touch); align-items: center; padding: 0 12px; border: 1px solid var(--edge); border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; gap: 8px; font: inherit; font-size: var(--text-md); transition: background var(--fast) ease, border-color var(--fast) ease, color var(--fast) ease; }
   .kinds button:hover:not(:disabled) { background: var(--wash); color: var(--text); }
-  .kinds button.current { border-color: var(--accent-edge); background: var(--accent-fill); color: var(--text); }
-  .kinds svg { width: var(--icon); height: var(--icon); flex: none; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: var(--stroke); }
+  .kinds button:active:not(:disabled) { background: var(--wash-strong); }
+  .kinds button.current { border-color: var(--accent-edge); background: var(--accent-fill); color: var(--text); font-weight: 600; }
+  .kinds svg { width: var(--icon-dense); height: var(--icon-dense); flex: none; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: var(--stroke-dense); }
 
-  /* The Settings select: dark-scheme so the native list matches the panel, its own chevron. */
-  .language { display: flex; flex-direction: column; margin-top: 4px; gap: 6px; }
+  /* A field: dark-scheme so the native list matches the panel, with its own chevron. */
+  .language { display: flex; flex-direction: column; gap: 4px; }
   .select-shell { position: relative; display: flex; }
-  select { width: 100%; min-width: 0; height: var(--control); padding: 0 32px 0 10px; border: 0; border-radius: var(--radius); background: var(--wash); color: var(--text); color-scheme: dark; font: inherit; font-size: var(--text-md); text-overflow: ellipsis; appearance: none; cursor: pointer; }
+  select { width: 100%; min-width: 0; height: var(--control); padding: 0 32px 0 12px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); color: var(--text); color-scheme: dark; font: inherit; font-size: var(--text-md); text-overflow: ellipsis; appearance: none; cursor: pointer; transition: border-color var(--fast) ease; }
+  select:hover:not(:disabled) { border-color: var(--edge-strong); }
   option { background: var(--panel); color: var(--text); }
   .select-shell svg { position: absolute; top: 50%; right: 8px; width: var(--icon-dense); height: var(--icon-dense); transform: translateY(-50%); fill: none; stroke: var(--muted); stroke-width: var(--stroke-dense); stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 
-  .result { display: flex; flex-direction: column; gap: 7px; }
-  textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--edge-soft); border-radius: var(--radius); background: rgb(0 0 0 / 22%); color: var(--text); font: inherit; font-size: var(--text-md); line-height: 1.45; resize: vertical; caret-color: var(--blueprint-light); }
-  textarea.code { font-family: "Cascadia Mono", Consolas, monospace; }
+  .result { display: flex; flex-direction: column; gap: 4px; }
+  textarea { width: 100%; padding: 8px 12px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); color: var(--text); font: inherit; font-size: var(--text-md); line-height: 1.4; resize: vertical; caret-color: var(--blueprint-light); transition: border-color var(--fast) ease; }
+  textarea:hover { border-color: var(--edge-strong); }
+  textarea.code { font-family: var(--font-code); }
   textarea::selection, .latex code::selection { background: var(--accent-select); }
 
-  .message, .hint, .lead { margin: 0; font-size: var(--text-sm); line-height: 1.45; }
+  .message, .hint, .lead { margin: 0; font-size: var(--text-sm); line-height: 1.4; }
   .message { color: var(--muted); }
-  .message.problem { color: var(--oxide); }
+  .message.problem { color: var(--oxide-text); }
   .hint { color: var(--quiet); }
   .lead { color: var(--text); font-size: var(--text-md); }
 
-  .offer { gap: 10px; }
-  .facts { display: grid; grid-template-columns: auto 1fr; margin: 0; gap: 5px 12px; font-size: var(--text-sm); }
+  .offer { gap: 12px; }
+  .facts { display: grid; grid-template-columns: auto 1fr; margin: 0; gap: 4px 12px; font-size: var(--text-sm); }
   .facts dt { color: var(--quiet); }
   .facts dd { margin: 0; color: var(--muted); }
-  .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .figure { color: var(--muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 
   .progress { position: relative; height: 6px; overflow: hidden; border-radius: 3px; background: var(--wash); }
   /* Scaled, not resized: the bar updates while the writer may be drawing, and a transform never
      makes the page lay out again. */
   .progress span { position: absolute; inset: 0; border-radius: inherit; background: var(--blueprint); transform: scaleX(0); transform-origin: left; transition: transform 200ms ease-out; }
-  .progress.indeterminate span { right: auto; width: 30%; transform: none; animation: travel 1.3s ease-in-out infinite; }
-  @keyframes travel { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+  /* Installing has no measurable progress: the full bar breathes only while work runs. */
+  .progress.indeterminate span { transform: none; animation: working 1.2s ease-in-out infinite; }
+  @keyframes working { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 
   details { font-size: var(--text-sm); }
   summary { color: var(--quiet); cursor: pointer; }
   summary:hover { color: var(--muted); }
   details[open] { display: flex; flex-direction: column; gap: 8px; }
   details[open] > .control { align-self: flex-start; }
-  .latex code { display: block; padding: 6px 8px; border-radius: var(--radius); background: rgb(0 0 0 / 22%); color: var(--muted); font-family: "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; user-select: text; }
-  .addon { padding-top: 10px; border-top: 1px solid var(--edge-soft); }
+  .latex code { display: block; padding: 8px; border-radius: var(--radius); background: var(--inset); color: var(--muted); font-family: var(--font-code); overflow-wrap: anywhere; user-select: text; }
+  .addon { padding-top: 12px; border-top: 1px solid var(--edge-soft); }
 
-  footer { display: flex; flex: none; justify-content: flex-end; padding: 10px 12px; border-top: 1px solid var(--edge-soft); gap: 8px; }
+  footer { display: flex; flex: none; justify-content: flex-end; padding: 12px; border-top: 1px solid var(--edge-soft); gap: 8px; }
 
-  .control, .primary { display: inline-flex; min-height: var(--control); align-items: center; justify-content: center; padding: 0 12px; border: 0; border-radius: var(--radius); font: inherit; font-size: var(--text-md); white-space: nowrap; cursor: pointer; touch-action: manipulation; }
+  .control, .primary { display: inline-flex; min-height: var(--control); align-items: center; justify-content: center; padding: 0 16px; border: 0; border-radius: var(--radius); font: inherit; font-size: var(--text-md); white-space: nowrap; cursor: pointer; touch-action: manipulation; transition: background var(--fast) ease; }
   .control { background: var(--wash); color: var(--text); }
   .control:hover:not(:disabled) { background: var(--wash-strong); }
   .primary { background: var(--blueprint); color: var(--on-accent); font-weight: 600; }
-  .primary:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--edge-strong); }
+  .primary:hover:not(:disabled) { background: var(--blueprint-hover); }
   .primary.wide { width: 100%; }
 
-  button:disabled { cursor: not-allowed; opacity: var(--disabled); }
+  button:disabled { cursor: default; opacity: var(--disabled); }
   button:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 
   @media (pointer: coarse) {
     .control, .primary { min-height: var(--control-touch); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .kinds button, .progress span { transition: none; }
-    .progress.indeterminate span { animation: none; }
+    .kinds button, .progress span, .control, .primary, .chrome, select, textarea { transition: none; }
+    .progress.indeterminate span { animation: none; opacity: 0.7; }
   }
 </style>

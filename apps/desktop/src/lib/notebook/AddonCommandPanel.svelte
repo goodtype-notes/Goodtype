@@ -210,35 +210,38 @@
 </div>
 
 <style>
-  .addon-command { position: absolute; top: 70px; right: 16px; z-index: 30; display: flex; width: 296px; max-width: calc(100% - 32px); max-height: calc(100% - 116px); flex-direction: column; border: 1px solid var(--edge); border-radius: var(--radius-lg); background: var(--panel); box-shadow: var(--shadow-panel); color: var(--text); font-size: var(--text-md); }
+  .addon-command { position: absolute; top: 70px; right: 16px; z-index: 30; display: flex; width: 296px; max-width: calc(100% - 32px); max-height: calc(100% - 116px); flex-direction: column; border: 1px solid var(--edge); border-radius: var(--radius-lg); background: var(--panel); box-shadow: var(--shadow-panel); color: var(--text); font: var(--text-md) var(--font-ui); animation: enter var(--enter) ease-out; }
+  @keyframes enter { from { opacity: 0; transform: translateY(4px); } }
   .addon-command:focus-visible { outline: none; }
-  header { display: flex; height: var(--control); flex: none; align-items: center; padding: 0 6px 0 12px; border-bottom: 1px solid var(--edge-soft); gap: 8px; }
-  h2 { flex: 1; margin: 0; overflow: hidden; font-size: var(--text-md); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+  header { display: flex; min-height: var(--control); flex: none; align-items: center; padding: 8px 8px 0 12px; gap: 8px; }
+  h2 { flex: 1; margin: 0; overflow: hidden; font-size: var(--text-lg); font-weight: 600; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
   .chrome { display: grid; width: var(--control-dense); height: var(--control-dense); padding: 0; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; place-items: center; }
   .chrome:hover { background: var(--wash); color: var(--text); }
   .chrome svg { width: var(--icon-dense); height: var(--icon-dense); fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: var(--stroke-dense); }
   .body { display: flex; min-height: 0; flex-direction: column; padding: 12px; gap: 11px; overflow-y: auto; }
-  .section-label { color: var(--muted); font-size: var(--text-sm); }
+  .section-label { color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
   .preview { display: block; max-width: 100%; max-height: 120px; padding: 6px; border-radius: var(--radius); background: var(--paper); object-fit: contain; }
   .result { display: flex; flex-direction: column; gap: 7px; }
-  textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--edge-soft); border-radius: var(--radius); background: rgb(0 0 0 / 22%); color: var(--text); font-family: "Cascadia Mono", Consolas, monospace; font-size: var(--text-md); line-height: 1.45; resize: vertical; caret-color: var(--blueprint-light); }
+  textarea:hover { border-color: var(--edge-strong); }
+  textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); color: var(--text); font-family: var(--font-code); font-size: var(--text-md); line-height: 1.45; resize: vertical; caret-color: var(--blueprint-light); }
   .message, .hint, .lead { margin: 0; font-size: var(--text-sm); line-height: 1.45; }
-  .message.problem { color: var(--oxide); }
+  .message.problem { color: var(--oxide-text); }
   .hint { color: var(--quiet); }
   .lead { color: var(--text); font-size: var(--text-md); }
-  .progress { position: relative; height: 6px; overflow: hidden; border-radius: 3px; background: var(--wash); }
-  .progress span { position: absolute; top: 0; bottom: 0; left: 0; width: 30%; border-radius: inherit; background: var(--blueprint); animation: travel 1.3s ease-in-out infinite; }
-  @keyframes travel { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+  .progress { position: relative; height: 6px; overflow: hidden; border-radius: var(--radius); background: var(--inset); }
+  .progress span { position: absolute; top: 0; bottom: 0; left: 0; width: 30%; border-radius: inherit; background: var(--blueprint); animation: travel 1.3s ease-in-out infinite alternate; }
+  @keyframes travel { from { opacity: 1; } to { opacity: 0.4; } }
   details { font-size: var(--text-sm); }
   summary { color: var(--quiet); cursor: pointer; }
-  .latex code { display: block; margin-top: 6px; padding: 6px 8px; border-radius: var(--radius); background: rgb(0 0 0 / 22%); color: var(--muted); font-family: "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; user-select: text; }
-  footer { display: flex; flex: none; justify-content: flex-end; padding: 10px 12px; border-top: 1px solid var(--edge-soft); gap: 8px; }
-  .control, .primary { display: inline-flex; min-height: var(--control); align-items: center; justify-content: center; padding: 0 12px; border: 0; border-radius: var(--radius); font: inherit; font-size: var(--text-md); white-space: nowrap; cursor: pointer; touch-action: manipulation; }
+  .latex code { display: block; margin-top: 6px; padding: 6px 8px; border-radius: var(--radius); background: var(--inset); color: var(--muted); font-family: var(--font-code); overflow-wrap: anywhere; user-select: text; }
+  footer { display: flex; flex: none; justify-content: flex-end; padding: 12px; border-top: 1px solid var(--edge-soft); gap: 8px; }
+  .control, .primary { display: inline-flex; min-height: var(--control); align-items: center; justify-content: center; padding: 0 16px; border: 0; border-radius: var(--radius); font: inherit; font-size: var(--text-md); white-space: nowrap; cursor: pointer; touch-action: manipulation; }
   .control { background: var(--wash); color: var(--text); }
   .control:hover:not(:disabled) { background: var(--wash-strong); }
+  .primary:hover:not(:disabled) { background: var(--blueprint-hover); }
   .primary { background: var(--blueprint); color: var(--on-accent); font-weight: 600; }
-  button:disabled { cursor: not-allowed; opacity: var(--disabled); }
+  button:disabled { cursor: default; opacity: var(--disabled); }
   button:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
   @media (pointer: coarse) { .control, .primary { min-height: var(--control-touch); } }
-  @media (prefers-reduced-motion: reduce) { .progress span { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .progress span, .addon-command { animation: none; } }
 </style>

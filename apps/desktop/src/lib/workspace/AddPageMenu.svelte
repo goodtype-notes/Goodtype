@@ -239,6 +239,7 @@
 
 <div
   bind:this={panel}
+ 
   use:dismissable={onClose}
   class="add-page-panel"
   role="dialog"
@@ -249,9 +250,7 @@
   <header>
     <div class="subject">
       <strong>{$t("workspace.addPage")}</strong>
-      <!-- Re-keyed so the line fades when it changes: it is the one thing here that answers
-           "what will this do", and a silent swap is easy to miss. -->
-      {#key destination}<span class="destination">{destination}</span>{/key}
+      <span class="destination">{destination}</span>
     </div>
 
     <div class="run" role="group" aria-label={$t("workspace.howManyPages")}>
@@ -386,7 +385,7 @@
             class:on={category === "all"}
             aria-pressed={category === "all"}
             onclick={() => (category = "all")}
-          >{$t("workspace.all")}<span class="tally">{paperGroups.reduce((total, group) => total + group.sources.length, 0)}</span></button>
+          >{$t("workspace.all")}</button>
           {#each paperGroups as group (group.id)}
             <button
               type="button"
@@ -394,7 +393,7 @@
               class:on={category === group.id}
               aria-pressed={category === group.id}
               onclick={() => (category = group.id)}
-            >{group.title}<span class="tally">{group.sources.length}</span></button>
+            >{group.title}</button>
           {/each}
         </div>
 
@@ -408,7 +407,7 @@
             class:on={selected?.id === source.id}
             disabled={source.disabled}
             aria-pressed={selected?.id === source.id}
-            title={source.detail ? `${source.label} ? ${source.detail}` : source.label}
+            title={source.detail ? `${source.label} · ${source.detail}` : source.label}
             onkeydown={(event) => moveWithin(event)}
             onclick={() => (selectedId = source.id)}
           >
@@ -508,17 +507,17 @@
 
 <style>
   .muted { opacity: var(--disabled); }
-  .generators { display: flex; flex-wrap: wrap; gap: 6px; margin-block-end: 8px; }
+  .generators { display: flex; flex-wrap: wrap; gap: 8px; margin-block-end: 8px; }
   .generators :global(.generator-group) { display: grid; gap: 4px; color: var(--muted); font-size: var(--text-sm); }
-  .generators :global(button) { min-height: var(--control); padding-inline: 8px; border: 0; background: var(--wash); color: var(--text); border-radius: var(--radius); font: inherit; cursor: pointer; }
+  .generators :global(button) { min-height: var(--control); padding-inline: 12px; border: 0; background: var(--wash); color: var(--text); border-radius: var(--radius); font: inherit; font-size: var(--text-md); cursor: pointer; }
+  .generators :global(button:hover:enabled) { background: var(--wash-strong); }
   .calculation-preview { box-sizing: border-box; padding: 18%; width: 100%; }
   .code-line { display: block; width: 85%; height: 4px; background: #8d9da8; margin-bottom: 7px; }
   .code-line.short { width: 55%; }
   .calculation-preview svg { display: block; width: 100%; margin-top: 16px; }
-  /* Centred on the window, not hung off the button that opened it. `right: 0` against a 36px
-     button sitting ~150px in from the window edge made `100vw` a lie about the space to its left,
-     so the panel walked off-screen by that offset — invisible while maximised, obvious the moment
-     it was not. A panel this size belongs to the window. */
+
+  /* Centred on the window, not hung off the button that opened it: a panel this size belongs to
+     the window. Entry is opacity plus 4px of travel, no scale. */
   .add-page-panel {
     position: fixed;
     z-index: 50;
@@ -529,18 +528,16 @@
     flex-direction: column;
     border: 1px solid var(--edge);
     border-radius: var(--radius-lg);
-    background: var(--surround);
+    background: var(--panel);
     box-shadow: var(--shadow-modal);
+    color: var(--text);
     overflow: hidden;
-    /* The centring translate lives in the keyframes too, or the animation would drop it and the
-       panel would fly in from the corner it is no longer anchored to. */
     transform: translate(-50%, -50%);
-    animation: panel-in var(--enter) cubic-bezier(0.2, 0.7, 0.3, 1);
+    animation: panel-in var(--enter) ease-out;
   }
 
   @keyframes panel-in {
-    from { opacity: 0; transform: translate(-50%, -50%) scale(0.985); }
-    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    from { opacity: 0; transform: translate(-50%, calc(-50% + 4px)); }
   }
 
   header {
@@ -549,46 +546,40 @@
     align-items: center;
     padding: 12px 12px 12px 20px;
     border-bottom: 1px solid var(--edge-soft);
-    background: var(--panel);
     gap: 16px;
   }
 
   .subject { min-width: 0; flex: 1; }
-  .subject strong { display: block; font-size: var(--text-lg); font-weight: 600; }
+  .subject strong { display: block; font-size: var(--text-lg); font-weight: 600; line-height: 1.25; }
 
   .destination {
     display: block;
-    margin-top: 3px;
+    margin-top: 4px;
     color: var(--muted);
     font-size: var(--text-sm);
-    animation: said var(--enter) ease-out;
-  }
-
-  @keyframes said {
-    from { opacity: 0; transform: translateY(-2px); }
+    line-height: 1.4;
   }
 
   .run {
     display: flex;
     flex: none;
     align-items: center;
-    padding: 4px 5px;
-    border: 1px solid var(--edge);
+    padding: 2px;
     border-radius: var(--radius);
-    background: var(--surround);
+    background: var(--inset);
     gap: 4px;
   }
 
   .run-label {
-    padding: 0 4px;
+    padding: 0 8px;
     color: var(--muted);
     font-size: var(--text-sm);
     font-weight: 600;
   }
 
   .run button {
-    width: 26px;
-    height: 24px;
+    width: var(--control-dense);
+    height: var(--control-dense);
     border: 0;
     border-radius: var(--radius);
     background: var(--wash);
@@ -603,7 +594,7 @@
   .run button:disabled { opacity: var(--disabled); cursor: default; }
 
   .run output {
-    min-width: 20px;
+    min-width: 24px;
     color: var(--text);
     font-size: var(--text-md);
     font-variant-numeric: tabular-nums;
@@ -622,6 +613,7 @@
     color: var(--muted);
     cursor: pointer;
     place-items: center;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
   .close:hover { background: var(--wash); color: var(--text); }
@@ -641,11 +633,11 @@
     align-items: stretch;
   }
 
-  /* Column A. Fixed width and no scroll of its own: the shape of a page is four small decisions,
-     and making them scroll is what pushed the library out of sight in the first place. */
+  /* Column A. Fixed width: the shape of a page is four small decisions, and making them scroll is
+     what pushed the library out of sight. */
   .settings {
     display: flex;
-    width: 250px;
+    width: 264px;
     flex: none;
     flex-direction: column;
     padding: 16px;
@@ -660,10 +652,10 @@
     box-sizing: border-box;
     width: 100%;
     height: var(--control);
-    padding: 0 10px;
+    padding: 0 12px;
     border: 1px solid var(--edge);
     border-radius: var(--radius);
-    background: var(--charcoal);
+    background: var(--inset);
     caret-color: var(--blueprint-light);
     color: var(--text);
     font: inherit;
@@ -675,7 +667,7 @@
   .pdf-pages input::placeholder { color: var(--quiet); }
   .pdf-pages input::selection { background: var(--accent-select); }
   .pdf-pages input:hover { border-color: var(--edge-strong); }
-  .pdf-pages input:focus-visible { border-color: var(--blueprint); outline: none; }
+  .pdf-pages input:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
   .pdf-pages input[aria-invalid="true"] { border-color: var(--oxide); }
   .pdf-pages .help { color: var(--quiet); font-size: var(--text-sm); }
   .pdf-pages .help.invalid { color: var(--oxide-text); }
@@ -693,34 +685,40 @@
     font-weight: 400;
   }
 
-  .row { display: flex; gap: 6px; }
-  .pairs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  /* Rows wrap rather than squeeze: a label is never cut to fit a chip. */
+  .row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pairs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
+  /* Controls have no border; the selected chip gets the accent ring. */
   .chip {
     display: flex;
-    height: var(--control);
-    flex: 1;
+    min-height: var(--control);
+    flex: 1 1 auto;
     align-items: center;
     justify-content: center;
-    padding: 0 8px;
-    border: 1px solid var(--edge);
+    padding: 4px 12px;
+    border: 0;
     border-radius: var(--radius);
-    background: transparent;
+    background: var(--wash);
     color: var(--muted);
     font: inherit;
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
+    line-height: 1.25;
+    text-align: center;
     cursor: pointer;
-    gap: 7px;
-    transition: background var(--fast) ease, border-color var(--fast) ease, color var(--fast) ease;
+    gap: 8px;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
-  .chip:hover:enabled { background: var(--wash); color: var(--text); }
+  .chip:hover:enabled { background: var(--wash-strong); color: var(--text); }
   .chip:disabled { opacity: var(--disabled); cursor: default; }
 
-  .chip.on {
-    border-color: var(--accent-edge);
+  .chip.on,
+  .chip.on:hover:enabled {
     background: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
     color: var(--text);
+    font-weight: 600;
   }
 
   .page-mark {
@@ -729,7 +727,6 @@
     flex: none;
     border: 1px solid currentColor;
     border-radius: 1px;
-    opacity: 0.8;
     transition: width var(--fast) ease, height var(--fast) ease;
   }
 
@@ -739,7 +736,7 @@
     width: 16px;
     height: 16px;
     flex: none;
-    border-radius: 3px;
+    border-radius: 50%;
     box-shadow: inset 0 0 0 1px var(--edge-strong);
   }
 
@@ -756,65 +753,64 @@
     display: flex;
     flex: none;
     flex-direction: column;
-    padding: 14px 16px 12px;
+    padding: 16px;
     border-bottom: 1px solid var(--edge-soft);
-    gap: 11px;
+    gap: 12px;
   }
 
-  .filters { display: flex; flex-wrap: wrap; gap: 7px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; }
 
   .pill {
     display: flex;
-    height: var(--control-dense);
+    min-height: var(--control-dense);
     align-items: center;
-    padding: 0 11px;
-    border: 1px solid var(--edge);
-    border-radius: var(--radius-pill);
-    background: transparent;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--radius);
+    background: var(--wash);
     color: var(--muted);
     font: inherit;
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
     cursor: pointer;
-    gap: 6px;
-    transition: background var(--fast) ease, border-color var(--fast) ease, color var(--fast) ease;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
-  .pill:hover { background: var(--wash); color: var(--text); }
+  .pill:hover { background: var(--wash-strong); color: var(--text); }
 
-  .pill.on {
-    border-color: var(--accent-edge);
+  .pill.on,
+  .pill.on:hover {
     background: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
     color: var(--text);
+    font-weight: 600;
   }
-
-  .tally { color: var(--quiet); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
 
   /* Side by side, not stacked: two short tiles leave the paper library a row higher. */
-  .pins { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; }
+  .pins { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
 
   .import {
     display: flex;
     min-width: 0;
     align-items: center;
-    padding: 7px 10px;
-    border: 1px dashed var(--edge-strong);
+    padding: 8px 12px;
+    border: 0;
     border-radius: var(--radius);
-    background: var(--fill-soft);
+    background: var(--wash);
     color: var(--text);
     font: inherit;
     text-align: left;
     cursor: pointer;
-    gap: 10px;
-    transition: background var(--fast) ease, border-color var(--fast) ease;
+    gap: 12px;
+    transition: background var(--fast) ease;
   }
 
-  .import:hover:enabled { border-color: var(--quiet); }
+  .import:hover:enabled { background: var(--wash-strong); }
   .import:disabled { opacity: var(--disabled); cursor: default; }
 
-  .import.on {
-    border-color: var(--blueprint);
-    border-style: solid;
-    background: var(--accent-tint);
+  .import.on,
+  .import.on:hover:enabled {
+    background: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
   }
 
   .sheet {
@@ -841,56 +837,54 @@
     font-weight: 600;
   }
 
-  .badge.big { padding: 3px 7px; font-size: var(--text-sm); }
+  .badge.big { padding: 4px 8px; font-size: var(--text-sm); }
 
+  /* Names wrap so a real name reads in full. */
   .words { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
-  .words .title { font-size: var(--text-md); font-weight: 600; }
-  .words .title,
-  .words .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .words .sub { color: var(--muted); font-size: var(--text-sm); }
+  .words .title { font-size: var(--text-md); font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+  .words .sub { color: var(--muted); font-size: var(--text-sm); line-height: 1.4; overflow-wrap: anywhere; }
 
   .papers {
     min-width: 0;
     flex: 1;
-    padding: 14px 16px 18px;
+    padding: 16px;
     overflow-y: auto;
     transition: opacity var(--fast) ease;
   }
 
-  .papers.muted { opacity: 0.4; }
-  .shelf + .shelf { margin-top: 18px; }
-  .shelf .eyebrow { margin-bottom: 9px; }
+  .shelf + .shelf { margin-top: 24px; }
+  .shelf .eyebrow { margin-bottom: 12px; }
 
   /* `minmax(0, …)` rather than `1fr`: a track's automatic minimum is its content's min-content
-     width, and a preview is an SVG that reports an intrinsic 300px. One bare `1fr` would let a
-     thumbnail push the whole panel wider than it is allowed to be. */
+     width, and a preview is an SVG that reports an intrinsic 300px. */
   .cards {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 11px;
+    gap: 8px;
   }
 
   .card {
     display: flex;
     flex-direction: column;
-    padding: 7px;
-    border: 1px solid var(--edge);
+    padding: 8px;
+    border: 0;
     border-radius: var(--radius);
     background: transparent;
     color: var(--muted);
     font: inherit;
     text-align: left;
     cursor: pointer;
-    gap: 7px;
-    transition: background var(--fast) ease, border-color var(--fast) ease, color var(--fast) ease;
+    gap: 8px;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
-  .card:hover:enabled { border-color: var(--edge-strong); color: var(--text); }
+  .card:hover:enabled { background: var(--wash); color: var(--text); }
   .card:disabled { opacity: var(--disabled); cursor: default; }
 
-  .card.on {
-    border-color: var(--blueprint);
+  .card.on,
+  .card.on:hover:enabled {
     background: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
     color: var(--text);
   }
 
@@ -899,20 +893,19 @@
     width: 100%;
     border-radius: 3px;
     background: var(--paper);
-    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 30%);
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 40%);
     overflow: hidden;
   }
 
   .thumb :global(svg) { display: block; width: 100%; height: 100%; }
 
   .name {
-    overflow: hidden;
     font-size: var(--text-sm);
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
   }
 
-  /* Column C. */
+  /* Column C. The page on the desk. */
   .preview {
     --stage-w: 230px;
     --stage-h: 300px;
@@ -920,8 +913,8 @@
     width: 262px;
     flex: none;
     flex-direction: column;
-    padding: 14px 16px 16px;
-    background: var(--charcoal);
+    padding: 16px;
+    background: var(--surround);
     gap: 12px;
   }
 
@@ -933,10 +926,8 @@
     justify-content: center;
   }
 
-  /* Sized from the stage rather than from its contents. `aspect-ratio` on a box with no children
-     and no definite side resolves to zero, which is why a plain page previewed as nothing at all.
-     Driving the height off whichever limit binds first keeps every page shape inside the column
-     whether it is portrait or landscape. */
+  /* Sized from the stage rather than from its contents: `aspect-ratio` on a box with no children
+     and no definite side resolves to zero. */
   .sheet-preview {
     width: auto;
     height: min(var(--stage-h), calc(var(--stage-w) / var(--ratio)));
@@ -952,14 +943,14 @@
     flex: none;
     flex-direction: column;
     margin: 0;
-    gap: 7px;
+    gap: 8px;
   }
 
   .summary div {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: 10px;
+    gap: 12px;
   }
 
   .summary dt {
@@ -969,13 +960,12 @@
   }
 
   .summary dd {
-    overflow: hidden;
+    min-width: 0;
     margin: 0;
     color: var(--text);
     font-size: var(--text-sm);
+    overflow-wrap: anywhere;
     text-align: right;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .commit { display: flex; flex: none; flex-direction: column; gap: 8px; }
@@ -994,28 +984,23 @@
   }
 
   .add:hover:enabled { background: var(--blueprint-hover); }
-  .add:disabled { opacity: var(--disabled); cursor: not-allowed; }
+  .add:disabled { opacity: var(--disabled); cursor: default; }
 
-  .note { color: var(--quiet); font-size: var(--text-xs); text-align: center; }
+  .note { color: var(--quiet); font-size: var(--text-sm); line-height: 1.4; text-align: center; }
 
   footer {
     display: flex;
-    height: 34px;
+    min-height: 36px;
     flex: none;
     align-items: center;
     justify-content: space-between;
-    padding: 0 18px;
+    padding: 8px 20px;
     border-top: 1px solid var(--edge-soft);
-    background: var(--charcoal);
+    background: var(--surround);
     color: var(--quiet);
     font-size: var(--text-sm);
+    line-height: 1.4;
     gap: 16px;
-  }
-
-  footer span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   button:focus-visible {
@@ -1023,34 +1008,41 @@
     outline-offset: 2px;
   }
 
+  .card:focus-visible,
+  .chip:focus-visible,
+  .import:focus-visible { outline-offset: -2px; }
+
   /* A narrower window tightens the two fixed columns and drops the library to three across
-     before it gives up the preview — the preview is the point of the panel, so it is the last
-     thing to go, not the first. */
+     before it gives up the preview. */
   @media (max-width: 1120px) {
-    .settings { width: 214px; padding: 14px; }
-    .preview { --stage-w: 192px; --stage-h: 250px; width: 218px; padding: 12px 13px 14px; }
+    .settings { width: 232px; padding: 12px; }
+    .preview { --stage-w: 192px; --stage-h: 250px; width: 224px; padding: 12px; }
     .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .body { height: min(480px, calc(100vh - 200px)); }
   }
 
-  /* Below this there is no honest way to show a page and a library side by side. The summary in
-     the footer still says what the button will make. */
+  /* Below this there is no honest way to show a page and a library side by side. */
   @media (max-width: 880px) {
     .preview { display: none; }
     .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
 
+  @media (pointer: coarse) {
+    .chip, .add, .pdf-pages input, .pill { min-height: var(--control-touch, 44px); }
+    .run button { width: var(--control-touch, 44px); height: var(--control-touch, 44px); }
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .add-page-panel,
-    .destination { animation: none; }
+    .add-page-panel { animation: none; }
 
     .chip,
     .pill,
     .card,
-    .thumb,
+    .import,
     .page-mark,
     .papers,
     .add,
+    .close,
     .run button { transition: none; }
   }
 </style>

@@ -27,3 +27,6 @@
     <button type="button" class="primary" onclick={onReload}>{$t("workspace.reloadNotebook")}</button>
   {/snippet}
 </Dialog>
+
+<style>
+</style>

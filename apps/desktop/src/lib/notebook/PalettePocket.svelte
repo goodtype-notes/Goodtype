@@ -113,6 +113,7 @@
   class:horizontal
   class:tagged={Boolean(tag)}
   class="pocket"
+ 
   role="group"
   aria-label={tag ? $t("workspace.styleForThe", { "value1": tag.toLowerCase() }) : undefined}
   title={tag ? $t("workspace.changesApplyToThe", { "value1": tag.toLowerCase() }) : undefined}
@@ -202,7 +203,7 @@
     flex-direction: column;
     padding-top: 7px;
     margin-top: 3px;
-    border-top: 1px solid var(--edge);
+    border-top: 1px solid var(--edge-soft);
     gap: 6px;
   }
 
@@ -216,7 +217,7 @@
     margin-top: 0;
     margin-left: 3px;
     border-top: 0;
-    border-left: 1px solid var(--edge);
+    border-left: 1px solid var(--edge-soft);
   }
 
   /* Two wide on a vertical rail, growing downward; two tall on a horizontal one, growing to the
@@ -266,13 +267,17 @@
     place-items: center;
   }
 
-  button:hover { background: var(--wash); }
+  button:hover { background: var(--wash); color: var(--text); }
+  button:active { background: var(--wash-strong); }
   button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 
   .widths button.current, .erasers button.current {
     background: var(--accent-fill);
-    outline: 1px solid var(--blueprint);
+    color: var(--text);
+    outline: 1px solid var(--accent-edge);
+    outline-offset: -1px;
   }
+  .widths button.current:focus-visible, .erasers button.current:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 
   .rule { width: 24px; height: 12px; color: var(--text); }
 
@@ -287,19 +292,18 @@
     border-radius: 50%;
   }
 
-  .dot.current { outline: 1.5px solid var(--blueprint); outline-offset: 2px; }
+  .dot.current { outline: 2px solid var(--blueprint); outline-offset: 1px; }
+  .dot.current:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 3px; }
 
-  /* Dashed, like every other control in this app that opens an editor rather than setting a
-     value. It vanishes at the ceiling, where the last colour or width stands in its cell. The
-     width tile keeps the chips' rounded square; the colour one is round like the swatches. */
-  .add {
-    border: 1px dashed var(--edge-strong);
-    background: transparent;
-  }
+  /* A quiet filled control: it opens an editor rather than setting a value. It vanishes at the
+     ceiling, where the last colour or width stands in its cell. The width tile keeps the chips'
+     rounded square; the colour one is round like the swatches. */
+  .add { background: var(--wash); }
+  .add:hover { background: var(--wash-strong); }
 
   .add svg {
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
     fill: none;
     stroke: currentColor;
     stroke-linecap: round;
