@@ -97,7 +97,11 @@
     install: "M12 3v12m-5-5 5 5 5-5M4 15v5h16v-5",
     cancel: "m6 6 12 12M6 18 18 6",
     check: "m5 12 4 4L19 6",
+    import: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5m-7 3v6m-3-3 3 3 3-3",
+    recognize: "m4 20 4-1 11-11-3-3L5 16zm10-14 3 3",
+    other: "m12 3 8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9",
   };
+  const kindIcon = (kind: string | undefined) => kind === "import" ? icons.import : kind === "recognize" ? icons.recognize : icons.other;
 
   async function refresh() {
     const started = ++request;
@@ -286,11 +290,11 @@
     {@const label = action === "cancel" ? $t("library.cancel") : $t(`addons.manager.${action}`)}
     {@const accessible = detail ? label : $t("addons.store.actionName", { action: label, name: addonText(addon.name, $locale) })}
     <button type="button" id={detail ? "addon-detail-action" : `addon-action-${addon.id}`}
-      class:chrome={!detail} class:primary={detail && action !== "cancel"} class:secondary={detail && action === "cancel"}
+      class:primary={detail && action !== "cancel"} class:secondary={!detail || action === "cancel"}
       aria-label={accessible} title={accessible} aria-haspopup={action !== "cancel" && (action !== "update" ||
         addon.catalogPermissions.some(permission => !addon.permissions.includes(permission))) ? "dialog" : undefined}
       disabled={action === "cancel" ? cancelling[addon.id] : pending[addon.id]} onclick={event => void choose(event, addon)}>
-      {#if detail}{label}{:else}{@render icon(icons[action === "reinstall" ? "install" : action])}{/if}
+      {label}
     </button>
   {/if}
 {/snippet}
@@ -309,7 +313,7 @@
 
 <svelte:window onkeydown={escape} onresize={placePrompt} />
 
-<main class="store" aria-labelledby="addons-title">
+<main class="store" data-ui="solid" aria-labelledby="addons-title">
   <header>
     <div class="title">
       <button type="button" class="chrome" bind:this={initialFocus} aria-label={$t("addons.store.back")} title={$t("addons.store.back")} onclick={() => void back()}>
@@ -482,7 +486,7 @@
         </aside>
       </div>
     {:else if manager}
-      <div class="page grid">
+      <div class="page list">
         {#each visible as addon (addon.id)}
           {@const name = addonText(addon.name, $locale)}
           {@const kind = addon.kind ?? kinds[addon.id]}
@@ -490,31 +494,36 @@
           {@const release = addon.update ?? addon.release}
           {@const action = addonAction(addon)}
           {@const percent = downloadPercent(addon.progress)}
-          <article class="tile">
-            <AddonPreview {kind} image={details[addon.id]?.preview} {percent} busy={action === "cancel"} />
-            <div class="tile-content">
-              <button type="button" class="tile-open" bind:this={tileButtons[addon.id]} onclick={() => void openDetail(addon)}>{name}</button>
-              <p class="tile-summary">{summary(addon, $locale)}</p>
-              <div class="tile-bottom">
+          <article class="row">
+            <div class="row-main">
+              <span class="kind-icon">{@render icon(kindIcon(kind))}</span>
+              <div class="row-text">
+                <button type="button" class="row-open" bind:this={tileButtons[addon.id]} onclick={() => void openDetail(addon)}>{name}</button>
+                {#if summary(addon, $locale)}<p class="row-summary">{summary(addon, $locale)}</p>{/if}
                 <span class="meta">
                   {[kindLabel, release?.version ?? addon.installed, release && megabytes(release.sizeBytes),
                     percent !== null && action === "cancel" && $t("addons.store.percent", { value: formatNumber(percent, undefined, $displayLocale) })]
                     .filter(Boolean).join(" · ")}
                 </span>
+                {#if action === "cancel"}
+                  <progress max="100" value={percent ?? undefined} aria-label={$t(addon.activity === "installing" ? "addons.manager.activity.installing" : "addons.manager.activity.downloading")}></progress>
+                {/if}
+              </div>
+              <div class="row-side">
                 {#if action}
                   {@render actionButton(addon)}
                 {:else if addon.activity === "awaitingApproval"}
-                  <span class="tile-status">{$t("addons.manager.activity.awaitingApproval")}</span>
+                  <span class="row-status">{$t("addons.manager.activity.awaitingApproval")}</span>
                 {:else if addon.status === "enabled"}
-                  <span class="tile-status installed">{@render icon(icons.check)}{$t("addons.store.installed")}</span>
+                  <span class="row-status installed">{@render icon(icons.check)}{$t("addons.store.installed")}</span>
                 {:else if addon.status !== "available"}
-                  <span class="tile-status" class:warning={addon.status === "needs-reinstall" || addon.status === "incompatible-api"}>
+                  <span class="row-status" class:warning={addon.status === "needs-reinstall" || addon.status === "incompatible-api"}>
                     {$t(`addons.manager.status.${addon.status}`, { expected: addon.expectedApi, found: addon.foundApi || $t("addons.manager.unknownVersion") })}
                   </span>
                 {/if}
               </div>
-              {@render errorLine(addon)}
             </div>
+            {@render errorLine(addon)}
           </article>
         {:else}
           <p class="empty" role="status">{$t(query.trim() ? "addons.store.noResults" : "addons.store.empty")}</p>
@@ -544,49 +553,60 @@
 </main>
 
 <style>
+  /* The solid language (DESIGN.md): a sibling of the library, a desk with a title, a toolbar and
+     panel rows. */
   .store { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; background: var(--surround); color: var(--text); font: var(--text-md) var(--font-ui); }
   .store :global(::selection) { background: var(--accent-select); }
   header, .title, .tools { display: flex; align-items: center; gap: 12px; min-width: 0; }
-  header { justify-content: space-between; padding: 12px 24px; border-bottom: 1px solid var(--edge-soft); }
-  h1, h2 { margin: 0; font-size: 20px; font-weight: 600; }
-  input { width: min(26vw, 280px); min-width: 145px; height: var(--control); padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); color: var(--text); font: inherit; caret-color: var(--blueprint-light); }
+  header { justify-content: space-between; padding: 16px 24px 8px; }
+  h1, h2 { margin: 0; font-size: var(--text-xl); font-weight: 600; line-height: 1.25; }
+  h1 { font-family: var(--font-display); }
+  input { width: min(26vw, 280px); min-width: 145px; height: var(--control); padding: 0 12px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); color: var(--text); font: inherit; caret-color: var(--blueprint-light); }
+  input:hover { border-color: var(--edge-strong); }
   input::placeholder { color: var(--quiet); }
-  input:focus { border-color: var(--blueprint); }
-  .registry, .status, footer, .tile-status { color: var(--muted); font-size: var(--text-sm); }
+  .registry, .status, footer, .row-status { color: var(--muted); font-size: var(--text-sm); }
   .registry { text-align: end; }
   .scroll { flex: 1; overflow: auto; scrollbar-color: var(--edge-strong) var(--surround); }
-  .page { width: min(100%, 1228px); margin: 0 auto; padding: 24px; box-sizing: border-box; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); gap: 16px; align-items: start; }
-  .empty { grid-column: 1 / -1; color: var(--muted); }
-  .tile { position: relative; min-width: 0; padding: 8px; background: var(--panel); border: 1px solid var(--edge); border-radius: var(--radius-lg); }
-  .tile:hover { background-color: var(--wash-strong); }
-  .tile:hover .meta { color: var(--muted); }
-  .tile-content { padding: 8px 4px 2px; }
-  .tile-open { display: block; text-align: start; padding: 0; font-weight: 600; }
-  .tile-open::after { content: ""; position: absolute; inset: 0; border-radius: var(--radius-lg); }
-  .tile-open:focus-visible { outline: none; }
-  .tile-open:focus-visible::after { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
-  .tile-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; min-height: 2.8em; margin: 4px 0; color: var(--muted); line-height: 1.4; }
-  .tile-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: var(--control-dense); }
-  .meta { font-size: var(--text-sm); color: var(--quiet); font-variant-numeric: tabular-nums; }
+  .page { width: min(100%, 960px); margin: 0 auto; padding: 8px 24px 24px; box-sizing: border-box; }
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  .empty { color: var(--muted); }
 
-  .tile-status { display: inline-flex; align-items: center; justify-content: end; gap: 4px; text-align: end; }
-  .tile-status svg { width: 14px; height: 14px; stroke-width: var(--stroke-dense); flex: none; }
+  .row { position: relative; min-width: 0; border-radius: var(--radius); background: var(--panel); transition: background var(--fast) ease; }
+  .row:hover { background: var(--wash); }
+  .row-main { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 8px 12px 8px 14px; }
+  .kind-icon { flex: none; display: grid; place-items: center; color: var(--muted); }
+  .kind-icon :global(svg) { width: 20px; height: 20px; stroke-width: var(--stroke); }
+  .row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .row-open { align-self: start; max-width: 100%; padding: 0; text-align: start; font-weight: 400; line-height: 1.4; overflow-wrap: anywhere; }
+  .row-open::after { content: ""; position: absolute; inset: 0; border-radius: var(--radius); }
+  .row-open:focus-visible { outline: none; }
+  .row-open:focus-visible::after { outline: 2px solid var(--blueprint-light); outline-offset: -2px; }
+  .row-summary { margin: 0; color: var(--muted); font-size: var(--text-sm); line-height: 1.4; overflow-wrap: anywhere; }
+  .meta { color: var(--quiet); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+  .row:hover .meta { color: var(--muted); }
+  .row-side { position: relative; z-index: 1; flex: none; display: flex; align-items: center; justify-content: flex-end; max-width: 40%; }
+  .row .problem { padding: 0 14px 8px 46px; }
+  .row-status { display: inline-flex; align-items: center; justify-content: end; gap: 4px; text-align: end; }
+  .row-status :global(svg) { width: 16px; height: 16px; stroke-width: var(--stroke-dense); flex: none; }
   .installed { color: var(--sage-text); }
   .warning { color: var(--amber-text); }
-  .detail { max-width: 920px; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 32px; align-items: start; }
+
+  .detail { max-width: 960px; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 32px; align-items: start; }
   .detail article { min-width: 0; }
-  .detail article :global(.readme) { max-width: 72ch; }
-  .detail aside { position: sticky; top: 24px; min-width: 0; }
+  .detail article :global(.readme) { max-width: 70ch; }
+  .detail aside { position: sticky; top: 24px; min-width: 0; padding: 16px; background: var(--panel); border-radius: var(--radius-lg); }
+  .detail aside h2 { font-size: var(--text-lg); }
   .muted, .description-status { color: var(--muted); line-height: 1.5; }
   .detail-actions, .secondary-actions, .popup-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .detail-actions { margin-top: 12px; }
   .status { margin: 8px 0; font-variant-numeric: tabular-nums; }
   progress { flex: 1; min-width: 70px; height: 6px; accent-color: var(--blueprint); }
+  .row-text progress { flex: none; width: 100%; max-width: 280px; margin-top: 4px; }
   dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; margin: 14px 0 0; padding: 12px 0; border-block: 1px solid var(--edge-soft); }
   dt { color: var(--muted); }
   dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-  .permissions h3 { font-size: var(--text-md); margin: 4px 0; }
-  .pack-previews { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+  .permissions h3 { font-size: var(--text-md); font-weight: 600; margin: 4px 0; }
+  .pack-previews { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 16px; }
   .pack-previews figure { margin: 0; min-width: 0; overflow-wrap: anywhere; font-size: var(--text-sm); }
   .pack-previews figcaption { padding-top: 6px; color: var(--muted); }
   .pack-previews figure div { height: 94px; padding: 8px; background: var(--paper); border-radius: var(--radius); }
@@ -598,32 +618,33 @@
   .permission-popup p { margin: 6px 0; }
   .popup-actions { justify-content: end; margin-top: 12px; }
   .skeleton { display: grid; gap: 8px; margin: 20px 0; }
-  .skeleton i { height: 10px; border-radius: var(--radius); background: var(--fill-soft); }
+  .skeleton i { height: 10px; border-radius: var(--radius); background: var(--panel); }
   .skeleton i:first-child { width: 35%; }
   .skeleton i:last-child { width: 75%; }
-  button, .permissions :global(button) { border: 0; border-radius: var(--radius); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  button, .permissions :global(button) { border: 0; border-radius: var(--radius); background: transparent; color: inherit; font: inherit; cursor: pointer; touch-action: manipulation; transition: background var(--fast) ease, color var(--fast) ease; }
   button:focus-visible, .permissions :global(button:focus-visible), input:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
-  button:disabled, .permissions :global(button:disabled) { opacity: var(--disabled); cursor: not-allowed; }
+  button:disabled, .permissions :global(button:disabled) { opacity: var(--disabled); cursor: default; }
   .chrome { position: relative; flex: none; display: grid; place-items: center; width: var(--control); height: var(--control); padding: 0; color: var(--muted); }
-  .tile .chrome { width: var(--control-dense); height: var(--control-dense); }
   .chrome svg { width: 20px; height: 20px; stroke-width: var(--stroke); }
-  .tile .chrome svg { width: 16px; height: 16px; stroke-width: var(--stroke-dense); }
   .chrome:hover:not(:disabled), .quiet-action:hover:not(:disabled), .switch-row:hover:not(:disabled) { background: var(--wash); }
   .chrome:hover:not(:disabled) { color: var(--text); }
-  .primary, .secondary, .permissions :global(button) { min-height: var(--control); padding: 0 14px; font-weight: 600; }
+  .primary, .secondary, .permissions :global(button) { min-height: var(--control); padding: 0 16px; }
+  .primary { font-weight: 600; }
   .primary, .permissions :global(.primary) { background: var(--blueprint); color: var(--on-accent); }
   .primary:hover:not(:disabled), .permissions :global(.primary:hover:not(:disabled)) { background: var(--blueprint-hover); }
   .secondary, .permissions :global(.control) { background: var(--wash); }
+  .row:hover .secondary { background: var(--wash-strong); }
   .secondary:hover:not(:disabled), .permissions :global(.control:hover:not(:disabled)) { background: var(--wash-strong); }
-  .quiet-action { position: relative; padding: 4px 6px; color: inherit; text-decoration: underline; }
-  .remove, .problem, .permissions :global(.problem) { color: var(--oxide-text); }
-  .problem { position: relative; font-size: var(--text-sm); }
+  .quiet-action { position: relative; min-height: var(--control-dense); padding: 0 8px; color: var(--blueprint-light); }
+  .quiet-action.remove, .problem, .permissions :global(.problem) { color: var(--oxide-text); }
+  .problem { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); }
   .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: start; width: 100%; min-height: var(--control); padding: 0 4px; }
   .switch-row span { flex: none; box-sizing: border-box; width: 34px; height: 20px; padding: 3px; border-radius: var(--radius-pill); background: var(--track); }
   .switch-row span::before { content: ""; display: block; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: transform var(--fast); }
   .switch-row[aria-checked="true"] span { background: var(--blueprint); }
   .switch-row[aria-checked="true"] span::before { background: var(--text); transform: translateX(14px); }
+  @media (pointer: coarse) { .primary, .secondary, .permissions :global(button) { min-height: var(--control-touch); } .chrome { width: var(--control-touch); height: var(--control-touch); } }
   @media (max-width: 899px) { .detail { grid-template-columns: minmax(0, 1fr); gap: 20px; } .detail aside { position: static; grid-row: 1; } }
-  @media (max-width: 620px) { header { flex-wrap: wrap; } .tools { flex: 1; justify-content: space-between; } }
-  @media (prefers-reduced-motion: reduce) { .switch-row span::before { transition: none; } }
+  @media (max-width: 620px) { header { flex-wrap: wrap; } .tools { flex: 1; justify-content: space-between; flex-wrap: wrap; } .row-main { flex-wrap: wrap; } .row-side { max-width: none; } }
+  @media (prefers-reduced-motion: reduce) { .switch-row span::before { transition: none; } .row, button { transition: none; } }
 </style>

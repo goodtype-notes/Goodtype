@@ -43,11 +43,12 @@
   {/each}
 {/snippet}
 
-<div class="readme">{@render renderBlocks(blocks)}</div>
+<div class="readme" data-ui="solid">{@render renderBlocks(blocks)}</div>
 
 <style>
-  .readme { color: var(--text); font-size: var(--text-md); line-height: 1.6; overflow-wrap: anywhere; }
-  h2, h3 { margin: 20px 0 8px; font-weight: 600; }
+  .readme { max-width: 70ch; color: var(--text); font-size: var(--text-md); line-height: 1.6; overflow-wrap: anywhere; }
+  h2, h3 { margin: 24px 0 12px; font-weight: 600; line-height: 1.25; }
+  .readme > :global(:first-child) { margin-top: 0; }
   h2 { font-size: var(--text-lg); }
   h3 { font-size: var(--text-md); }
   p, ul, ol, pre, blockquote, .table-scroll { margin: 0 0 12px; }
@@ -55,13 +56,13 @@
   li > p { margin: 0; }
   li > ul, li > ol { margin-bottom: 0; }
   strong { font-weight: 600; }
-  code { padding: 1px 4px; background: var(--fill-soft); border-radius: var(--radius); font-family: var(--font-code); }
-  pre { padding: 12px; background: var(--charcoal); border-radius: var(--radius); overflow-x: auto; }
-  pre code { padding: 0; background: transparent; }
+  code { padding: 1px 4px; background: var(--panel); border-radius: var(--radius); font-family: var(--font-code); font-size: var(--text-sm); }
+  pre { padding: 12px; background: var(--inset); border-radius: var(--radius); overflow-x: auto; }
+  pre code { padding: 0; background: transparent; font-size: var(--text-sm); }
   blockquote { margin-inline-start: 16px; color: var(--muted); }
   hr { border: 0; border-top: 1px solid var(--edge-soft); margin: 16px 0; }
   .table-scroll { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; text-align: start; }
-  th, td { padding: 6px 10px; border-bottom: 1px solid var(--edge-soft); text-align: start; }
+  th, td { padding: 8px 12px; border-bottom: 1px solid var(--edge-soft); text-align: start; }
   th { color: var(--muted); font-weight: 600; }
 </style>

@@ -100,7 +100,7 @@
 {/snippet}
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<aside class="shape-panel" class:dock-left={dock === "left"} aria-labelledby="shape-panel-title" data-preserve-selection
+<aside class="shape-panel" data-ui="solid" class:dock-left={dock === "left"} aria-labelledby="shape-panel-title" data-preserve-selection
   onkeydown={event => {
     if (event.key !== "Escape") return;
     event.stopPropagation();
@@ -137,7 +137,6 @@
             onclick={() => (collapsed = { ...collapsed, [library.id]: open })}>
             <svg class:open viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
             <span>{library.label}</span>
-            <span class="count">{items.length}</span>
           </button>
         </h3>
         {#if open}{@render tiles(items, library.id)}{/if}
@@ -175,10 +174,11 @@
   header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   h2, h3, p { margin: 0; }
   h2 { font-size: var(--text-lg); font-weight: 600; }
-  .section-label { padding: 2px 4px 6px; color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
+  .section-label { padding: 2px 4px 6px; color: var(--text); font-size: var(--text-md); font-weight: 600; }
 
   button, input { font: inherit; color: inherit; border: 0; border-radius: var(--radius); }
   button { background: transparent; cursor: pointer; transition: background var(--fast) ease, color var(--fast) ease; }
+  button:active:not(:disabled) { background: var(--wash-strong); }
   button:hover:not(:disabled) { background: var(--wash); }
   button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
   button:disabled { cursor: default; }
@@ -187,29 +187,30 @@
   .close { display: grid; place-items: center; width: var(--control-dense); height: var(--control-dense); color: var(--muted); }
   .close:hover { color: var(--text); }
 
-  input { height: var(--control); flex: none; padding: 0 8px; background: var(--inset); border: 1px solid var(--edge); color-scheme: dark; }
+  input { height: var(--control); flex: none; padding: 0 12px; background: var(--inset); border: 1px solid var(--edge); color-scheme: dark; }
   input::placeholder { color: var(--quiet); }
-  input:focus-visible { outline: none; border-color: var(--blueprint); }
+  input:hover { border-color: var(--edge-strong); }
+  input:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 
   .hint { min-height: 1lh; color: var(--muted); font-size: var(--text-sm); }
   .hint.stamping { color: var(--text); }
   .error { color: var(--oxide-text); }
 
   .list { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 6px; margin: 0 -12px -12px; padding: 0 12px 12px; overflow-y: auto; overscroll-behavior: contain; }
-  .library { display: flex; width: 100%; min-height: var(--control-dense); align-items: center; gap: 4px; padding: 0 4px; color: var(--muted); font-size: var(--text-sm); font-weight: 600; text-align: left; }
-  .library:hover:not(:disabled) { color: var(--text); }
+  .library { display: flex; width: 100%; min-height: var(--control-dense); align-items: center; gap: 4px; padding: 0 4px; color: var(--text); font-size: var(--text-md); font-weight: 600; text-align: left; }
   .library svg { transition: transform var(--fast) ease; }
   .library svg.open { transform: rotate(90deg); }
   .library span:first-of-type { flex: 1; }
-  .count { color: var(--quiet); font-weight: 400; }
 
   .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding-top: 2px; }
   .tile { display: grid; grid-template-rows: 44px auto; gap: 4px; min-width: 0; padding: 6px 4px; color: var(--text); text-align: center; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
   .tile[aria-pressed="true"] { background: var(--accent-fill); box-shadow: inset 0 0 0 1px var(--accent-edge); }
   .tile[aria-pressed="true"]:hover { background: var(--accent-fill); }
+  .tile:active:not([aria-pressed="true"]) { background: var(--wash-strong); }
   .drawing { display: block; min-width: 0; pointer-events: none; }
   .label { overflow: hidden; color: var(--muted); font-size: var(--text-sm); line-height: 1.25; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: break-word; hyphens: auto; }
   .tile:hover .label, .tile[aria-pressed="true"] .label { color: var(--text); }
+  .tile[aria-pressed="true"] .label { font-weight: 600; }
   .empty { padding: 8px 4px; color: var(--muted); }
 
   /* At narrow windows the panel keeps most of the page visible: two columns instead of three. */
