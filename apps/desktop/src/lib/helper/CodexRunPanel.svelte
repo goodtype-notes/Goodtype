@@ -9,7 +9,7 @@
   const steps = $derived(tools.filter((step, index) => !tools.slice(index + 1).some(next => next.server === step.server && next.tool === step.tool && next.phase !== "start" && step.phase === "start")));
 </script>
 
-<section aria-label={$t("codex.title")}>
+<section aria-label={$t("codex.title")} data-ui="solid">
   <div class="status-row"><p class:active role="status"><span class="dot"></span>{$t(`codex.${state}`)}</p>
     {#if active}<button type="button" disabled={stopping} onclick={onStop}>{$t("codex.stop")}</button>{/if}
   </div>
@@ -37,24 +37,28 @@
 </section>
 
 <style>
-  section { display: grid; gap: 12px; margin-bottom: 16px; }
+  section { display: grid; gap: 12px; margin-bottom: 16px; font-size: var(--text-md); }
   .status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .status-row p { display: flex; align-items: center; gap: 7px; }
   .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
-  .active .dot { background: var(--blueprint); }
-  p { margin: 0; font-size: var(--text-sm); color: var(--muted); }
+  .active .dot { background: var(--blueprint-light); animation: working 1.2s ease-in-out infinite alternate; }
+  @keyframes working { from { opacity: 1; } to { opacity: .35; } }
+  p { margin: 0; font-size: var(--text-md); color: var(--muted); }
   [role="alert"] { color: var(--oxide-text); }
   details { color: var(--muted); font-size: var(--text-sm); }
-  summary { cursor: pointer; }
+  summary { cursor: pointer; border-radius: var(--radius); }
+  summary:hover { color: var(--text); }
+  summary:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
   pre { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
-  .transcript { white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 400; line-height: 1.65; user-select: text; }
+  .transcript { white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 400; line-height: 1.6; user-select: text; }
   ol { margin: 0; padding-left: 20px; color: var(--muted); font-size: var(--text-sm); }
   li { padding: 4px; }
   .external { background: var(--wash); border-radius: var(--radius); }
-  strong { display: block; }
-  button { min-height: var(--control-dense); padding: 4px 10px; background: var(--wash); color: var(--text); border: 0; border-radius: var(--radius); cursor: pointer; font-size: var(--text-sm); }
+  strong { display: block; font-weight: 600; }
+  button { min-height: var(--control-dense); padding: 0 12px; background: var(--wash); color: var(--text); border: 0; border-radius: var(--radius); cursor: pointer; font: inherit; font-size: var(--text-md); font-weight: 400; }
   button:hover:not(:disabled) { background: var(--wash-strong); }
   button:disabled { cursor: not-allowed; opacity: var(--disabled); }
   @media (pointer: coarse) { button { min-height: var(--control-touch); } }
+  @media (prefers-reduced-motion: reduce) { .active .dot { animation: none; } }
   button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 </style>

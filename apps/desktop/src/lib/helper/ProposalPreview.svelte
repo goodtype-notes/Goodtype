@@ -10,7 +10,7 @@
 </script>
 
 {#if $proposalPreview?.root === root && $proposalPreview.pageId === pageId && $proposalPreview.kind !== "preset_install" && !$proposalPreview.edit}
-  <svg class="preview" viewBox={`0 0 ${size.x} ${size.y}`} aria-hidden="true" style="pointer-events: none">
+  <svg class="preview" data-ui="solid" viewBox={`0 0 ${size.x} ${size.y}`} aria-hidden="true" style="pointer-events: none">
     {#each $proposalPreview.items as item (item.object.id)}
       {@const position = pageToViewport(item.object, view)}
       {@const bounds = pageToViewport({ x: item.widthPt, y: item.heightPt }, view)}

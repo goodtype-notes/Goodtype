@@ -17,7 +17,7 @@
   async function send() { if (!canSend(prompt, busy) || prompt.length > promptBudget) return; const captured = prompt; if (await onSend(cellContext && activeFocus ? focusPrompt(captured, activeFocus).replace(/(`{3,})typst\n/, "$1python\n") : focusPrompt(captured, activeFocus)) && prompt === captured) prompt = ""; }
 </script>
 <svelte:window onkeydown={event => { if (event.key === "Escape" && form?.contains(event.target as Node)) composerKey(event, send, onClose); }} />
-<form bind:this={form} onsubmit={event => { event.preventDefault(); send(); }}>
+<form bind:this={form} data-ui="solid" onsubmit={event => { event.preventDefault(); send(); }}>
   <div class="context-block">
   {#if count > 0 || selectionLabel}<div class="context-row">
     {#if thumbnail}
@@ -63,24 +63,26 @@
 <style>
   .context-block { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 2px; margin: -2px; }
   .handoff { color: var(--muted); font-size: var(--text-sm); line-height: 1.5; overflow-wrap: anywhere; }
-  form { display: grid; gap: 7px; min-width: 0; }
+  form { display: grid; gap: 8px; min-width: 0; font-size: var(--text-md); }
   button, select, textarea { font: inherit; color: var(--text); }
   button { cursor: pointer; }
   svg { width: var(--icon-dense); height: var(--icon-dense); flex: none; fill: none; stroke: currentColor; stroke-width: var(--stroke-dense); stroke-linecap: round; stroke-linejoin: round; }
   .context-row { display: flex; align-items: center; justify-content: space-between; min-width: 0; gap: 8px; }
-  .attachment { display: inline-flex; align-items: center; gap: 6px; min-width: 0; min-height: var(--control-dense); padding: 0 6px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--panel); color: var(--muted); font-size: var(--text-sm); text-align: left; justify-self: start; max-width: 100%; }
-  button.attachment:hover { background: var(--wash); color: var(--text); }
+  .attachment { display: inline-flex; align-items: center; gap: 6px; min-width: 0; min-height: var(--control-dense); padding: 0 8px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--panel); color: var(--muted); font-size: var(--text-sm); text-align: left; justify-self: start; max-width: 100%; }
+  button.attachment:hover { background: var(--wash); border-color: var(--edge-strong); color: var(--text); }
   .attachment-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .prompt-box { min-width: 0; border: 1px solid var(--edge); border-radius: var(--radius-lg); background: var(--charcoal); }
-  .prompt-box:focus-within { border-color: var(--blueprint); }
-  textarea { display: block; width: 100%; min-height: 76px; max-height: min(160px, 22dvh); padding: 12px; border: 0; border-radius: var(--radius-lg); background: transparent; line-height: 1.6; resize: vertical; caret-color: var(--blueprint-light); }
+  .prompt-box { min-width: 0; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); }
+  .prompt-box:hover { border-color: var(--edge-strong); }
+  .prompt-box:focus-within { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
+  textarea { display: block; width: 100%; min-height: 76px; max-height: min(160px, 22dvh); padding: 12px; border: 0; border-radius: var(--radius); background: transparent; font-size: var(--text-md); line-height: 1.5; resize: vertical; caret-color: var(--blueprint-light); }
   textarea:focus-visible { outline: none; }
   textarea.followup { min-height: 56px; }
   textarea::placeholder { color: var(--quiet); }
   textarea::selection { background: var(--accent-select); }
   .input-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; padding: 6px; }
   .select-shell { position: relative; display: flex; flex: 1; min-width: 110px; max-width: 185px; }
-  select { width: 100%; min-width: 0; height: var(--control); padding: 0 24px 0 6px; border: 0; border-radius: var(--radius); appearance: none; background: transparent; color: var(--muted); color-scheme: dark; font-size: var(--text-sm); text-overflow: ellipsis; cursor: pointer; }
+  select { width: 100%; min-width: 0; height: var(--control); padding: 0 28px 0 8px; border: 0; border-radius: var(--radius); appearance: none; background: transparent; color: var(--muted); color-scheme: dark; font-size: var(--text-md); text-overflow: ellipsis; cursor: pointer; }
+  select:hover:not(:disabled) { background: var(--wash); color: var(--text); }
   option { color: var(--text); background: var(--panel); }
   .select-shell svg { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
   .web { position: relative; display: flex; align-items: center; justify-content: center; width: var(--control); height: var(--control); flex: none; border-radius: var(--radius); color: var(--muted); font-size: var(--text-sm); cursor: pointer; }
@@ -89,16 +91,16 @@
   .web:has(input:checked) { border-color: var(--accent-edge); background: var(--accent-fill); color: var(--text); }
   .web input { position: absolute; inset: 0; margin: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
   .web:has(input:focus-visible) { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
-  .primary { display: inline-flex; align-items: center; justify-content: center; flex: none; gap: 6px; min-height: var(--control); margin-left: auto; padding: 0 14px; border: 0; border-radius: var(--radius); background: var(--blueprint); color: var(--on-accent); font-weight: 600; }
+  .primary { display: inline-flex; align-items: center; justify-content: center; flex: none; gap: 6px; min-height: var(--control); margin-left: auto; padding: 0 16px; border: 0; border-radius: var(--radius); background: var(--blueprint); color: var(--on-accent); font-size: var(--text-md); font-weight: 600; }
   .primary:hover:not(:disabled) { background: var(--blueprint-hover); }
   button:disabled, select:disabled, .web:has(input:disabled) { opacity: var(--disabled); cursor: not-allowed; }
   .footnote { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; color: var(--muted); font-size: var(--text-sm); line-height: 1.5; }
   .footnote .handoff { flex: 1 1 200px; color: var(--quiet); }
-  .link { padding: 0; border: 0; background: none; color: var(--muted); font-size: inherit; text-decoration: underline; text-underline-offset: 2px; }
-  .link:hover { color: var(--text); }
-  .end { flex: none; min-height: var(--control-dense); padding: 0 8px; border: 0; border-radius: var(--radius); background: transparent; color: var(--oxide-text); font-size: var(--text-sm); }
+  .link { padding: 0; border: 0; border-radius: var(--radius); background: none; color: var(--blueprint-light); font-size: inherit; }
+  .link:hover { text-decoration: underline; text-underline-offset: 2px; }
+  .end { flex: none; min-height: var(--control-dense); padding: 0 8px; font-weight: 400; border: 0; border-radius: var(--radius); background: transparent; color: var(--oxide-text); font-size: var(--text-sm); }
   .end:hover:not(:disabled) { background: var(--wash); }
-  .stop { display: inline-flex; align-items: center; justify-content: center; flex: none; gap: 6px; min-height: var(--control); margin-left: auto; padding: 0 14px; border: 0; border-radius: var(--radius); background: var(--wash); color: var(--text); font-weight: 600; }
+  .stop { display: inline-flex; align-items: center; justify-content: center; flex: none; gap: 6px; min-height: var(--control); margin-left: auto; padding: 0 16px; border: 0; border-radius: var(--radius); background: var(--wash); color: var(--text); font-size: var(--text-md); font-weight: 400; }
   .stop:hover:not(:disabled) { background: var(--wash-strong); }
   .details { position: fixed; inset: auto 12px 70px auto; width: min(320px, calc(100vw - 24px)); margin: 0; padding: 12px; border: 1px solid var(--edge); border-radius: var(--radius-lg); background: var(--panel); color: var(--muted); box-shadow: var(--shadow-menu); font-size: var(--text-sm); line-height: 1.5; }
   .details p + p { margin-top: 8px; }

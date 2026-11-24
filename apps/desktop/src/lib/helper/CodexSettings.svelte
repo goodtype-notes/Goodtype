@@ -19,7 +19,7 @@
   onMount(() => { if ("__TAURI_INTERNALS__" in window) void refresh(); });
 </script>
 
-<section aria-label={$t("codex.title")}>
+<section aria-label={$t("codex.title")} data-ui="solid">
   <header>
     <h3>{$t("codex.title")}</h3>
     <button type="button" disabled={loading} onclick={refresh}>{$t(loading ? "codex.checking" : "codex.refresh")}</button>
@@ -68,7 +68,8 @@
 <style>
   details { display: grid; gap: 12px; }
   details > label { margin: 12px 0; }
-  summary { cursor: pointer; color: var(--muted); padding: 8px 0; }
+  summary { cursor: pointer; color: var(--muted); padding: 8px 0; border-radius: var(--radius); }
+  summary:hover { color: var(--text); }
   section { display: flex; flex-direction: column; gap: 12px; padding: 18px 0; border-top: 1px solid var(--edge-soft); font-size: var(--text-md); overflow-wrap: anywhere; }
   header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   h3, h4, p { margin: 0; }
@@ -77,22 +78,21 @@
   .hint { color: var(--muted); font-size: var(--text-sm); line-height: 1.5; }
   .connection { display: flex; flex-direction: column; gap: 4px; }
   .problem { color: var(--oxide-text); font-size: var(--text-sm); line-height: 1.5; }
-  label { display: grid; min-width: 0; gap: 8px; }
+  label { display: grid; min-width: 0; gap: 8px; color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
   .path { margin-top: -6px; user-select: text; }
-  input:not([type="checkbox"]), select, button { min-width: 0; min-height: var(--control); max-width: 100%; padding: 8px 10px; background: var(--wash); color: var(--text); border: 0; border-radius: var(--radius); font: inherit; }
+  input:not([type="checkbox"]), select, button { min-width: 0; min-height: var(--control); max-width: 100%; padding: 0 12px; background: var(--wash); color: var(--text); border: 0; border-radius: var(--radius); font: inherit; font-size: var(--text-md); font-weight: 400; }
   input:not([type="checkbox"]), select { border: 1px solid var(--edge); background: var(--inset); }
   input:not([type="checkbox"]):hover, select:hover { border-color: var(--edge-strong); }
-  input:not([type="checkbox"]):focus, select:focus { border-color: var(--blueprint); }
-  input:not([type="checkbox"]), select { width: 100%; }
+    input:not([type="checkbox"]), select { width: 100%; }
   input::placeholder { color: var(--quiet); }
-  button { cursor: pointer; font-size: var(--text-sm); font-weight: 600; }
+  button { cursor: pointer; }
   button:hover:not(:disabled) { background: var(--wash-strong); }
   button:disabled { cursor: not-allowed; opacity: var(--disabled); }
   .select-shell { position: relative; display: flex; }
-  select { padding-right: 32px; appearance: none; color-scheme: dark; cursor: pointer; }
+  select { padding-right: 36px; appearance: none; color-scheme: dark; cursor: pointer; }
   option { background: var(--panel); color: var(--text); }
   .select-shell svg { position: absolute; top: 50%; right: 8px; width: var(--icon-dense); height: var(--icon-dense); transform: translateY(-50%); fill: none; stroke: var(--muted); stroke-width: var(--stroke-dense); stroke-linecap: round; pointer-events: none; }
-  .server { display: flex; align-items: center; justify-content: space-between; min-height: var(--control); border-top: 1px solid var(--edge-soft); gap: 20px; }
+  .server { color: var(--text); font-size: var(--text-md); font-weight: 400; display: flex; align-items: center; justify-content: space-between; min-height: var(--control); border-top: 1px solid var(--edge-soft); gap: 20px; }
   .toggle { position: relative; display: grid; flex: none; width: 34px; height: var(--control); align-items: center; }
   .toggle input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
   .track { height: 20px; border-radius: var(--radius-pill); background: var(--track); pointer-events: none; transition: background var(--fast); }
