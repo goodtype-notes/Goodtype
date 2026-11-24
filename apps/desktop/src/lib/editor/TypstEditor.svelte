@@ -41,6 +41,19 @@
   } = $props();
 
   let host: HTMLDivElement;
+
+  /// The completion and hover popups render into the body, outside any `data-ui` subtree, so they
+  /// get a holder that carries the solid tokens.
+  function tooltipHolder(): HTMLElement {
+    let holder = document.querySelector<HTMLElement>("[data-typst-tooltips]");
+    if (!holder) {
+      holder = document.createElement("div");
+      holder.dataset.typstTooltips = "";
+      holder.dataset.ui = "solid";
+      document.body.append(holder);
+    }
+    return holder;
+  }
   let view: EditorView | undefined;
   let applyingExternalValue = false;
   let highlightTimer: ReturnType<typeof setTimeout> | undefined;
@@ -72,7 +85,7 @@
         // The block editor lives inside the page, which clips its overflow and stacks the ink
         // layer above it. Rendering the completion popup into the body escapes both, so it can
         // sit above the editor, the rendered preview, and everything else while you type.
-        tooltips({ parent: document.body, position: "fixed" }),
+        tooltips({ parent: tooltipHolder(), position: "fixed" }),
         // Declares the editor dark so CodeMirror applies its dark base theme. Without this its
         // `&light .cm-tooltip` rule paints the completion popup near-white, and that rule is
         // more specific than any plain `.cm-tooltip` override we could write.
@@ -289,7 +302,7 @@
   });
 </script>
 
-<div class="editor" class:filled={maxLines === null} style:--max-lines={maxLines ?? 0}>
+<div class="editor" data-ui="solid" class:filled={maxLines === null} style:--max-lines={maxLines ?? 0}>
   <div class="host" bind:this={host}></div>
   {#if help || helpStatus}
     <div class:code={help?.code} class="help" role="status" aria-live="polite">
@@ -343,14 +356,14 @@
        set below, and the addend covers the editor's own vertical padding. */
     max-height: calc(var(--max-lines) * 1.65 * 12px + 10px);
     border: 1px solid var(--edge);
-    background: var(--charcoal);
+    background: var(--inset);
     color: var(--text);
-    font: 12px/1.65 "Cascadia Mono", Consolas, monospace;
+    font: 12px/1.65 var(--font-code);
   }
 
   .editor :global(.cm-editor.cm-focused) {
-    outline: 1.5px solid var(--blueprint);
-    outline-offset: 0;
+    outline: 2px solid var(--blueprint-light);
+    outline-offset: -2px;
   }
 
   .editor :global(.cm-scroller) {
@@ -359,30 +372,30 @@
 
   .overflow-hint {
     margin: 0;
-    padding: 5px 9px;
+    padding: 8px 12px;
     border: 1px solid var(--edge);
     border-top: 0;
     background: var(--surround);
     color: var(--muted);
-    font: 10px/1.4 Bahnschrift, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    font: var(--text-sm)/1.4 var(--font-ui);
   }
 
   .help {
-    padding: 7px 9px;
+    padding: 8px 12px;
     border: 1px solid var(--edge);
     border-top: 0;
     background: var(--surround);
     color: var(--muted);
-    font: 11px/1.45 Bahnschrift, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    font: var(--text-sm)/1.4 var(--font-ui);
   }
 
   .help.code {
-    font-family: "Cascadia Mono", Consolas, monospace;
+    font-family: var(--font-code);
   }
 
   .editor :global(.cm-gutters) {
-    border-right-color: var(--wash);
-    background: var(--charcoal);
+    border-right: 1px solid var(--edge-soft);
+    background: var(--inset);
     color: var(--quiet);
   }
 
@@ -391,10 +404,19 @@
     background: var(--fill-soft);
   }
 
-  .editor :global(.cm-cursor) {
-    border-left-color: var(--blueprint);
+  .editor :global(.cm-activeLineGutter) {
+    color: var(--muted);
   }
 
+  .editor :global(.cm-cursor) {
+    border-left-color: var(--blueprint-light);
+  }
+
+  .editor :global(.cm-selectionBackground) {
+    background: var(--accent-select);
+  }
+
+  /* Syntax colours are content, not interface. */
   .editor :global(.cm-typst-comment) { color: #737d89; font-style: italic; }
   .editor :global(.cm-typst-string) { color: #a8d1a0; }
   .editor :global(.cm-typst-keyword) { color: #c6a0f6; }
@@ -417,50 +439,46 @@
   .editor :global(.cm-typst-math) { color: #8fc8ff; }
   .editor :global(.cm-lintRange-error) {
     background-image: none;
-    background: rgb(229 100 94 / 12%);
-    text-decoration: underline wavy #ff6b66;
+    background: var(--oxide-wash);
+    text-decoration: underline wavy var(--oxide);
     text-decoration-thickness: 1.5px;
     text-underline-offset: 3px;
   }
   .editor :global(.cm-lintRange-warning) {
     background-image: none;
-    text-decoration: underline wavy #f1c76d;
+    text-decoration: underline wavy var(--amber);
     text-underline-offset: 3px;
   }
 
-  /* Tooltips render into the document body (see `tooltips()` above) so they are no longer
-     descendants of `.editor`; these rules are therefore global. The popup needs a fully opaque
-     surface of its own — CodeMirror's default is light and semi-transparent, which is
-     unreadable against white paper. */
+  /* Tooltips render into a `data-ui="solid"` holder in the document body (see `tooltipHolder()`),
+     so they are not descendants of `.editor` and these rules are global. The popup needs a fully
+     opaque surface of its own. `!important` on the two properties CodeMirror's base theme sets
+     itself: its `&dark .cm-tooltip` rule is more specific than anything written from outside. */
   :global(.cm-tooltip) {
     /* Above the page, the ink layer, the palette, and the rest of the workspace chrome. */
     z-index: 2000;
-    /* Mirrors the workspace's floating panels (--panel/--text and the overflow menu's edge and
-       shadow). The values are literal because the popup renders into the body, outside the
-       `.workspace-app` subtree where those custom properties are defined.
-       `!important` on the two properties CodeMirror's base theme sets itself: its `&dark
-       .cm-tooltip` rule is more specific than anything we can write from outside, so this is
-       the override point rather than a specificity war. */
-    border: 1px solid var(--wash-strong) !important;
+    border: 1px solid var(--edge) !important;
     border-radius: var(--radius-lg);
     background: var(--panel) !important;
     box-shadow: var(--shadow-menu);
     color: var(--text);
+    font-family: var(--font-ui);
+    font-size: var(--text-md);
   }
 
   :global(.cm-tooltip-autocomplete > ul) {
     max-height: 16rem;
     margin: 0;
-    padding: 7px;
+    padding: 4px;
     /* Monospace, because every candidate is inserted as code. */
-    font: 12px/1.6 "Cascadia Mono", Consolas, monospace;
+    font: 12px/1.4 var(--font-code);
   }
 
   :global(.cm-tooltip-autocomplete > ul > li) {
     display: flex;
     align-items: baseline;
-    gap: 10px;
-    padding: 5px 9px;
+    gap: 12px;
+    padding: 4px 8px;
     border-radius: var(--radius);
     color: var(--text);
   }
@@ -471,6 +489,7 @@
 
   :global(.cm-tooltip-autocomplete > ul > li[aria-selected]) {
     background: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
     color: var(--text);
   }
 
@@ -494,11 +513,10 @@
   :global(.cm-completionIcon) {
     width: 1.1em;
     padding-right: 0;
-    opacity: 0.7;
   }
 
   :global(.cm-tooltip.cm-completionInfo) {
     margin-left: 4px;
-    padding: 6px 8px;
+    padding: 8px;
   }
 </style>

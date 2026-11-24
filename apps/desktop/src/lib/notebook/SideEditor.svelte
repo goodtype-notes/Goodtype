@@ -132,6 +132,7 @@
 
 <aside
   class="side-editor"
+  data-ui="solid"
   class:dock-right={dock === "right"}
   style:width={`${width}px`}
   aria-label={customTitle ?? $t("editor.typstSource")}
@@ -304,7 +305,7 @@
 </aside>
 
 <style>
-  .block-controls { flex: none; padding: 0 8px 6px; background: var(--panel); }
+  .block-controls { flex: none; padding: 0 8px 8px; background: var(--panel); }
   .side-editor {
     position: relative;
     display: flex;
@@ -314,7 +315,9 @@
        window is resized, not just while dragging. */
     max-width: 50%;
     border-right: 1px solid var(--edge-soft);
-    background: var(--surround);
+    background: var(--panel);
+    color: var(--text);
+    font-family: var(--font-ui);
   }
 
   .side-editor.dock-right {
@@ -325,9 +328,10 @@
   header {
     display: flex;
     height: var(--control);
+    flex: none;
     align-items: center;
     gap: 2px;
-    padding: 0 6px 0 12px;
+    padding: 0 8px 0 12px;
     border-bottom: 1px solid var(--edge-soft);
     background: var(--panel);
   }
@@ -337,15 +341,16 @@
     min-width: 0;
     flex: 1;
     align-items: baseline;
-    padding-right: 6px;
-    gap: 9px;
+    padding-right: 8px;
+    gap: 8px;
   }
 
   .title {
     overflow: hidden;
-    color: var(--muted);
-    font-size: var(--text-sm);
+    color: var(--text);
+    font-size: var(--text-lg);
     font-weight: 600;
+    line-height: 1.25;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -362,17 +367,23 @@
     width: var(--control-dense);
     height: var(--control-dense);
     flex: none;
+    padding: 0;
     border: 0;
     border-radius: var(--radius);
     background: transparent;
     color: var(--muted);
     cursor: pointer;
     place-items: center;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
   .icon:hover {
     background: var(--wash);
     color: var(--text);
+  }
+
+  .icon:active {
+    background: var(--wash-strong);
   }
 
   .icon:focus-visible {
@@ -386,6 +397,7 @@
     fill: none;
     stroke: currentColor;
     stroke-linecap: round;
+    stroke-linejoin: round;
     stroke-width: var(--stroke-dense);
   }
 
@@ -399,10 +411,11 @@
     flex: 1;
     flex-direction: column;
     align-items: flex-start;
-    gap: 10px;
-    padding: 18px 16px;
+    gap: 12px;
+    padding: 16px;
     color: var(--text);
     font-size: var(--text-md);
+    line-height: 1.4;
   }
 
   .notice p {
@@ -414,18 +427,23 @@
     font-size: var(--text-sm);
   }
 
+  /* Secondary button. */
   .action {
-    padding: 7px 11px;
-    border: 1px solid var(--edge);
+    height: var(--control);
+    padding: 0 16px;
+    border: 0;
     border-radius: var(--radius);
-    background: var(--panel);
+    background: var(--wash);
     color: var(--text);
+    font: inherit;
     font-size: var(--text-md);
+    line-height: 1;
     cursor: pointer;
+    transition: background var(--fast) ease;
   }
 
   .action:hover {
-    background: var(--wash);
+    background: var(--wash-strong);
   }
 
   .action:focus-visible {
@@ -438,14 +456,15 @@
     margin: 0;
     padding: 8px 12px;
     border-top: 1px solid var(--edge-soft);
+    background: var(--inset);
     color: var(--muted);
-    font: var(--text-sm)/1.5 "Cascadia Mono", Consolas, monospace;
+    font: var(--text-sm)/1.5 var(--font-code);
     list-style: none;
     overflow-y: auto;
   }
 
   .diagnostics .error {
-    color: var(--oxide);
+    color: var(--oxide-text);
   }
 
   .resizer {
@@ -467,5 +486,13 @@
   .resizer:focus-visible {
     background: var(--accent-select);
     outline: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .icon, .action { transition: none; }
+  }
+
+  @media (pointer: coarse) {
+    .action { min-height: var(--control-touch); }
   }
 </style>
