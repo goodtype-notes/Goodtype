@@ -74,7 +74,7 @@
 </script>
 
 <!-- Notebook-scoped Typst source search (Phase 2 §3.7): typed content only, no OCR. -->
-<section class="search" role="search" aria-label={$t("workspace.searchTypedNotebookContent")}>
+<section class="search" data-ui="solid" role="search" aria-label={$t("workspace.searchTypedNotebookContent")}>
   <div class="field">
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
     <input
@@ -113,102 +113,92 @@
     right: 16px;
     z-index: 30;
     width: min(380px, calc(100% - 32px));
-    border: 1px solid var(--wash-strong);
-    border-radius: 10px;
+    border: 1px solid var(--edge);
+    border-radius: var(--radius-lg);
     background: var(--panel);
     box-shadow: var(--shadow-menu);
   }
 
-  .field {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-  }
+  .field { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; }
 
   .field svg {
-    width: 15px;
-    height: 15px;
+    width: var(--icon-dense);
+    height: var(--icon-dense);
     flex: none;
     fill: none;
-    stroke: var(--quiet);
-    stroke-width: 1.8;
+    stroke: var(--muted);
+    stroke-linecap: round;
+    stroke-width: var(--stroke-dense);
   }
 
   input {
     flex: 1;
     min-width: 0;
+    height: var(--control);
     border: 0;
     background: transparent;
     color: var(--text);
-    font-size: 13px;
+    font: inherit;
+    font-size: var(--text-md);
     outline: none;
   }
+  input::placeholder { color: var(--quiet); }
 
   .field > button {
     flex: none;
-    width: 24px;
-    height: 24px;
+    width: var(--control-dense);
+    height: var(--control-dense);
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius);
     background: transparent;
-    color: var(--quiet);
-    font-size: 16px;
+    color: var(--muted);
+    font-size: var(--text-lg);
+    line-height: 1;
     cursor: pointer;
   }
-
-  .field > button:hover {
-    background: var(--wash);
-    color: var(--text);
-  }
+  .field > button:hover { background: var(--wash); color: var(--text); }
+  .field > button:active { background: var(--wash-strong); }
+  .field > button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 
   .state {
     margin: 0;
-    padding: 10px 14px 12px;
-    border-top: 1px solid var(--wash);
-    color: var(--quiet);
-    font-size: 12px;
+    padding: 12px;
+    border-top: 1px solid var(--edge-soft);
+    color: var(--muted);
+    font-size: var(--text-md);
   }
 
   ol {
     max-height: 280px;
     overflow: auto;
     margin: 0;
-    padding: 6px;
-    border-top: 1px solid var(--wash);
+    padding: 4px;
+    border-top: 1px solid var(--edge-soft);
     list-style: none;
   }
 
   li button {
     display: flex;
-    align-items: baseline;
-    gap: 10px;
+    align-items: center;
+    gap: 12px;
     width: 100%;
-    padding: 7px 9px;
+    min-height: var(--control);
+    padding: 0 12px;
     border: 0;
-    border-radius: 7px;
+    border-radius: var(--radius);
     background: transparent;
     color: var(--text);
-    font-size: 12.5px;
+    font: inherit;
+    font-size: var(--text-md);
     text-align: left;
     cursor: pointer;
   }
+  li button:hover { background: var(--wash); }
+  li button:active { background: var(--wash-strong); }
+  li button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: -2px; }
 
-  li button:hover,
-  li button:focus-visible {
-    background: var(--accent-fill);
-  }
+  /* On a hovered row (--wash) --quiet fails contrast, so the page number is --muted. */
+  .page { flex: none; color: var(--muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+  .excerpt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  .page {
-    flex: none;
-    color: var(--blueprint);
-    font-variant-numeric: tabular-nums;
-    font-size: 11.5px;
-  }
-
-  .excerpt {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
 </style>

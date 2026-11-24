@@ -53,12 +53,14 @@
   }
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<aside
+<div
   bind:this={menu}
   use:dismissable={{ onClose, trigger }}
   class="overflow-menu"
   class:compact
+  data-ui="solid"
+  role="menu"
+  tabindex="-1"
   aria-label={title}
   onkeydown={moveWithin}
 >
@@ -70,12 +72,13 @@
   {/if}
 
   {#each sections as section, index (section.title ?? index)}
-    {#if index > 0}<div class="menu-divider"></div>{/if}
-    {#if section.title}<div class="menu-heading">{section.title}</div>{/if}
+    {#if index > 0}<div class="menu-divider" role="separator"></div>{/if}
+    {#if section.title}<div class="menu-heading" role="presentation">{section.title}</div>{/if}
 
     {#each section.entries as entry (entry.id)}
       <button
         type="button"
+        role="menuitem"
         class:destructive={entry.destructive}
         disabled={entry.disabled}
         onclick={() => run(entry)}
@@ -94,7 +97,7 @@
       </button>
     {/each}
   {/each}
-</aside>
+</div>
 
 <style>
   .overflow-menu {
@@ -106,23 +109,24 @@
     top: 52px;
     right: 14px;
     width: min(304px, calc(100vw - 28px));
-    padding: 6px;
+    padding: 4px;
     border: 1px solid var(--edge);
     border-radius: var(--radius-lg);
     background: var(--panel);
     box-shadow: var(--shadow-menu);
-    animation: menu-in var(--enter) cubic-bezier(0.2, 0.7, 0.3, 1);
-    transform-origin: top right;
+    animation: menu-in var(--enter) ease-out;
   }
 
+  .overflow-menu:focus { outline: none; }
+
   @keyframes menu-in {
-    from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+    from { opacity: 0; transform: translateY(-4px); }
   }
 
   .menu-subject {
-    padding: 8px 10px 10px;
+    padding: 8px 12px 10px;
     border-bottom: 1px solid var(--edge-soft);
-    margin-bottom: 6px;
+    margin-bottom: 4px;
   }
 
   .menu-subject strong {
@@ -135,7 +139,7 @@
   .menu-subject span {
     display: block;
     overflow: hidden;
-    margin-top: 3px;
+    margin-top: 2px;
     color: var(--quiet);
     font-size: var(--text-sm);
     text-overflow: ellipsis;
@@ -143,7 +147,7 @@
   }
 
   .menu-heading {
-    padding: 9px 10px 5px;
+    padding: 8px 12px 4px;
     color: var(--muted);
     font-size: var(--text-sm);
     font-weight: 600;
@@ -154,21 +158,23 @@
     width: 100%;
     min-height: var(--control);
     align-items: center;
-    padding: 0 10px;
+    padding: 0 12px;
     border: 0;
     border-radius: var(--radius);
     background: transparent;
     color: var(--text);
+    cursor: pointer;
     font: inherit;
     font-size: var(--text-md);
     text-align: left;
-    gap: 10px;
+    gap: 12px;
+    transition: background var(--fast) ease;
   }
 
-  button { cursor: pointer; transition: background var(--fast) ease; }
   button:hover:not(:disabled) { background: var(--wash); }
+  button:active:not(:disabled) { background: var(--wash-strong); }
   button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: -2px; }
-  button:disabled { color: var(--quiet); cursor: default; }
+  button:disabled { cursor: default; opacity: var(--disabled); }
 
   .menu-icon {
     display: grid;
@@ -189,30 +195,30 @@
   }
 
   button:hover:not(:disabled) .menu-icon svg { stroke: var(--text); }
-  .menu-label { overflow: hidden; flex: 1; text-overflow: ellipsis; white-space: nowrap; }
+  .menu-label { overflow: hidden; min-width: 0; flex: 1; text-overflow: ellipsis; white-space: nowrap; }
 
+  /* Shortcuts keep their full width: the label gives way, the hint never does. */
   .menu-hint {
     flex: none;
     color: var(--quiet);
     font-size: var(--text-sm);
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
+  /* --quiet is below 4.5:1 on a --wash fill. */
+  button:hover:not(:disabled) .menu-hint { color: var(--muted); }
 
-  /* Red is spent only on entries that destroy work the writer cannot retype, so it still means
-     something when it appears. */
-  .destructive { color: var(--oxide); }
-  .destructive .menu-icon svg { stroke: var(--oxide); }
-  .destructive:hover:not(:disabled) { background: rgb(229 100 94 / 12%); }
-  .destructive:hover:not(:disabled) .menu-icon svg { stroke: var(--oxide); }
+  /* Red is spent only on entries that destroy work the writer cannot retype. */
+  .destructive { color: var(--oxide-text); }
+  .destructive .menu-icon svg,
+  .destructive:hover:not(:disabled) .menu-icon svg { stroke: var(--oxide-text); }
+  .destructive:hover:not(:disabled) { background: var(--oxide-wash); }
 
   /* Sized to its labels, with dense rows: it sits on the work, not in the window chrome. */
   .overflow-menu.compact {
     width: max-content;
     min-width: 168px;
     max-width: min(280px, calc(100vw - 28px));
-    padding: 4px;
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-menu);
   }
 
   .compact button { min-height: var(--control-dense); padding: 0 8px; }
@@ -221,7 +227,7 @@
 
   .menu-divider {
     height: 1px;
-    margin: 6px 8px;
+    margin: 4px 8px;
     background: var(--edge-soft);
   }
 

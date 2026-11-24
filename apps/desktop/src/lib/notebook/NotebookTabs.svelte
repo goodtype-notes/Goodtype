@@ -47,6 +47,7 @@
 <div
   bind:this={tablist}
   class="notebook-tabs"
+  data-ui="solid"
   role="tablist"
   aria-label={$t("workspace.openNotebooks")}
   tabindex="-1"
@@ -89,8 +90,7 @@
   .notebook-tabs {
     display: flex;
     min-width: 0;
-    /* Only as wide as the tabs themselves. Stretching to fill the strip pushed the "open another
-       notebook" button to the far side of the window, away from the tabs it adds to. */
+    /* Only as wide as the tabs themselves, so "open another notebook" sits next to them. */
     flex: 0 1 auto;
     overflow-x: auto;
     gap: 4px;
@@ -104,17 +104,14 @@
     height: var(--control);
     flex: 1 1 180px;
     align-items: center;
-    border: 1px solid var(--edge);
-    /* The bottom edge stays 2px in every state so selecting a tab tints it rather than resizing
-       it. It used to be transparent when inactive, which left the box visibly open at the
-       bottom — a browser-tab move that only reads right when the tab docks onto content below. */
-    border-bottom: 2px solid var(--edge);
     border-radius: var(--radius);
-    background: var(--fill-soft);
+    background: transparent;
+    transition: background var(--fast) ease;
   }
-  .notebook-tab.active { border-bottom-color: var(--blueprint); background: var(--panel); }
-  .notebook-tab.switching { opacity: .65; }
   .notebook-tab:hover { background: var(--wash); }
+  /* Selected: fill plus inset ring, nothing else. */
+  .notebook-tab.active { background: var(--accent-fill); box-shadow: inset 0 0 0 1px var(--accent-edge); }
+  .notebook-tab.switching { opacity: .65; }
   .tab-target {
     display: flex;
     min-width: 0;
@@ -122,27 +119,32 @@
     flex: 1;
     align-items: center;
     gap: 8px;
-    padding: 0 5px 0 11px;
+    padding: 0 4px 0 12px;
     border: 0;
+    border-radius: var(--radius);
     background: transparent;
     color: var(--muted);
     cursor: pointer;
+    font: inherit;
+    font-size: var(--text-md);
     text-align: left;
   }
-  .notebook-tab.active .tab-target { color: var(--text); }
-  /* Without this the title fell through to the browser's 16px default, which is why the tabs
-     read a full step larger than every other label in the strip. */
-  .tab-title { overflow: hidden; font-size: var(--text-md); text-overflow: ellipsis; white-space: nowrap; }
+  .notebook-tab.active .tab-target { color: var(--text); font-weight: 600; }
+  .tab-target:hover:not(:disabled) { color: var(--text); }
+  .tab-target:disabled, .tab-close:disabled { cursor: default; opacity: var(--disabled); }
+  .tab-target:focus-visible, .tab-close:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: -2px; }
+  .tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tab-close {
     display: grid;
     width: var(--control-dense);
     height: var(--control-dense);
+    margin-right: 2px;
     flex: none;
     padding: 0;
     border: 0;
     border-radius: var(--radius);
     background: transparent;
-    color: var(--quiet);
+    color: var(--muted);
     cursor: pointer;
     place-items: center;
   }
@@ -155,13 +157,16 @@
     stroke-width: var(--stroke-dense);
   }
   .tab-close:hover:not(:disabled) { background: var(--wash); color: var(--text); }
+  .tab-close:active:not(:disabled) { background: var(--wash-strong); }
+  .notebook-tab.active .tab-close:hover:not(:disabled) { background: var(--wash-strong); }
   .state-dot {
     width: 6px;
     height: 6px;
     flex: none;
     border-radius: 50%;
-    background: var(--blueprint);
+    background: var(--blueprint-light);
   }
+  /* Real work in progress: opacity only, and it stops when saving stops. */
   .state-dot.saving { animation: breathe 1s ease-in-out infinite alternate; }
   .state-dot.warning { background: var(--oxide); }
   @keyframes breathe { from { opacity: .35; } to { opacity: 1; } }
@@ -169,6 +174,7 @@
     .notebook-tab { min-width: 118px; }
   }
   @media (prefers-reduced-motion: reduce) {
+    .notebook-tab { transition: none; }
     .state-dot.saving { animation: none; }
   }
 </style>
