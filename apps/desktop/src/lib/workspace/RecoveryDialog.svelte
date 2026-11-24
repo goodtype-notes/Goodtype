@@ -24,6 +24,7 @@
   applied or deleted silently (Pillar 3). "Decide later" is the only way out, so Escape and the
   backdrop do nothing here.
 -->
+<div class="solid-root" data-ui="solid">
 <Dialog title={$t("workspace.recoveredWorkFound")} lead={$t("workspace.anEarlierSaveWasInterruptedTheConfirmed")} size="md" {onClose} dismissible={false}>
   {#snippet children()}
     <ul>
@@ -55,13 +56,16 @@
     <button type="button" class="control" onclick={onClose}>{$t("workspace.decideLater")}</button>
   {/snippet}
 </Dialog>
+</div>
 
 <style>
+  .solid-root { display: contents; }
   ul { max-height: min(50vh, 400px); margin: 0; padding: 0; overflow: auto; list-style: none; }
   /* Rows divided by a soft rule rather than boxed: cards inside a panel read as clutter. */
-  li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--edge-soft); }
+  li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--edge-soft); }
   li:first-child { border-top: 0; padding-top: 0; }
-  .summary { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+  .summary { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; line-height: 1.4; }
+  .summary strong { color: var(--text); font-size: var(--text-md); font-weight: 600; }
   .summary span { color: var(--muted); font-size: var(--text-sm); }
   .summary .problem { color: var(--oxide-text); }
   .actions { flex: none; }

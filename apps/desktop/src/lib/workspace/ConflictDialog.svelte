@@ -18,6 +18,7 @@
   session read-only until the user decides. There is deliberately no "overwrite anyway", and no
   Escape or backdrop dismissal: the writer has to choose.
 -->
+<div class="solid-root" data-ui="solid">
 <Dialog title={$t("workspace.notebookChangedOutsideGoodtype")} lead={detail} size="md" role="alertdialog">
   {#snippet children()}
     <p class="hint">{$t("workspace.yourLatestUnsavedChangeWasNotWritten")}</p>
@@ -27,3 +28,8 @@
     <button type="button" class="primary" onclick={onReload}>{$t("workspace.reloadNotebook")}</button>
   {/snippet}
 </Dialog>
+</div>
+
+<style>
+  .solid-root { display: contents; }
+</style>
