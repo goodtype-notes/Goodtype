@@ -18,7 +18,9 @@ Choose **Lasso select** and draw a loop around the graph. Drag the selection to 
 
 ## Typeset an equation
 
-Choose **New Typst block** to place an equation beside your sketch. Enter ordinary Typst source, such as `$ F = m a $`. Drag a corner to scale the result or a side to change the width and reflow the text. If a source edit fails to compile, the previous rendering stays on the page. Use **Page text** for longer passages that follow the paper ruling.
+Choose **New Typst block** to place an equation beside your sketch. Enter ordinary Typst source, such as `$ T = 2 pi sqrt(L / g) $`. Drag a corner to scale the result or a side to change the width and reflow the text. If a source edit fails to compile, the previous rendering stays on the page. Use **Page text** for longer passages that follow the paper ruling.
+
+![The typeset period equation beside a blue ink drawing of a pendulum](media/pendulum.png)
 
 Goodtype includes the Typst compiler, fonts and the Tinymist editor helper. Installed fonts also work in preview and export.
 
@@ -40,6 +42,6 @@ If you use an external AI assistant, you can grant it access to selected noteboo
 
 Arrange pages in the order you want to read them, then choose **Export PDF**. Export uses the saved pages, including their images, PDF material and calculation outputs. Calculation pages can retain their full height or split into A4 sheets.
 
-*The screenshots and animation use the Goodtype frontend at revision `3721f46` with a sample graph and simulated pen input.*
+*The pendulum demo uses the Windows desktop app with its embedded Typst compiler. The graph and paper picker use the frontend preview. Both use sample content and simulated pen input.*
 
 [Import and store notebooks](files.md)

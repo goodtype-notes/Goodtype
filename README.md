@@ -11,9 +11,9 @@
 
 <p align="center"><a href="https://github.com/goodtype-notes/Goodtype/releases">Download for Windows</a> · <a href="handbook/notebooks.md">Notebook guide</a> · <a href="handbook/development.md">Build from source</a></p>
 
-![A damped oscillation drawn in blue ink, then selected with the lasso](handbook/media/tour.gif)
+![Typing the period equation in Typst, then sketching and labelling a pendulum beside the rendered equation on the same page](handbook/media/tour.gif)
 
-Sketch a graph with the pen. Set its equation in Typst. Keep the calculation on a Jupyter page in the same notebook. Export everything to PDF with vector ink and selectable text.
+Type an equation and sketch its diagram beside it on the same page. Keep the calculation on a Jupyter page in the same notebook. Export everything to PDF with vector ink and selectable text.
 
 Goodtype saves ordinary files on your device. Writing, typesetting and exporting work offline without an account.
 
