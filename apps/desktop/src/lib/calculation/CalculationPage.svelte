@@ -149,7 +149,7 @@
   }
 </script>
 
-<section class="calculation-page" aria-label={$t("calculation.page")} bind:this={page} use:localEditorHeight>
+<section class="calculation-page" data-ui="solid" aria-label={$t("calculation.page")} bind:this={page} use:localEditorHeight>
   <header role="toolbar" aria-label={$t("calculation.pageTools")} use:controlSpace={"top"}>
     <div class="title">
       {#if renaming}
@@ -232,19 +232,21 @@
 <style>
   .calculation-page { min-height: 60px; box-sizing: border-box; width: 100%; position: relative; padding: 18px; color: var(--text); background: var(--charcoal); }
   /* Page chrome floats above and below the A4 sheet. It never takes height from the page content. */
-  header { position: absolute; z-index: 4; bottom: calc(100% + 6px); left: 0; right: 0; display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--text); font: 10px var(--font-ui); }
+  header { position: absolute; z-index: 4; bottom: calc(100% + 6px); left: 0; right: 0; display: flex; align-items: center; gap: 12px; min-width: 0; color: var(--text); font: var(--text-sm) var(--font-ui); }
   .title { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 0 1 auto; }
-  .name { min-width: 0; overflow: hidden; border: 0; background: transparent; color: inherit; padding: 0; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
-  .name strong { font-size: 12px; font-weight: 600; }
-  .name:hover strong { text-decoration: underline; text-decoration-color: var(--quiet); text-underline-offset: 2px; }
-  .title input { min-width: 80px; max-width: 200px; padding: 1px 4px; border: 1px solid var(--edge); border-radius: 3px; background: var(--panel); color: var(--text); font: 600 12px var(--font-ui); }
+  .name { min-width: 0; overflow: hidden; border: 0; border-radius: var(--radius); background: transparent; color: inherit; padding: 0 4px; margin: 0 -4px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+  .name:hover { background: var(--wash); }
+  .name strong { font-size: var(--text-md); font-weight: 600; }
+  .title input { min-width: 80px; max-width: 220px; height: var(--control-dense); box-sizing: border-box; padding: 0 8px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); color: var(--text); font: 600 var(--text-md) var(--font-ui); }
+  .title input:hover { border-color: var(--edge-strong); }
   .part { color: var(--muted); white-space: nowrap; }
 
   /* One indicator for the Python session: the dot carries state at a glance, the words confirm it. */
   .session { display: inline-flex; align-items: center; flex: none; color: var(--muted); white-space: nowrap; }
-  .dot { width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--quiet); }
+  .dot { width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--quiet); }
   .session[data-state="live"] .dot { background: var(--sage); }
   .session[data-state="running"] { color: var(--text); }
+  /* Opacity-only loop, present only while the session is really running. */
   .session[data-state="running"] .dot { background: var(--blueprint-light); animation: pulse 1s ease-in-out infinite; }
   .state { margin-left: 4px; }
   .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -253,11 +255,14 @@
   .actions { display: flex; align-items: center; gap: 4px; margin-left: auto; flex: none; }
   button { font: inherit; cursor: pointer; }
   button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
-  /* Controls carry no border (workspace rule): a fill on hover is enough to read as a button. */
-  .actions button, .add-cell button { height: 24px; padding: 0 9px; border: 0; border-radius: var(--radius); background: transparent; color: var(--text); }
+  /* Controls carry no border: a fill on hover is enough to read as a button. */
+  .actions button, .add-cell button { height: var(--control-dense); padding: 0 12px; border: 0; border-radius: var(--radius); background: transparent; color: var(--text); font-size: var(--text-md); transition: background var(--fast), color var(--fast); }
   .actions button:hover:not(:disabled), .add-cell button:hover:not(:disabled) { background: var(--wash); }
-  .actions button.icon { display: grid; place-items: center; width: 24px; padding: 0; color: var(--muted); }
+  .actions button:active:not(:disabled), .add-cell button:active:not(:disabled) { background: var(--wash-strong); }
+  .actions button.icon { display: grid; place-items: center; width: var(--control-dense); padding: 0; color: var(--muted); }
+  .actions button.icon:hover:not(:disabled), .actions button.icon[aria-expanded="true"] { color: var(--text); }
   .actions button.stop { background: var(--wash); }
+  .actions button.stop:hover:not(:disabled) { background: var(--wash-strong); }
   .actions button.primary { background: var(--blueprint); color: var(--on-accent); font-weight: 600; }
   .actions button.primary:hover:not(:disabled) { background: var(--blueprint-hover); }
 
@@ -266,30 +271,31 @@
   .cell.selected { box-shadow: -2px 0 var(--blueprint); }
   .cell:has(:global(.overflow-menu)) { z-index: 3; }
   /* Cell tools straddle the top edge inside the sheet width, so they stay on screen at every zoom. */
-  .cell-tools { position: absolute; z-index: 2; top: -11px; right: 6px; display: flex; align-items: center; gap: 1px; max-width: calc(100% - 12px); padding: 1px 2px; border: 1px solid var(--edge); border-radius: 5px; background: var(--panel); box-shadow: var(--shadow-menu); font: 10px var(--font-ui); }
+  .cell-tools { position: absolute; z-index: 2; top: -16px; right: 6px; display: flex; align-items: center; gap: 2px; max-width: calc(100% - 12px); padding: 2px; border: 1px solid var(--edge); border-radius: var(--radius-lg); background: var(--panel); box-shadow: var(--shadow-menu); font: var(--text-sm) var(--font-ui); }
   .cell-tools:empty { display: none; }
-  .count { min-width: 24px; color: var(--muted); font: 10px 'DejaVu Sans Mono', Consolas, monospace; text-align: center; }
-  .count.stale { opacity: .5; font-style: italic; }
-  .cell-tools button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--muted); }
-  .cell-tools button:hover:not(:disabled) { background: var(--wash-strong); color: var(--text); }
+  .count { min-width: 28px; color: var(--muted); font: var(--text-sm) var(--font-code); font-variant-numeric: tabular-nums; text-align: center; }
+  .count.stale { color: var(--quiet); font-style: italic; }
+  .cell-tools button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); transition: background var(--fast), color var(--fast); }
+  .cell-tools button:hover:not(:disabled) { background: var(--wash); color: var(--text); }
+  .cell-tools button:active:not(:disabled) { background: var(--wash-strong); }
   .cell-tools button[aria-busy="true"] svg { animation: pulse 1s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: .3; } }
-  @media (prefers-reduced-motion: reduce) { .cell-tools button[aria-busy="true"] svg, .session .dot { animation: none; } }
-  svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  @media (prefers-reduced-motion: reduce) { .cell-tools button[aria-busy="true"] svg, .session .dot { animation: none; } .actions button, .add-cell button, .cell-tools button { transition: none; } }
+  svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 
   .source { display: block; width: 100%; min-height: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
-  pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.45 'DejaVu Sans Mono', Consolas, monospace; }
+  pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--text-sm)/1.45 var(--font-code); }
   /* Same raised surface as the settled code box (previewTheme), so pending and settled match. */
   .source pre { padding: 10px; background: var(--charcoal); }
   .output { padding: 6px 10px; }
   .output img { display: block; max-width: 100%; height: auto; }
   .output.error pre { margin: 0 -10px; padding: 4px 10px; border-radius: 3px; background: var(--oxide-wash); color: var(--oxide-text); }
-  .provenance { position: absolute; left: 0; right: 0; bottom: -13px; margin: 0; color: var(--muted); font: 9px var(--font-ui); pointer-events: none; }
+  .provenance { position: absolute; left: 0; right: 0; bottom: -16px; margin: 0; color: var(--muted); font: var(--text-sm) var(--font-ui); pointer-events: none; }
   .settled { display: block; width: 100%; }
   /* Output from older code stays readable but steps back, so it is not mistaken for the current result. */
   .settled.stale-output { opacity: .6; }
 
-  .add-cell { position: absolute; top: calc(100% + 6px); left: 0; right: 0; display: flex; flex-wrap: wrap; gap: 2px; font: 10px var(--font-ui); }
+  .add-cell { position: absolute; top: calc(100% + 6px); left: 0; right: 0; display: flex; flex-wrap: wrap; gap: 4px; font: var(--text-sm) var(--font-ui); }
   .add-cell button { color: var(--muted); }
   .add-cell button:hover:not(:disabled) { color: var(--text); }
 

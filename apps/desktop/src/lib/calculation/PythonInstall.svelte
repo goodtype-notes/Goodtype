@@ -34,10 +34,10 @@
   <Dialog title={$t("calculation.installTitle")} lead={$t("calculation.installLead")} size="md"
     onClose={dismiss} dismissible={!workspace.installing} closeButton closeTitle={$t("calculation.close")}>
     {#snippet children()}
-      <div class="body" aria-live="polite">
+      <div class="body" data-ui="solid" aria-live="polite">
         {#if workspace.installing}
           <p class="status">{activity}</p>
-          <div class="progress" role="progressbar" aria-label={activity}><span></span></div>
+          <div class="progress indeterminate" role="progressbar" aria-label={activity}><span></span></div>
           {#if !workspace.removing}
             <div class="row">
               <!-- The archive being fetched, e.g. "numpy": shows the download is moving. -->
@@ -103,23 +103,29 @@
 
 <style>
   .body, section { display: grid; grid-template-columns: minmax(0, 1fr); }
-  .body { gap: 18px; }
+  .body { gap: 16px; }
   .row { display: flex; gap: 8px; align-items: center; }
   .spacer { flex: 1; }
 
   section { gap: 8px; }
-  section + section { padding-top: 18px; border-top: 1px solid var(--edge-soft); }
-  h3 { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: var(--text-md); font-weight: 600; }
-  .tag { color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
+  section + section { padding-top: 16px; border-top: 1px solid var(--edge-soft); }
+  h3 { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: var(--text-md); font-weight: 600; line-height: 1.4; }
+  .tag { color: var(--muted); font-size: var(--text-sm); font-weight: 400; }
 
-  code { font-family: 'DejaVu Sans Mono', Consolas, monospace; font-size: var(--text-sm); }
+  code { font-family: var(--font-code); font-size: var(--text-sm); }
 
-  .candidates { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 2px 0 0; padding: 0; list-style: none; }
-  .candidates li { display: flex; align-items: center; gap: 12px; padding: 6px 0; }
+  .candidates { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin: 2px 0 0; padding: 0; list-style: none; }
+  .candidates li { display: flex; align-items: center; gap: 12px; min-height: var(--control); padding: 0 0 0 12px; border-radius: var(--radius); background: var(--inset); }
   .candidates code { flex: 1; min-width: 0; overflow: hidden; color: var(--text); direction: rtl; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 
-  .figure { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .figure { color: var(--muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 
-  .link { justify-self: start; padding: 2px 0; border: 0; background: none; color: var(--blueprint-light); font: inherit; font-size: var(--text-sm); cursor: pointer; }
-  .link:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 2px; }
+  /* Download progress has no measurable fraction (only the archive being fetched), so the bar is
+     indeterminate: a full bar pulsing in opacity, present only while the install runs. */
+  .body .progress.indeterminate :global(span) { right: 0; width: auto; transform: none; animation: working 1.2s ease-in-out infinite; }
+  @keyframes working { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .body .progress.indeterminate :global(span) { animation: none; opacity: 0.7; } }
+
+  .link { justify-self: start; min-height: var(--control-dense); padding: 0 8px; margin-left: -8px; border: 0; border-radius: var(--radius); background: none; color: var(--blueprint-light); font: inherit; font-size: var(--text-md); cursor: pointer; }
+  .link:hover:not(:disabled) { background: var(--wash); }
 </style>
