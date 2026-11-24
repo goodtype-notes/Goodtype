@@ -93,7 +93,7 @@
     bind:this={chip}
     type="button"
     class="back-to-cell"
-    data-ui="solid"
+   
     class:over-palette={overPalette}
     class:reduced-motion={reducedMotion}
     onpointerdown={(event) => event.preventDefault()}

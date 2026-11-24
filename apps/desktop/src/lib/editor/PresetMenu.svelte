@@ -191,7 +191,7 @@
   });
 </script>
 
-<div class="preset" data-ui="solid" bind:this={root}>
+<div class="preset" bind:this={root}>
   <button
     type="button"
     class="chip"

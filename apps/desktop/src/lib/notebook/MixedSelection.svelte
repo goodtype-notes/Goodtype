@@ -58,7 +58,7 @@
   }
 </script>
 
-<svg class="mixed-selection" data-ui="solid" role="group" aria-label={$t("workspace.mixedCanvasSelection")} style:--zoom={zoom}>
+<svg class="mixed-selection" role="group" aria-label={$t("workspace.mixedCanvasSelection")} style:--zoom={zoom}>
   <rect role="button" tabindex="0" aria-label={$t("workspace.moveSelectedItems")} use:focusOnMount
     x={bounds.left} y={bounds.top} width={Math.max(1, bounds.right - bounds.left)} height={Math.max(1, bounds.bottom - bounds.top)}
     onkeydown={keydown} onpointerdown={event => begin(event)} onpointermove={move} onpointerup={end} onpointercancel={end} onlostpointercapture={end} />

@@ -265,7 +265,7 @@
   </div>
 {/snippet}
 
-<div class="panel-scrim" role="presentation" data-ui="solid" data-preserve-selection>
+<div class="panel-scrim" role="presentation" data-preserve-selection>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
     bind:this={panel}

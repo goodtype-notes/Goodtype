@@ -17,7 +17,7 @@
   async function send() { if (!canSend(prompt, busy) || prompt.length > promptBudget) return; const captured = prompt; if (await onSend(cellContext && activeFocus ? focusPrompt(captured, activeFocus).replace(/(`{3,})typst\n/, "$1python\n") : focusPrompt(captured, activeFocus)) && prompt === captured) prompt = ""; }
 </script>
 <svelte:window onkeydown={event => { if (event.key === "Escape" && form?.contains(event.target as Node)) composerKey(event, send, onClose); }} />
-<form bind:this={form} data-ui="solid" onsubmit={event => { event.preventDefault(); send(); }}>
+<form bind:this={form} onsubmit={event => { event.preventDefault(); send(); }}>
   <div class="context-block">
   {#if count > 0 || selectionLabel}<div class="context-row">
     {#if thumbnail}

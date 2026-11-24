@@ -58,7 +58,7 @@
   use:dismissable={{ onClose, trigger }}
   class="overflow-menu"
   class:compact
-  data-ui="solid"
+ 
   role="menu"
   tabindex="-1"
   aria-label={title}

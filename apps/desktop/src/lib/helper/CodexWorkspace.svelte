@@ -247,7 +247,7 @@
   });
 </script>
 
-<div class="codex-workspace" data-ui="solid" class:started={Boolean(run)}>
+<div class="codex-workspace" class:started={Boolean(run)}>
   <div class="body" class:empty={!run} bind:this={body} onscroll={trackScroll} role="region" aria-label={$t("codex.conversation")}>
   {#each history as message}
     <p class="request">{message.prompt}</p>

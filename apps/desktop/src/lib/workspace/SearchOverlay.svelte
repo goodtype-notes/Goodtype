@@ -74,7 +74,7 @@
 </script>
 
 <!-- Notebook-scoped Typst source search (Phase 2 §3.7): typed content only, no OCR. -->
-<section class="search" data-ui="solid" role="search" aria-label={$t("workspace.searchTypedNotebookContent")}>
+<section class="search" role="search" aria-label={$t("workspace.searchTypedNotebookContent")}>
   <div class="field">
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
     <input

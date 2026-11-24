@@ -1,26 +1,29 @@
-/* Goodtype's design tokens. The rules for using them live in apps/desktop/DESIGN.md.
-   Every surface reads these names; a raw colour, shadow or tint inside a component is a bug
-   unless it is notebook content (ink, paper defaults, syntax colours, the hue picker). */
+/* Goodtype's design tokens: the solid language. The rules for using them live in
+   apps/desktop/DESIGN.md. Every surface reads these names; a raw colour, shadow or tint inside a
+   component is a bug unless it is notebook content (ink, paper defaults, syntax colours, the hue
+   picker). */
 :root {
-  /* Surfaces, darkest to lightest. Paper is content, never a control fill. */
-  --charcoal: #16181d;
-  --surround: #1b1e24;
-  --panel: #23272f;
+  /* The surface ladder, darkest to lightest. Every step is solid. Paper is content, never a
+     control fill. */
+  --charcoal: #121418;
+  --surround: #16181c;
+  --panel: #202329;
   --paper: #fcfcfa;
 
-  /* Text. Quiet is the lowest step that still reads (4.7:1 on panel); nothing goes dimmer. */
-  --text: #e9ebee;
-  --muted: #aeb5be;
-  --quiet: #8a929c;
+  /* Text. Quiet is the lowest step that still reads (5.6:1 on panel); never use it on a wash or
+     a selected fill. */
+  --text: #eceef1;
+  --muted: #b0b6bf;
+  --quiet: #959da7;
 
   /* The one accent. Blue means: primary action, selected, focused, or the target of a drop. */
   --blueprint: #4c8df0;
-  --blueprint-light: #7fb0f7;
+  --blueprint-light: #8ab8f8;
   --blueprint-hover: #6a9ef2;
   --on-accent: #0e1b31;
-  --accent-tint: rgb(76 141 240 / 10%);
-  --accent-fill: rgb(76 141 240 / 16%);
-  --accent-edge: rgb(76 141 240 / 55%);
+  --accent-tint: color-mix(in srgb, #4c8df0 10%, #202329);
+  --accent-fill: color-mix(in srgb, #4c8df0 18%, #202329);
+  --accent-edge: color-mix(in srgb, #4c8df0 60%, #202329);
   --accent-select: rgb(76 141 240 / 35%);
   /* Selection drawn on paper needs a darker blue to hold contrast against white. */
   --paper-select: #2f6fdb;
@@ -35,22 +38,22 @@
   --sage: #4fb586;
   --sage-text: #7fd1a3;
 
-  /* Neutral fills and lines over the dark surfaces. Fills: soft (a resting field), wash (hover,
-     secondary button), strong (pressed). Lines: soft (divider), edge (container), strong (hover
-     on a bordered field, dashed drop zones, swatch rings). */
-  --fill-soft: rgb(255 255 255 / 4%);
-  --wash: rgb(255 255 255 / 8%);
-  --wash-strong: rgb(255 255 255 / 12%);
-  --edge-soft: rgb(255 255 255 / 7%);
-  --edge: rgb(255 255 255 / 12%);
-  --edge-strong: rgb(255 255 255 / 22%);
-  --inset: rgb(0 0 0 / 22%);
-  --track: #505764;
+  /* Fills and lines, solid. Fills: soft (a resting chip on the desk), wash (hover, secondary
+     button), strong (pressed). Lines: soft (divider), edge (container, field), strong (hover on
+     a field or tile, dashed drop zones). */
+  --fill-soft: #1c1f24;
+  --wash: #2b2f36;
+  --wash-strong: #353a42;
+  --edge-soft: #2a2e35;
+  --edge: #33373f;
+  --edge-strong: #4a505a;
+  --inset: #121418;
+  --track: #4a505a;
 
   /* Elevation: three levels and no others. Content on the canvas sits flat. */
-  --shadow-menu: 0 8px 24px rgb(0 0 0 / 40%);
-  --shadow-panel: 0 14px 36px rgb(0 0 0 / 48%);
-  --shadow-modal: 0 24px 64px rgb(0 0 0 / 55%);
+  --shadow-menu: 0 8px 24px rgb(0 0 0 / 36%);
+  --shadow-panel: 0 12px 32px rgb(0 0 0 / 42%);
+  --shadow-modal: 0 24px 64px rgb(0 0 0 / 50%);
   /* The page sheet on the desk, and full-size previews of one. Not for anything on the page. */
   --shadow-page: 0 1px 4px rgb(0 0 0 / 30%), 0 16px 40px rgb(0 0 0 / 35%);
 
@@ -61,7 +64,7 @@
 
   /* Sizes. */
   --control: 36px;
-  --control-dense: 28px;
+  --control-dense: 32px;
   --control-touch: 44px;
   --icon: 20px;
   --icon-dense: 16px;
@@ -70,49 +73,6 @@
   --radius: 6px;
   --radius-lg: 10px;
   --radius-pill: 999px;
-  --text-xs: 10px;
-  --text-sm: 11px;
-  --text-md: 13px;
-  --text-lg: 15px;
-
-  --font-ui: Bahnschrift, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  --font-display: var(--font-ui);
-  --font-brand: Bahnschrift, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
-  --font-code: "Cascadia Mono", Consolas, monospace;
-  --text-xl: 20px;
-}
-
-/* The solid language (DESIGN.md). Surfaces opt in with data-ui="solid" while they are migrated
-   one at a time; once every surface carries it, these values move into :root and the wash values
-   above go. Same token names, so a migrated component changes values, not names. */
-[data-ui="solid"] {
-  --charcoal: #121418;
-  --surround: #16181c;
-  --panel: #202329;
-
-  --text: #eceef1;
-  --muted: #b0b6bf;
-  --quiet: #959da7;
-
-  --blueprint-light: #8ab8f8;
-  --accent-tint: color-mix(in srgb, #4c8df0 10%, #202329);
-  --accent-fill: color-mix(in srgb, #4c8df0 18%, #202329);
-  --accent-edge: color-mix(in srgb, #4c8df0 60%, #202329);
-
-  --fill-soft: #1c1f24;
-  --wash: #2b2f36;
-  --wash-strong: #353a42;
-  --edge-soft: #2a2e35;
-  --edge: #33373f;
-  --edge-strong: #4a505a;
-  --track: #4a505a;
-  --inset: #121418;
-
-  --shadow-menu: 0 8px 24px rgb(0 0 0 / 36%);
-  --shadow-panel: 0 12px 32px rgb(0 0 0 / 42%);
-  --shadow-modal: 0 24px 64px rgb(0 0 0 / 50%);
-
-  --control-dense: 32px;
   --text-xs: 12px;
   --text-sm: 12px;
   --text-md: 14px;
@@ -121,6 +81,8 @@
 
   --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --font-brand: Bahnschrift, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --font-code: "Cascadia Mono", Consolas, monospace;
 
   font-family: var(--font-ui);
 }

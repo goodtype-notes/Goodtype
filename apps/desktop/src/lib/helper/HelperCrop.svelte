@@ -25,7 +25,7 @@
     drag=null;preview=null;
   }
 </script>
-<svg class="helper-crop" data-ui="solid" style:--zoom={zoom} aria-label={$t("codex.resizeCrop")}>
+<svg class="helper-crop" style:--zoom={zoom} aria-label={$t("codex.resizeCrop")}>
   <rect x={shown.x} y={shown.y} width={shown.width} height={shown.height}/>
   {#if editable}{#each [0,1,2,3] as corner}
     <circle class="hit" role="button" tabindex="0" aria-label={$t((["codex.cropTopLeft", "codex.cropTopRight", "codex.cropBottomLeft", "codex.cropBottomRight"] as const)[corner])} cx={shown.x+(corner%2?shown.width:0)} cy={shown.y+(corner<2?0:shown.height)} r={22/zoom}

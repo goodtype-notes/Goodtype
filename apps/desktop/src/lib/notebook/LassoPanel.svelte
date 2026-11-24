@@ -4,7 +4,7 @@
   let { targets, onChange }: { targets: LassoTargets; onChange: (next: LassoTargets) => void } = $props();
 </script>
 
-<div class="lasso-settings" data-ui="solid">
+<div class="lasso-settings">
   {#each lassoOptions($t) as option (option.key)}
     <label class="setting">
       <span>{option.label}</span>

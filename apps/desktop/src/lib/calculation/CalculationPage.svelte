@@ -149,7 +149,7 @@
   }
 </script>
 
-<section class="calculation-page" data-ui="solid" aria-label={$t("calculation.page")} bind:this={page} use:localEditorHeight>
+<section class="calculation-page" aria-label={$t("calculation.page")} bind:this={page} use:localEditorHeight>
   <header role="toolbar" aria-label={$t("calculation.pageTools")} use:controlSpace={"top"}>
     <div class="title">
       {#if renaming}

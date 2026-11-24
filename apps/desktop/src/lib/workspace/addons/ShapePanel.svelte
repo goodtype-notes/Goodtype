@@ -100,7 +100,7 @@
 {/snippet}
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<aside class="shape-panel" data-ui="solid" class:dock-left={dock === "left"} aria-labelledby="shape-panel-title" data-preserve-selection
+<aside class="shape-panel" class:dock-left={dock === "left"} aria-labelledby="shape-panel-title" data-preserve-selection
   onkeydown={event => {
     if (event.key !== "Escape") return;
     event.stopPropagation();

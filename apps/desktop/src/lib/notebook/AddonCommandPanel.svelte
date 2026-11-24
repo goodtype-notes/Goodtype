@@ -148,7 +148,7 @@
   });
 </script>
 
-<div class="addon-command" data-ui="solid" role="dialog" aria-modal="false" aria-labelledby="addon-command-title" tabindex="-1" bind:this={panel} onkeydown={keydown}>
+<div class="addon-command" role="dialog" aria-modal="false" aria-labelledby="addon-command-title" tabindex="-1" bind:this={panel} onkeydown={keydown}>
   <header>
     <h2 id="addon-command-title">{label}</h2>
     <button type="button" class="chrome" title={$t("addonCommand.close")} aria-label={$t("addonCommand.close")} onclick={onClose}>

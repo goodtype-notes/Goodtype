@@ -43,7 +43,7 @@
   {/each}
 {/snippet}
 
-<div class="readme" data-ui="solid">{@render renderBlocks(blocks)}</div>
+<div class="readme">{@render renderBlocks(blocks)}</div>
 
 <style>
   .readme { max-width: 70ch; color: var(--text); font-size: var(--text-md); line-height: 1.6; overflow-wrap: anywhere; }

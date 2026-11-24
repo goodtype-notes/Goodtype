@@ -27,7 +27,7 @@
   }
   onDestroy(() => { alive = false; previews.dispose(); urls.dispose(); });
 </script>
-<svg data-ui="solid" viewBox={selection ? `${selection.cropPt.x} ${selection.cropPt.y} ${selection.cropPt.width} ${selection.cropPt.height}` : `0 0 ${snapshot.page.geometry.widthPt} ${snapshot.page.geometry.heightPt}`} aria-hidden="true">
+<svg viewBox={selection ? `${selection.cropPt.x} ${selection.cropPt.y} ${selection.cropPt.width} ${selection.cropPt.height}` : `0 0 ${snapshot.page.geometry.widthPt} ${snapshot.page.geometry.heightPt}`} aria-hidden="true">
   <foreignObject width={snapshot.page.geometry.widthPt} height={snapshot.page.geometry.heightPt}>
     <div class="paper" style:width={`${snapshot.page.geometry.widthPt}px`} style:height={`${snapshot.page.geometry.heightPt}px`}><PageSurface materials={view.page.objects} {root} background={view.page.background} pageWidthPt={view.page.geometry.widthPt} pageHeightPt={view.page.geometry.heightPt}
       blocks={blockViewsFromSnapshot(view)} pageTypst={pageTypstViewFromSnapshot(view)} images={imageViewsFromSnapshot(view, urls)}

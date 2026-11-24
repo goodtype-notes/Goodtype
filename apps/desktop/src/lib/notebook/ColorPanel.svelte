@@ -182,7 +182,7 @@
   bind:this={panel}
   class:embedded
   class="color-panel"
-  data-ui="solid"
+ 
   style:transform={embedded ? null : `translate(${shift.x}px, ${shift.y}px)`}
   role={embedded ? "group" : "dialog"}
   tabindex="-1"

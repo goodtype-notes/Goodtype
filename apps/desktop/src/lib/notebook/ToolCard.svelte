@@ -142,7 +142,7 @@
 
 <div
   class="tool-card"
-  data-ui="solid"
+ 
   class:anchored={!!anchor}
   use:placePalettePopup={anchor ? { anchor, dock, onDismiss: onClose } : undefined}
   class:point-down={dock === "bottom"}

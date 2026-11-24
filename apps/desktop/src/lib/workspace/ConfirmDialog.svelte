@@ -31,15 +31,12 @@
   });
 </script>
 
-<div class="solid-root" data-ui="solid">
 <Dialog {title} lead={detail} size="sm" role="alertdialog" onClose={onCancel}>
   {#snippet actions()}
     <button bind:this={cancelButton} type="button" class="control" onclick={onCancel}>{$t("library.cancel")}</button>
     <button type="button" class="danger" onclick={onConfirm}>{confirmLabel}</button>
   {/snippet}
 </Dialog>
-</div>
 
 <style>
-  .solid-root { display: contents; }
 </style>

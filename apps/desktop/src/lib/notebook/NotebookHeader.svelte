@@ -11,7 +11,7 @@
   } = $props();
 </script>
 
-  <header class="command-strip" data-ui="solid">
+  <header class="command-strip">
     <div class="notebook-identity">
       <button
         class="home-button"

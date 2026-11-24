@@ -10,7 +10,7 @@
 </script>
 
 {#if (pending.length && (pending.length > 1 || !selected)) || discarded}
-  <aside class="proposal-tray" data-ui="solid" aria-label={$t("proposal.proposals")} data-preserve-selection>
+  <aside class="proposal-tray" aria-label={$t("proposal.proposals")} data-preserve-selection>
     <strong>{$t("proposal.proposals")}</strong>
     {#each pending as proposal (proposal.id)}
       <button class:current={selected === proposal.id} onclick={() => onOpen(proposal.id)}>{proposal.kind === "preset_install" ? $t("proposal.presetTray", { name: proposal.preset?.name ?? "", status: $t(proposal.status === "installed" ? "proposal.presetInstalled" : proposal.status === "already_installed" ? "proposal.presetAlreadyInstalled" : "proposal.review") }) : proposal.summary}</button>

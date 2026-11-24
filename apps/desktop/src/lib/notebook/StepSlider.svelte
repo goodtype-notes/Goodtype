@@ -93,7 +93,7 @@
   $effect(() => stopRepeat);
 </script>
 
-<div class="step-slider" data-ui="solid">
+<div class="step-slider">
   <div class="label">
     <span class="name">{name}</span>
     <output class="value">{valueText}</output>

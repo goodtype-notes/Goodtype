@@ -216,7 +216,7 @@
   }
 </script>
 
-<div class="transcription" data-ui="solid" role="dialog" aria-modal="false" aria-labelledby="transcription-title" tabindex="-1" onkeydown={keydown}>
+<div class="transcription" role="dialog" aria-modal="false" aria-labelledby="transcription-title" tabindex="-1" onkeydown={keydown}>
   <header>
     <h2 id="transcription-title">{$t("transcription.title")}</h2>
     <button type="button" class="chrome" title={$t("transcription.close")} aria-label={$t("transcription.close")} onclick={onClose}>

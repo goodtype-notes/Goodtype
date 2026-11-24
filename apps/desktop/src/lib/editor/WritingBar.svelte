@@ -35,7 +35,7 @@
   }
 </script>
 
-<nav class="writing-bar" data-ui="solid" aria-label={$t("editor.pageTextFormatting")}>
+<nav class="writing-bar" aria-label={$t("editor.pageTextFormatting")}>
   <div class="tools" role="group" aria-label={$t("editor.textStyle")}>
     <button type="button" aria-label={$t("editor.bold")} title={$t("editor.boldCtrlB")} onclick={() => onCommand("bold")}><b>B</b></button>
     <button type="button" aria-label={$t("editor.emphasis")} title={$t("editor.emphasisCtrlI")} onclick={() => onCommand("italic")}><i>I</i></button>

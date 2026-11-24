@@ -18,7 +18,7 @@
   {@const value = addon.values[field.id] ?? field.default}
   {@const mode = toolFieldPresentation(addon, field, $locale)}
   {#if field.type === "choice"}
-    <div class="choice" class:rail data-ui="solid">
+    <div class="choice" class:rail>
       {#if !rail}<span class="label">{label}</span>{/if}
       <div class="options" class:list={mode === "list"} role="group" aria-label={label}>
         {#each field.choices as option (option.value)}

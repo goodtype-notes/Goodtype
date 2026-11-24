@@ -117,7 +117,7 @@
 
 <div
   class="shape-card"
-  data-ui="solid"
+ 
   class:point-down={dock === "bottom"}
   class:point-up={dock === "top"}
   class:point-left={dock === "left"}

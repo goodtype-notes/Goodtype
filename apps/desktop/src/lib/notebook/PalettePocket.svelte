@@ -113,7 +113,7 @@
   class:horizontal
   class:tagged={Boolean(tag)}
   class="pocket"
-  data-ui="solid"
+ 
   role="group"
   aria-label={tag ? $t("workspace.styleForThe", { "value1": tag.toLowerCase() }) : undefined}
   title={tag ? $t("workspace.changesApplyToThe", { "value1": tag.toLowerCase() }) : undefined}

@@ -15,7 +15,7 @@
 
 </script>
 
-<div use:placePalettePopup={{ anchor, dock, onDismiss, focus: "[aria-pressed='true'], input, button" }} class="palette-editor" data-ui="solid" role="dialog" aria-label={title} tabindex="-1"
+<div use:placePalettePopup={{ anchor, dock, onDismiss, focus: "[aria-pressed='true'], input, button" }} class="palette-editor" role="dialog" aria-label={title} tabindex="-1"
   onkeydown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
   <header><strong>{title}</strong><button type="button" aria-label={$t("workspace.close2", { "value1": title.toLowerCase() })} onclick={onClose}>
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>

@@ -7,7 +7,7 @@
   async function copy() { try { await navigator.clipboard.writeText(command); status = notice("helper.copied"); } catch { status = notice("helper.error"); } }
   async function retry() { try { helper.set(await helperInstallRelay()); } catch { status = notice("helper.error"); } }
 </script>
-<details data-ui="solid">
+<details>
   <summary>{$t("helper.terminalSetup")}</summary>
   <section aria-label={$t("helper.setup")}>
   <p>{$helper?.listening ? $t("helper.listening", { count: $helper.sessions.length }) : $t("helper.off")}</p>

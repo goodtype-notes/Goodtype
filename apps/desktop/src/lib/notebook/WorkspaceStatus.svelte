@@ -27,7 +27,7 @@
   const problemText = $derived(problem ? renderMessage(status, $t) : "");
 </script>
 
-  <footer class="status-strip" data-ui="solid">
+  <footer class="status-strip">
     {#if problemText}
       <div class="problem" class:failure={transactionFailed} role="status" title={problemText}>{problemText}</div>
     {:else}

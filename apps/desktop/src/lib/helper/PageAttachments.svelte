@@ -48,7 +48,7 @@
     }
   }
 </script>
-<div class="attachments" data-ui="solid">
+<div class="attachments">
   <button class="attach" bind:this={trigger} type="button" aria-haspopup="dialog" aria-expanded={openState} aria-controls={id} onclick={() => open()}>
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h10l4 4v14H5zM14 3v5h5M8 14h8m-4-4v8" /></svg>{$t("codex.attachPage")}
   </button>
@@ -61,7 +61,7 @@
   {/each}
   {#if selected.length > 2}<button class="page-chip more" type="button" onclick={() => open()}>{$t("codex.morePages", { count: selected.length - 2 })}</button>{/if}
 </div>
-<div class="picker" data-ui="solid" id={id} bind:this={popover} popover="auto" role="dialog" tabindex="-1" aria-label={$t("codex.pagePicker")} onkeydown={keys} ontoggle={event => { openState = event.newState === "open"; if (!openState) trigger?.focus(); }}>
+<div class="picker" id={id} bind:this={popover} popover="auto" role="dialog" tabindex="-1" aria-label={$t("codex.pagePicker")} onkeydown={keys} ontoggle={event => { openState = event.newState === "open"; if (!openState) trigger?.focus(); }}>
   <p>{$t("codex.pagePicker")}</p>
   <input type="search" bind:value={query} aria-label={$t("codex.pageSearch")} placeholder={$t("codex.pageSearch")} onkeydown={event => { if (event.key === "Enter") event.preventDefault(); }} />
   <div class="range"><input bind:value={range} aria-label={$t("codex.pageRange")} placeholder={$t("codex.pageRange")} onkeydown={event => { if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); addRange(); } }} /><button type="button" onclick={addRange}>{$t("codex.addRange")}</button></div>
@@ -76,7 +76,7 @@
   {/each}
   <div class="picker-actions"><button type="button" disabled={!selected.length} onclick={() => { for (const id of selected) onToggle(id); }}>{$t("codex.clearPages")}</button><button type="button" onclick={close}>{$t("codex.donePages")}</button></div>
 </div>
-<div class="picker" data-ui="solid" bind:this={preview} popover="auto" role="region" aria-label={$t("codex.selectionPreview")} ontoggle={event => { if (event.newState === "closed") previewTrigger?.focus(); }}>
+<div class="picker" bind:this={preview} popover="auto" role="region" aria-label={$t("codex.selectionPreview")} ontoggle={event => { if (event.newState === "closed") previewTrigger?.focus(); }}>
   {#if previewPage}
     <p>{$t("codex.pageAttachment", { page: formatNumber(previewPage.number), title: previewPage.title })}</p>
     {#if previewPage.calculation}<p>{$t("codex.pythonPage")}</p>{:else if previewPage.snapshot && previewPage.root}{#key previewPage.id}{#await import("./PageAttachmentPreview.svelte")}<p>{$t("codex.readingPages")}</p>{:then module}{@const Preview = module.default}<Preview snapshot={previewPage.snapshot} root={previewPage.root} />{/await}{/key}{:else}<p>{$t("codex.pageUnavailable")}</p>{/if}

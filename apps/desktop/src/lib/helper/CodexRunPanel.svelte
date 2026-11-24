@@ -9,7 +9,7 @@
   const steps = $derived(tools.filter((step, index) => !tools.slice(index + 1).some(next => next.server === step.server && next.tool === step.tool && next.phase !== "start" && step.phase === "start")));
 </script>
 
-<section aria-label={$t("codex.title")} data-ui="solid">
+<section aria-label={$t("codex.title")}>
   <div class="status-row"><p class:active role="status"><span class="dot"></span>{$t(`codex.${state}`)}</p>
     {#if active}<button type="button" disabled={stopping} onclick={onStop}>{$t("codex.stop")}</button>{/if}
   </div>

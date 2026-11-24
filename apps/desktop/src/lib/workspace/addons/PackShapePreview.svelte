@@ -11,7 +11,7 @@
   const margin = $derived(previewMargin(item, width));
 </script>
 
-<svg data-ui="solid" aria-hidden="true" viewBox={`${-margin} ${-margin} ${item.widthPt + 2 * margin} ${item.heightPt + 2 * margin}`}>
+<svg aria-hidden="true" viewBox={`${-margin} ${-margin} ${item.widthPt + 2 * margin} ${item.heightPt + 2 * margin}`}>
   {#each item.objects as object}
     {#if object.type === "shape"}
       {@const style = {

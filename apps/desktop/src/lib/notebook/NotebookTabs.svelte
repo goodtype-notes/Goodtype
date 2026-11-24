@@ -47,7 +47,7 @@
 <div
   bind:this={tablist}
   class="notebook-tabs"
-  data-ui="solid"
+ 
   role="tablist"
   aria-label={$t("workspace.openNotebooks")}
   tabindex="-1"

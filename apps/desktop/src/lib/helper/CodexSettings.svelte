@@ -19,7 +19,7 @@
   onMount(() => { if ("__TAURI_INTERNALS__" in window) void refresh(); });
 </script>
 
-<section aria-label={$t("codex.title")} data-ui="solid">
+<section aria-label={$t("codex.title")}>
   <header>
     <h3>{$t("codex.title")}</h3>
     <button type="button" disabled={loading} onclick={refresh}>{$t(loading ? "codex.checking" : "codex.refresh")}</button>

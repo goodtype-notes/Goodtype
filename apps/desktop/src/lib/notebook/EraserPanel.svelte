@@ -11,7 +11,7 @@
   const id = $props.id();
 </script>
 
-<div class="eraser-settings" data-ui="solid">
+<div class="eraser-settings">
   <label class="setting" title={$t("workspace.eraseOnlyTheInkUnderTheEraser")}>
     <span>{$t("workspace.precise")}</span>
     <input type="checkbox" role="switch" aria-label={$t("workspace.precise")}

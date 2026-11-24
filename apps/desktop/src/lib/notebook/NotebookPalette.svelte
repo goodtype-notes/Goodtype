@@ -258,7 +258,7 @@
 </script>
 
 <!-- One grid owns the canvas chrome and preserves the original sibling/drag ancestry. -->
-<div bind:this={workspaceChrome} class="workspace-chrome" data-ui="solid">
+<div bind:this={workspaceChrome} class="workspace-chrome">
       <div
         bind:this={historyElement}
         class:dragging={historyDrag !== null}

@@ -40,7 +40,7 @@
   }
 </script>
 
-<div class="color-control" data-ui="solid" use:dismissable={() => close(false)}>
+<div class="color-control" use:dismissable={() => close(false)}>
   <button bind:this={button} type="button" class="color-button" class:active={open}
     aria-label={$t("editor.typstColour")} title={$t("editor.typstColour")} aria-haspopup="dialog" aria-expanded={open}
     onclick={() => { if (open) close(); else open = true; }}>

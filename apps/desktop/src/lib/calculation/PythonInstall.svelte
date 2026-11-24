@@ -34,7 +34,7 @@
   <Dialog title={$t("calculation.installTitle")} lead={$t("calculation.installLead")} size="md"
     onClose={dismiss} dismissible={!workspace.installing} closeButton closeTitle={$t("calculation.close")}>
     {#snippet children()}
-      <div class="body" data-ui="solid" aria-live="polite">
+      <div class="body" aria-live="polite">
         {#if workspace.installing}
           <p class="status">{activity}</p>
           <div class="progress indeterminate" role="progressbar" aria-label={activity}><span></span></div>

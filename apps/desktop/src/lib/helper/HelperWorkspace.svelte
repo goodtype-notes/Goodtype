@@ -91,13 +91,13 @@
   });
 </script>
 {#if connections[0]}
-  <aside class="helper-card" data-ui="solid" aria-label={$t("helper.title")} data-preserve-selection>
+  <aside class="helper-card" aria-label={$t("helper.title")} data-preserve-selection>
     <p>{$t("helper.connection", { name: connections[0].clientName })}</p><p>{$t("helper.disclosure")}</p>
     <button type="button" onclick={() => connection(true)}>{$t("helper.allow")}</button><button type="button" onclick={() => connection(false)}>{$t("helper.deny")}</button>
   </aside>
 {:else if scopes[0]}
   {@const request = scopes[0]}
-  <aside class="helper-card" data-ui="solid" aria-label={$t("helper.title")} data-preserve-selection>
+  <aside class="helper-card" aria-label={$t("helper.title")} data-preserve-selection>
     <p>{$t("helper.scope", { name: request.clientName, scope: request.scope.kind === "notebook" ? $t("helper.notebook") : request.scope.kind === "presets" ? $t("helper.presetsScope") : request.scope.kind === "page_names" ? $t("helper.pageNamesScope") : $t("helper.pages", { pages: request.scope.pages.map(n => formatNumber(n)).join(", ") }) })}</p>
     {#if request.scope.kind === "presets"}<ul>{#each request.targets ?? [] as path}<li>{path}</li>{/each}</ul>{/if}
     <p>{$t("helper.scopeDisclosure", { name: request.clientName })}</p>
@@ -106,7 +106,7 @@
   </aside>
 {/if}
 {#if activityOpen && $helper?.enabled}
-  <aside bind:this={activityPanel} class="helper-activity" data-ui="solid" tabindex="-1" aria-label={$t("helper.activity")} data-preserve-selection onwheel={event => event.stopPropagation()}>
+  <aside bind:this={activityPanel} class="helper-activity" tabindex="-1" aria-label={$t("helper.activity")} data-preserve-selection onwheel={event => event.stopPropagation()}>
     <header>
       <h2>{$t("helper.activity")}</h2>
       <button class="chrome" type="button" aria-label={$t("helper.close")} title={$t("helper.close")} onclick={closeActivity}>
@@ -127,7 +127,7 @@
   {/if}
   {#if applied}<p class="applied" role="status">{$t("proposal.applied")}</p>{/if}
 {/snippet}
-<aside class="ai-panel" data-ui="solid" hidden={!panelOpen || !$helper?.enabled} aria-label={$t("codex.panelTitle")} data-preserve-selection onwheel={event => event.stopPropagation()}>
+<aside class="ai-panel" hidden={!panelOpen || !$helper?.enabled} aria-label={$t("codex.panelTitle")} data-preserve-selection onwheel={event => event.stopPropagation()}>
   <header>
     <h2>{$t("codex.panelTitle")}</h2>
     <button class="chrome" type="button" aria-label={$t("codex.details")} title={$t("codex.details")} onclick={() => activityOpen = true}>
@@ -144,7 +144,7 @@
   {/if}
 </aside>
 {#if $helper?.enabled && !panelOpen && (hasConversation || proposals.some(p => p.status === "pending" || p.status === "stale") || discarded)}
-  <button class="reopen-ai" type="button" data-ui="solid" data-preserve-selection onclick={() => panelOpen=true}>{$t("codex.openPanel")}</button>
+  <button class="reopen-ai" type="button" data-preserve-selection onclick={() => panelOpen=true}>{$t("codex.openPanel")}</button>
 {/if}
 <style>
 

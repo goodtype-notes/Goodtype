@@ -42,18 +42,6 @@
 
   let host: HTMLDivElement;
 
-  /// The completion and hover popups render into the body, outside any `data-ui` subtree, so they
-  /// get a holder that carries the solid tokens.
-  function tooltipHolder(): HTMLElement {
-    let holder = document.querySelector<HTMLElement>("[data-typst-tooltips]");
-    if (!holder) {
-      holder = document.createElement("div");
-      holder.dataset.typstTooltips = "";
-      holder.dataset.ui = "solid";
-      document.body.append(holder);
-    }
-    return holder;
-  }
   let view: EditorView | undefined;
   let applyingExternalValue = false;
   let highlightTimer: ReturnType<typeof setTimeout> | undefined;
@@ -85,7 +73,7 @@
         // The block editor lives inside the page, which clips its overflow and stacks the ink
         // layer above it. Rendering the completion popup into the body escapes both, so it can
         // sit above the editor, the rendered preview, and everything else while you type.
-        tooltips({ parent: tooltipHolder(), position: "fixed" }),
+        tooltips({ parent: document.body, position: "fixed" }),
         // Declares the editor dark so CodeMirror applies its dark base theme. Without this its
         // `&light .cm-tooltip` rule paints the completion popup near-white, and that rule is
         // more specific than any plain `.cm-tooltip` override we could write.
@@ -302,7 +290,7 @@
   });
 </script>
 
-<div class="editor" data-ui="solid" class:filled={maxLines === null} style:--max-lines={maxLines ?? 0}>
+<div class="editor" class:filled={maxLines === null} style:--max-lines={maxLines ?? 0}>
   <div class="host" bind:this={host}></div>
   {#if help || helpStatus}
     <div class:code={help?.code} class="help" role="status" aria-live="polite">
@@ -450,8 +438,8 @@
     text-underline-offset: 3px;
   }
 
-  /* Tooltips render into a `data-ui="solid"` holder in the document body (see `tooltipHolder()`),
-     so they are not descendants of `.editor` and these rules are global. The popup needs a fully
+  /* Tooltips render into the document body, so they are not descendants of `.editor` and these
+     rules are global. The popup needs a fully
      opaque surface of its own. `!important` on the two properties CodeMirror's base theme sets
      itself: its `&dark .cm-tooltip` rule is more specific than anything written from outside. */
   :global(.cm-tooltip) {

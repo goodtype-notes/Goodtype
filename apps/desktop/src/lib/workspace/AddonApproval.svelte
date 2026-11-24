@@ -27,17 +27,14 @@
   }
 </script>
 
-<div class="approval" data-ui="solid">
-  <p>{$t("addons.manager.approvalDetail", { version: approval.version })}</p>
-  <AddonPermissions permissions={approval.permissions} approval />
-  <button type="button" class="primary" disabled={pending} onclick={() => void decide(true)}>{$t("addons.manager.approve")}</button>
-  <button type="button" class="control" disabled={pending} onclick={() => void decide(false)}>{$t("library.cancel")}</button>
-  {#if failed}<p role="alert" class="problem">{$t("addons.manager.actionFailed")}</p>{/if}
-</div>
+<p>{$t("addons.manager.approvalDetail", { version: approval.version })}</p>
+<AddonPermissions permissions={approval.permissions} approval />
+<button type="button" class="primary" disabled={pending} onclick={() => void decide(true)}>{$t("addons.manager.approve")}</button>
+<button type="button" class="control" disabled={pending} onclick={() => void decide(false)}>{$t("library.cancel")}</button>
+{#if failed}<p role="alert" class="problem">{$t("addons.manager.actionFailed")}</p>{/if}
 
 <style>
-  /* No box of its own: the parent decides the layout, this only carries the solid tokens. */
-  .approval { display: contents; }
-  .approval > p { margin: 0; line-height: 1.4; }
+  /* No box of its own: the parent decides the layout. */
+  p { margin: 0; line-height: 1.4; }
   .problem { color: var(--oxide-text); }
 </style>

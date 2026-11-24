@@ -125,7 +125,7 @@
 
 <!-- Embedded, the card owns dismissal: the outside-press listener would fire on the card's own
      header and close the sub-view out from under the writer. -->
-<aside use:dismissable={embedded ? () => {} : onClose} class:embedded class="width-panel" data-ui="solid" aria-label={$t("workspace.strokeWidth")}>
+<aside use:dismissable={embedded ? () => {} : onClose} class:embedded class="width-panel" aria-label={$t("workspace.strokeWidth")}>
   <!-- Drawn at the width it will be, so the number is checked against a mark rather than trusted. -->
   <div class="sample">
     <svg viewBox="0 0 220 42" aria-hidden="true"><path d="M20 28C48 3 66 4 91 24S133 39 153 20S181 5 200 17" fill="none" stroke="currentColor" stroke-linecap="round"

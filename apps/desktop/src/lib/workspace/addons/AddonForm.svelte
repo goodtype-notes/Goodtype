@@ -121,7 +121,7 @@
   }
 </script>
 
-<div role="dialog" aria-modal="true" aria-label={title} class="sheet" data-ui="solid" tabindex="-1"
+<div role="dialog" aria-modal="true" aria-label={title} class="sheet" tabindex="-1"
   bind:this={panel} use:dismissable={{ onClose, swallow: true }} onkeydown={trap}>
   <header>
     <h2>{title}</h2>

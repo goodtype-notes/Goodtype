@@ -2334,7 +2334,7 @@
 </HelperWorkspace>
   {#if settingsReady}
   {#if !session.notebookChosen}
-    <div class="start-slot" data-ui="solid">
+    <div class="start-slot">
       <LibrarySurface
         {tauriAvailable}
         onSettings={() => (settingsOpen = true)}
@@ -3385,8 +3385,8 @@
     margin-top: calc(var(--calculation-top-space, 32px) * var(--page-zoom));
     margin-bottom: calc(var(--calculation-bottom-space, 30px) * var(--page-zoom));
   }
-  /* Springs back when a pull is let go; follows the finger without lag while it lasts. */
-  .page-pan-field { transition: transform 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+  /* Settles back when a pull is let go (no overshoot); follows the finger while it lasts. */
+  .page-pan-field { transition: transform 220ms cubic-bezier(0.2, 0.9, 0.3, 1); }
   .page-pan-field.pulling { transition: none; }
   .touch-history-toast {
     position: absolute;

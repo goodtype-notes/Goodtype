@@ -124,7 +124,7 @@
 
 <div
   class="export-panel"
-  data-ui="solid"
+ 
   role="dialog"
   tabindex="-1"
   aria-labelledby="export-title"

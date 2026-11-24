@@ -239,7 +239,7 @@
 
 <div
   bind:this={panel}
-  data-ui="solid"
+ 
   use:dismissable={onClose}
   class="add-page-panel"
   role="dialog"

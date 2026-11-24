@@ -26,7 +26,7 @@
 </script>
 
 {#if fields.length}
-  <section data-ui="solid" aria-label={contributionText(addon, "name", $locale)}>
+  <section aria-label={contributionText(addon, "name", $locale)}>
     <h3>{query ? contributionText(addon, "name", $locale) : $t("addons.contributions.settings")}</h3>
     {#each fields as field (field.id)}
       {@const value = changes[field.id] ?? addon.values[field.id] ?? field.default}

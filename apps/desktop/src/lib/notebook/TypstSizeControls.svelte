@@ -40,7 +40,7 @@
   }
 </script>
 
-<div class="typst-sizing" data-ui="solid" role="group" aria-label={$t("workspace.blockDimensions")} title={$t("workspace.blockSizingHint")}>
+<div class="typst-sizing" role="group" aria-label={$t("workspace.blockDimensions")} title={$t("workspace.blockSizingHint")}>
   <div class="dimension"><label for="typst-size">{$t("workspace.blockSize")}</label>
     <div class="value"><input id="typst-size" type="number" min="10" max="800" step="1" bind:value={size} onchange={() => setSize(size)} onkeydown={e => fieldKey(e, () => { size = Math.round(scale * 100); })} /><span>{$t("workspace.percentageUnit")}</span>
       <div class="arrows">

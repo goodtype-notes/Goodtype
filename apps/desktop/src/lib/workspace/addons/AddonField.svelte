@@ -16,7 +16,7 @@
   const hint = $derived(field.hint ? contributionText(addon, field.hint, $locale) : "");
 </script>
 
-<div class="field" data-ui="solid">
+<div class="field">
   {#if field.type === "toggle"}
     <button type="button" class="switch-row" role="switch" aria-checked={value === true}
       aria-describedby={hint ? id : undefined} {disabled} onclick={() => onChange(value !== true)}>

@@ -167,7 +167,7 @@
   bind:this={element}
   class:ready
   class="selection-actions"
-  data-ui="solid"
+ 
   role="toolbar"
   style:left={`${left}px`}
   style:top={`${top}px`}

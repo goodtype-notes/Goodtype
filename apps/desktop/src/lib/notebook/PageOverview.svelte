@@ -402,7 +402,7 @@
 <aside
   {id}
   class="page-overview"
-  data-ui="solid"
+ 
   class:reduced-motion={reducedMotion}
   aria-label={$t("pageOverview.label")}
   onkeydown={panelKeydown}

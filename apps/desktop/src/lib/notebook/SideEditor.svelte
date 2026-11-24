@@ -132,7 +132,7 @@
 
 <aside
   class="side-editor"
-  data-ui="solid"
+ 
   class:dock-right={dock === "right"}
   style:width={`${width}px`}
   aria-label={customTitle ?? $t("editor.typstSource")}

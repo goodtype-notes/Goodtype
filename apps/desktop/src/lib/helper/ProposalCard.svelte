@@ -121,7 +121,7 @@
     : code === "operation_failed" ? $t("helper.detail_failed")
     : $t("proposal.failed", { details: error }));
 </script>
-<div class="proposal-card" data-ui="solid" role="dialog" aria-modal="false" aria-label={$t("proposal.review")}
+<div class="proposal-card" role="dialog" aria-modal="false" aria-label={$t("proposal.review")}
   tabindex="-1" onkeydown={keydown} data-preserve-selection>
   <header>
     <div class="title">

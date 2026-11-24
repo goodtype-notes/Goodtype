@@ -309,7 +309,7 @@
 
 <svelte:window onkeydown={escape} onresize={placePrompt} />
 
-<main class="store" data-ui="solid" aria-labelledby="addons-title">
+<main class="store" aria-labelledby="addons-title">
   <header>
     <div class="title">
       <button type="button" class="chrome" bind:this={initialFocus} aria-label={$t("addons.store.back")} title={$t("addons.store.back")} onclick={() => void back()}>
