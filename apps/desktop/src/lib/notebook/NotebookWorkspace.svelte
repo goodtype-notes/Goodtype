@@ -1389,7 +1389,7 @@
           title: $t("workspace.notebook"),
           entries: [
             { kind: "action", id: "reopen", label: $t("workspace.reopenNotebook"), icon: "M4 12a8 8 0 1 1 2.3 5.6M4 12V6M4 12h6", onSelect: session.reopen },
-            { kind: "action", id: "settings", label: $t("library.settings"), icon: "M4 8h8M17 8h3M4 16h3M12 16h8M14.5 5.8v4.4M9.5 13.8v4.4", hint: "Ctrl ,", onSelect: () => (settingsOpen = true) },
+            { kind: "action", id: "settings", label: $t("library.settings"), icon: "M4 8h8M17 8h3M4 16h3M12 16h8M14.5 5.8v4.4M9.5 13.8v4.4", hint: "Ctrl+,", onSelect: () => (settingsOpen = true) },
           ],
         },
       ];
@@ -1421,7 +1421,7 @@
       {
         entries: [
           { kind: "action", id: "style", label: $t("workspace.editSharedTypstStyle"), icon: "M5 4.5h14M12 4.5v15M8 19.5h8", onSelect: openSharedStyle },
-          { kind: "action", id: "settings", label: $t("library.settings"), hint: "Ctrl ,", icon: "M4 8h8M17 8h3M4 16h3M12 16h8M14.5 5.8v4.4M9.5 13.8v4.4", onSelect: () => (settingsOpen = true) },
+          { kind: "action", id: "settings", label: $t("library.settings"), hint: "Ctrl+,", icon: "M4 8h8M17 8h3M4 16h3M12 16h8M14.5 5.8v4.4M9.5 13.8v4.4", onSelect: () => (settingsOpen = true) },
         ],
       },
     ]);
