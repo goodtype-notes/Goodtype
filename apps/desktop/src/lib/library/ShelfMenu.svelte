@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { dismissable } from "../workspace/dismiss";
+  import { floatInView } from "../workspace/floating";
 
   /**
    * A small popover for the shelf: the New menu, the sort menu, a tile's own menu.
@@ -89,6 +90,7 @@
 <div
   bind:this={menuElement}
   use:dismissable={onClose}
+  use:floatInView={{ align: align === "left" ? "start" : "end" }}
   class="menu"
   class:left={align === "left"}
   role="menu"

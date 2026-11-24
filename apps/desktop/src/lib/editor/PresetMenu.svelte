@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from "../i18n";
   import { tick } from "svelte";
+  import { floatInView } from "../workspace/floating";
   import type { PresetDiagnostic, PresetSummary } from "../page/presets";
   import { DEFAULT_PRESET_PATH, presetPresentation, pagePresetOptions, pagePresetState } from "../page/presets";
 
@@ -208,7 +209,7 @@
   </button>
 
   {#if open}
-    <div class="menu" bind:this={list} role="menu" tabindex="-1" aria-label={$t("editor.pagePreset")} onkeydown={keys}>
+    <div class="menu" bind:this={list} use:floatInView={{ anchor: chip, align: "end", gap: 4 }} role="menu" tabindex="-1" aria-label={$t("editor.pagePreset")} onkeydown={keys}>
       <div class="scope" role="group" aria-label={$t("editor.applyTo")}>
         <button
           type="button"
