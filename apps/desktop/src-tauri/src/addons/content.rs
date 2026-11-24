@@ -925,11 +925,20 @@ fn sideload_archive(folder: &Path) -> Result<(&'static Addon, String, tempfile::
         let executable = addon.executable();
         // A package folder holds the executable beside the manifest; a source checkout holds it
         // in its release build output.
-        let path = [folder.join(&executable), folder.join("target/release").join(&executable)]
-            .into_iter()
-            .find(|path| path.is_file())
-            .ok_or_else(|| format!("{}: not found (also looked in target\release)", folder.join(&executable).display()))?;
-        let metadata = fs::symlink_metadata(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        let path = [
+            folder.join(&executable),
+            folder.join("target/release").join(&executable),
+        ]
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| {
+            format!(
+                "{}: not found (also looked in target\release)",
+                folder.join(&executable).display()
+            )
+        })?;
+        let metadata =
+            fs::symlink_metadata(&path).map_err(|error| format!("{}: {error}", path.display()))?;
         if !metadata.is_file() || is_package_link(&metadata) {
             return Err("invalid local addon executable".into());
         }
@@ -948,7 +957,10 @@ fn sideload_archive(folder: &Path) -> Result<(&'static Addon, String, tempfile::
         MAX_UNPACKED_BYTES
     } as usize;
     for relative in files {
-        let source = sources.get(&relative).cloned().unwrap_or_else(|| folder.join(&relative));
+        let source = sources
+            .get(&relative)
+            .cloned()
+            .unwrap_or_else(|| folder.join(&relative));
         let bytes = read_bounded(&source, budget)?;
         budget -= bytes.len();
         zip.start_file(
