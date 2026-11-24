@@ -4,7 +4,7 @@ use super::{
     *,
 };
 use crate::library;
-use goodtype_core::{layout, storage};
+use goodtype_core::{SCHEMA_VERSION, layout, storage};
 use std::io::Cursor;
 use zip::write::SimpleFileOptions;
 
@@ -505,7 +505,18 @@ fn contract_needs_matching_protocol_schema_and_pin() {
             .is_ok()
         );
         assert!(check(&manifest(2, SCHEMA_VERSION), None, None).is_err());
-        assert!(check(&manifest(1, SCHEMA_VERSION + 1), None, None).is_err());
+        let newest = goodtype_core::SCHEMA_VERSION;
+        assert!(check(&manifest(1, newest + 1), None, None).is_err());
+        assert!(check(&manifest(1, 0), None, None).is_err());
+        assert!(
+            check(
+                &manifest(1, goodtype_core::BINARY_INK_SCHEMA_VERSION),
+                None,
+                None
+            )
+            .is_ok()
+        );
+        assert!(check(&manifest(1, newest), None, None).is_ok());
         let other_release = PinnedRelease {
             version: "1.0.0",
             ..release

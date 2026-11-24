@@ -4,9 +4,7 @@ use std::io::Read;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::Deserialize;
 
-use super::{
-    Addon, MAX_PACKAGE_BYTES, PROTOCOL_VERSION, PinnedRelease, SCHEMA_VERSION, TARGET, github_asset,
-};
+use super::{Addon, MAX_PACKAGE_BYTES, PROTOCOL_VERSION, PinnedRelease, TARGET, github_asset};
 
 const MAX_DESCRIPTOR: u64 = 64 * 1024;
 
@@ -116,37 +114,29 @@ fn verify(
     stable_version(&descriptor.version)?;
     if descriptor.source_dirty
         || !is_hash(&descriptor.source_commit, 40)
-        || if tool.is_content() {
-            !descriptor.decoder_commit.is_empty()
-        } else {
+        || if tool.imports_notebooks() {
             !is_hash(&descriptor.decoder_commit, 40)
+        } else {
+            !descriptor.decoder_commit.is_empty()
         }
         || !is_hash(&descriptor.archive.sha256, 64)
     {
         return Err("importer update is not a clean, identified release".into());
     }
-    let schema = if tool.legacy == Some(descriptor.version.as_str())
-        && tool.pinned.is_some_and(|pin| {
-            pin.version == descriptor.version
-                && pin.size == descriptor.archive.size_bytes
-                && pin.decoder_commit == descriptor.decoder_commit
-                && pin.sha256.eq_ignore_ascii_case(&descriptor.archive.sha256)
-        }) {
-        goodtype_core::BINARY_INK_SCHEMA_VERSION
+    // Only the importer CLI protocol carries versions here. Importers may write any notebook
+    // schema this Goodtype reads; the core reader validates every imported notebook before it
+    // is published. Session addons are bound by their `goodtype-api` manifest and handshake.
+    let compatible = if tool.imports_notebooks() {
+        descriptor.protocol_version == Some(PROTOCOL_VERSION)
+            && descriptor
+                .notebook_schema_version
+                .is_some_and(super::importable_schema)
+    } else if tool.is_content() {
+        descriptor.protocol_version.is_none() && descriptor.notebook_schema_version.is_none()
     } else {
-        SCHEMA_VERSION
+        true
     };
-    let versions = if tool.is_content() {
-        (None, None)
-    } else {
-        (Some(PROTOCOL_VERSION), Some(schema))
-    };
-    if (
-        descriptor.protocol_version,
-        descriptor.notebook_schema_version,
-    ) != versions
-        || descriptor.target != TARGET
-    {
+    if !compatible || descriptor.target != TARGET {
         return Err("the newest importer requires a different Goodtype version; the installed version was kept".into());
     }
     let name = format!("{}-{}-windows-x64.zip", tool.package, descriptor.version);
@@ -243,7 +233,7 @@ mod tests {
 
     fn descriptor(tool: &Addon) -> serde_json::Value {
         let name = format!("{}-0.1.1-windows-x64.zip", tool.package);
-        json!({"version":"0.1.1", "protocolVersion":1, "notebookSchemaVersion":SCHEMA_VERSION,
+        json!({"version":"0.1.1", "protocolVersion":1, "notebookSchemaVersion":goodtype_core::SCHEMA_VERSION,
             "target":TARGET, "sourceDirty":false, "sourceCommit":"1".repeat(40), "decoderCommit":"2".repeat(40),
             "archive":{"fileName":name, "sizeBytes":1234,
                 "sha256":"3".repeat(64), "url":format!("{}/v0.1.1/{name}", tool.release_url())}})
@@ -336,21 +326,10 @@ mod tests {
     }
 
     #[test]
-    fn signed_legacy_descriptor_must_match_the_catalog_archive() {
-        let tool = &GOODNOTES;
-        let pin = tool.pinned.unwrap();
+    fn descriptor_versions_follow_each_addon_kind() {
+        use super::super::catalog::{CONNECTORS, MATH};
         let key = SigningKey::from_bytes(&[42; 32]);
-        let mut value = descriptor(tool);
-        value["notebookSchemaVersion"] = json!(goodtype_core::BINARY_INK_SCHEMA_VERSION);
-        value["version"] = json!(pin.version);
-        value["decoderCommit"] = json!(pin.decoder_commit);
-        value["archive"] = json!({
-            "fileName": pin.url.rsplit('/').next().unwrap(),
-            "sizeBytes": pin.size,
-            "sha256": pin.sha256,
-            "url": pin.url,
-        });
-        let verify_descriptor = |value: &serde_json::Value| {
+        let check = |tool: &Addon, value: &serde_json::Value| {
             let bytes = serde_json::to_vec(value).unwrap();
             verify(
                 tool,
@@ -359,9 +338,48 @@ mod tests {
                 key.verifying_key().as_bytes(),
             )
         };
-        assert!(verify_descriptor(&value).is_ok());
-        value["archive"]["sha256"] = json!("3".repeat(64));
-        assert!(verify_descriptor(&value).is_err());
+        // Importers: protocol 1, any notebook schema the core reads, an identified decoder.
+        let mut value = descriptor(&GOODNOTES);
+        for schema in [
+            goodtype_core::BINARY_INK_SCHEMA_VERSION,
+            goodtype_core::SCHEMA_VERSION,
+        ] {
+            value["notebookSchemaVersion"] = json!(schema);
+            assert!(check(&GOODNOTES, &value).is_ok(), "schema {schema}");
+        }
+        for (field, bad) in [
+            ("notebookSchemaVersion", json!(0)),
+            (
+                "notebookSchemaVersion",
+                json!(goodtype_core::SCHEMA_VERSION + 1),
+            ),
+            ("notebookSchemaVersion", json!(null)),
+            ("protocolVersion", json!(2)),
+            ("decoderCommit", json!("")),
+        ] {
+            let mut value = descriptor(&GOODNOTES);
+            value[field] = bad;
+            assert!(check(&GOODNOTES, &value).is_err(), "{field}");
+        }
+        // Session addons, as published by math 0.1.1 and connectors 0.1.0: no decoder, and the
+        // importer versions carry no meaning (the goodtype-api manifest decides).
+        for (tool, versions) in [
+            (
+                &MATH,
+                json!({"protocolVersion": 1, "notebookSchemaVersion": 0}),
+            ),
+            (&CONNECTORS, json!({})),
+        ] {
+            let mut value = descriptor(tool);
+            let object = value.as_object_mut().unwrap();
+            object.remove("protocolVersion");
+            object.remove("notebookSchemaVersion");
+            object.extend(versions.as_object().unwrap().clone());
+            object.insert("decoderCommit".into(), json!(""));
+            assert!(check(tool, &value).is_ok(), "{}", tool.id);
+            value["decoderCommit"] = json!("2".repeat(40));
+            assert!(check(tool, &value).is_err(), "{} decoder", tool.id);
+        }
     }
 
     #[test]

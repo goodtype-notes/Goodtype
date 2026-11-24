@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use goodtype_core::{CALCULATION_SCHEMA_VERSION as SCHEMA_VERSION, paths};
+use goodtype_core::paths;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::Manager;
@@ -629,6 +629,11 @@ pub struct ToolVersion {
     pub decoder_commit: String,
 }
 
+/// A notebook schema an importer may write: any the core reader accepts.
+fn importable_schema(version: u32) -> bool {
+    (goodtype_core::MIN_SUPPORTED_SCHEMA_VERSION..=goodtype_core::SCHEMA_VERSION).contains(&version)
+}
+
 /// Whether a package (and its own version report) is one this Goodtype can drive. With a pin,
 /// the version and decoder must be exactly the pinned ones.
 pub fn check_contract(
@@ -637,24 +642,21 @@ pub fn check_contract(
     tool: Option<&ToolVersion>,
     pin: Option<&PinnedRelease>,
 ) -> Result<(), String> {
-    let schema = if expected.is_legacy_release(&manifest.version, manifest, pin) {
-        // These two exact releases predate computational pages. The normal core reader
-        // still validates their schema-3 notebooks before publishing them.
-        goodtype_core::BINARY_INK_SCHEMA_VERSION
-    } else {
-        SCHEMA_VERSION
-    };
+    // Importers may write any notebook schema this Goodtype reads; the normal core reader
+    // validates every imported notebook before publishing it.
     if manifest.protocol_version != PROTOCOL_VERSION
-        || (expected.imports_notebooks() && manifest.notebook_schema_version != schema)
+        || (expected.imports_notebooks() && !importable_schema(manifest.notebook_schema_version))
         || manifest.target != TARGET
     {
         return Err(format!(
             "importer {} speaks protocol {} for notebook schema {} on {}; this Goodtype needs \
-             protocol {PROTOCOL_VERSION}, schema {schema} on {TARGET}",
+             protocol {PROTOCOL_VERSION}, schema {}-{} on {TARGET}",
             manifest.version,
             manifest.protocol_version,
             manifest.notebook_schema_version,
-            manifest.target
+            manifest.target,
+            goodtype_core::MIN_SUPPORTED_SCHEMA_VERSION,
+            goodtype_core::SCHEMA_VERSION,
         ));
     }
     if let Some(tool) = tool

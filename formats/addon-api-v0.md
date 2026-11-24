@@ -192,13 +192,13 @@ Illustrative index. Release metadata for the future package is fictional.
   "expires": "2027-03-01T00:00:00Z",
   "addons": [{
     "id": "onenote",
-    "repository": "/Just8it/Goodtype-OneNote-Importer",
+    "repository": "/goodtype-notes/Goodtype-OneNote-Importer",
     "publicKey": "73bce6988059fe2d4210d9c6dbb4b99e72b458649be3b9f278e9a45ac24c33",
     "versions": [{
       "version": "0.1.1",
       "api": "goodtype-api 0.1",
       "target": "x86_64-pc-windows-msvc",
-      "url": "https://github.com/Just8it/Goodtype-OneNote-Importer/releases/download/v0.1.1/goodtype-onenote-importer-0.1.1-windows-x64.zip",
+      "url": "https://github.com/goodtype-notes/Goodtype-OneNote-Importer/releases/download/v0.1.1/goodtype-onenote-importer-0.1.1-windows-x64.zip",
       "size": 1927930,
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }]
@@ -443,7 +443,13 @@ The first MUST exit successfully and report `name`, `version`,
 `protocolVersion`, `notebookSchemaVersion` and `decoderCommit` matching the
 expected executable and package values. The importer protocol version is
 integer `1`, independent of the beta API string. The self-check MUST exit
-successfully.
+successfully. `notebookSchemaVersion` may be any schema the core reader accepts
+(1 up to the current one); every imported notebook is validated by that reader
+before it is published. Signed release descriptors follow the same rule; only
+importers carry `protocolVersion`, `notebookSchemaVersion` and a 40-hex
+`decoderCommit`. Session addons (`stdio-jsonrpc`) are bound by their
+`goodtype-api` manifest and handshake, and their descriptors carry an empty
+`decoderCommit` (amended 2026-11-24 after the goodtype-notes releases).
 
 For import, Rust re-verifies the installed files and invokes
 `<executable> <source> <staging>/batch` with staging as working directory and
@@ -536,7 +542,7 @@ Step 3b hardening moved session installs to stable per-version profiles with a
 one-time tree grant and added the host-side `addon-storage-exceeded` problem
 for the 256 MiB scratch cap. The wire contract is unchanged.
 
-Math catalog: Ed25519 key from `Just8it/Goodtype-ink-recognition` (0.1.0), no bootstrap pin; math installs from the signed index (index-3 onward, now also the bundled snapshot). Math sessions hold `registryRead` only (user-approved 2026-11-21). No wire change.
+Math catalog: Ed25519 key from `goodtype-notes/Goodtype-Math-Recognition` (formerly `Just8it/Goodtype-ink-recognition`) (0.1.0), no bootstrap pin; math installs from the signed index (index-3 onward, now also the bundled snapshot). Math sessions hold `registryRead` only (user-approved 2026-11-21). No wire change.
 
 Step 5 adds the `content` transport and `contents` to manifest v1. Existing
 process manifests and the API version are unchanged.

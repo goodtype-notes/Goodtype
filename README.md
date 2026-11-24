@@ -55,8 +55,8 @@ Goodtype keeps your notebooks as plain files on your own disk. No account, no sy
   for other supported content. OneNote sections, `.onepkg` packages and web exports bring across
   typed text as Typst (equations as Typst math), handwriting as ink, and pictures; tall pages are
   split at clear gaps. Each source uses an optional importer
-  ([Goodnotes](https://github.com/Just8it/Goodtype-Goodnodes-importer),
-  [OneNote](https://github.com/Just8it/Goodtype-OneNote-Importer)) downloaded when you ask.
+  ([Goodnotes](https://github.com/goodtype-notes/Goodtype-Goodnotes-Importer),
+  [OneNote](https://github.com/goodtype-notes/Goodtype-OneNote-Importer)) downloaded when you ask.
   Conversion runs locally and preserves the originals; some features of each app are not supported.
 - **Mixed selection** with lasso filters for handwriting, highlighting, shapes, images and Typst
   blocks, so you can move, resize, duplicate or delete them together.
@@ -121,7 +121,7 @@ Goodtype currently targets Windows 10 and 11.
   **Desktop development with C++** and a Windows 10 or 11 SDK
 
 ```powershell
-git clone https://github.com/Just8it/Goodtype.git
+git clone https://github.com/goodtype-notes/Goodtype.git
 cd Goodtype
 pnpm install --frozen-lockfile
 cargo xtask doctor    # checks your toolchain

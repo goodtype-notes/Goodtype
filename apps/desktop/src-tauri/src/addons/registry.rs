@@ -2,9 +2,10 @@ use super::*;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use tauri::Emitter;
 
-const URL: &str = "https://github.com/Just8it/Goodtype-Addons/releases/latest/download/index.json";
+const URL: &str =
+    "https://github.com/goodtype-notes/Goodtype-Addons/releases/latest/download/index.json";
 const SIG_URL: &str =
-    "https://github.com/Just8it/Goodtype-Addons/releases/latest/download/index.json.sig";
+    "https://github.com/goodtype-notes/Goodtype-Addons/releases/latest/download/index.json.sig";
 const KEY: [u8; 32] = [
     0xde, 0x1d, 0x19, 0x23, 0x38, 0x67, 0x1b, 0x55, 0x6a, 0x00, 0xfe, 0xe7, 0xd2, 0xd6, 0xbb, 0x47,
     0x04, 0xc2, 0xa3, 0xba, 0xcb, 0x65, 0x2a, 0x4b, 0xd5, 0x20, 0x90, 0x03, 0xff, 0x01, 0xd6, 0xd9,
@@ -490,7 +491,7 @@ fn registry_url_allowed(initial: &str, url: &str, redirected: bool) -> bool {
         return url == initial;
     }
     // GitHub's latest-download endpoint redirects through a tagged release on the same repo.
-    if valid_url(url, "/Just8it/Goodtype-Addons")
+    if valid_url(url, "/goodtype-notes/Goodtype-Addons")
         && url.rsplit('/').next() == initial.rsplit('/').next()
     {
         return true;
@@ -521,7 +522,7 @@ fn fetch() -> Result<(Vec<u8>, Vec<u8>), Problem> {
     Ok((index, signature))
 }
 
-const RELEASES: &str = "https://github.com/Just8it/Goodtype-Addons/releases/download";
+const RELEASES: &str = "https://github.com/goodtype-notes/Goodtype-Addons/releases/download";
 
 /// `index-<n>` from a same-repository tagged download URL of `index.json`, else nothing.
 fn release_tag(url: &str) -> Option<String> {
@@ -738,8 +739,8 @@ mod tests {
     #[test]
     fn bundled_registry_authenticates_exact_bytes() {
         let index = verify(SNAPSHOT, SIGNATURE, &KEY).unwrap();
-        assert_eq!(index.sequence, 3);
-        assert_eq!(index.addons.len(), 3);
+        assert_eq!(index.sequence, 4);
+        assert_eq!(index.addons.len(), 6);
         assert!(verify(SNAPSHOT, &[], &KEY).is_err());
         assert!(verify(SNAPSHOT, &[0; 64], &KEY).is_err());
         let mut modified = SNAPSHOT.to_vec();
@@ -756,7 +757,7 @@ mod tests {
         assert!(accept(&signed(&input).unwrap(), &floor, at("2026-11-22T00:00:00Z")).is_err());
         let index = verify(SNAPSHOT, SIGNATURE, &KEY).unwrap();
         assert_eq!(
-            accept(&index, &floor, at("2027-03-21T13:11:58Z")),
+            accept(&index, &floor, at("2027-03-24T09:51:51Z")),
             Err(Problem::Expired)
         );
         assert!(timestamp("2100-02-29T00:00:00Z").is_none());
@@ -767,8 +768,9 @@ mod tests {
     #[test]
     fn unknown_ids_are_ignored_and_catalog_binding_is_strict() {
         let mut input = fixture();
+        let listed = input["addons"].as_array().unwrap().len();
         input["addons"][0]["id"] = json!("unlisted");
-        assert_eq!(signed(&input).unwrap().addons.len(), 2);
+        assert_eq!(signed(&input).unwrap().addons.len(), listed - 1);
         for (path, value) in [
             ("/addons/0/publicKey", json!("1".repeat(64))),
             ("/addons/0/repository", json!("/Another/repo")),
@@ -804,9 +806,10 @@ mod tests {
             .push(release);
         assert!(signed(&input).is_err());
 
-        let bytes = String::from_utf8(SNAPSHOT.to_vec()).unwrap().replace(
-            "\"size\": 14881982",
-            "\"size\": 14881982, \"size\": 14881982",
+        let bytes = String::from_utf8(SNAPSHOT.to_vec()).unwrap().replacen(
+            "\"size\": ",
+            "\"size\": 1, \"size\": ",
+            1,
         );
         let key = SigningKey::from_bytes(&[17; 32]);
         let bytes = bytes.as_bytes();
@@ -1045,7 +1048,7 @@ mod tests {
             }
             fs::write(path.with_extension("state.json"), b"{").unwrap();
             let state = load(&path, key).unwrap();
-            assert_eq!(state.index.sequence, 3);
+            assert_eq!(state.index.sequence, 4);
             assert_eq!(state.floor.sequence, 5);
             let later = || start + Duration::from_secs(DAY);
             assert!(matches!(
@@ -1120,8 +1123,7 @@ mod tests {
 
     #[test]
     fn registry_redirects_stay_with_the_named_asset_or_github_asset_hosts() {
-        let tagged =
-            "https://github.com/Just8it/Goodtype-Addons/releases/download/index-1/index.json";
+        let tagged = "https://github.com/goodtype-notes/Goodtype-Addons/releases/download/index-1/index.json";
         assert!(registry_url_allowed(URL, URL, false));
         assert!(!registry_url_allowed(URL, tagged, false));
         assert!(registry_url_allowed(URL, tagged, true));
