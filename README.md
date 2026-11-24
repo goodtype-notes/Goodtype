@@ -183,26 +183,25 @@ Goodtype uses [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`.
 The product is currently **pre-alpha**, remaining below `1.0.0`; a release from `main`
 is a publication channel, not a claim of product maturity.
 
-- **Patch** (`0.2.0` to `0.2.1`): backward-compatible bug fixes.
+- **Patch** (`0.2.0` to `0.2.1`): allocated by CI for each successful push to `dev`
+  on the current major/minor line.
 - **Minor** (`0.2.1` to `0.3.0`): new features or breaking changes during initial development;
   reset the patch number and describe compatibility changes in the release notes.
 - **Major** (`1.0.0`): an explicit product-readiness and compatibility commitment, not an
   automatic consequence of adding a feature. After 1.0, incompatible changes increment major.
-- **Development candidate** (`0.3.0-dev.42.1`): a pre-alpha build toward `0.3.0`.
-  `42` identifies the CI run and `1` its attempt; neither is a feature or patch number.
-
-Choose the base version from the changes since the previous published base release,
-not from the number of commits or CI builds. GitHub titles explicitly distinguish
-`Pre-alpha development build` from `Pre-alpha release`; published tags and assets stay immutable.
-Changing the maturity label to alpha requires an explicit readiness decision.
+- **Development candidate** (`v0.3.1`): a GitHub pre-release with a plain SemVer tag.
+  Published tags and assets stay immutable. Changing the maturity label to alpha
+  requires an explicit readiness decision.
 
 Use **feature branch → `dev` → tested Windows candidate → `main`**.
 
 - Start feature/fix branches from `dev` and open small PRs against `dev`. Both long-lived
   branches require PRs, passing CI and resolved conversations; force pushes and deletion are blocked.
 - Every successful push to `dev` runs full verification, macOS/Linux build smoke checks and
-  portable Windows packaging. It publishes a uniquely versioned prerelease
-  `v<base>-dev.<workflow-run-number>.<attempt>` with the ZIP, JSON manifest and SHA-256 file.
+  portable Windows packaging. It publishes a GitHub pre-release with the ZIP, JSON
+  manifest and SHA-256 file. The version starts at the shared base or the next patch
+  after the highest plain tag on that major/minor line, whichever is higher. A rerun
+  for a tagged commit reuses its version.
   Candidates are also downloadable as the run's `windows-x64` artifact for 14 days.
 - Test that exact extracted candidate on Windows. Record the build tag, actual tests/results
   and remaining limitations; automated integrity/decoder checks do not establish physical pen,
@@ -211,20 +210,19 @@ Use **feature branch → `dev` → tested Windows candidate → `main`**.
 - Open a **`dev` → `main`** promotion PR. Its body must include these two lines with real values:
 
   ```text
-  Tested dev build: v0.1.0-dev.123.1
+  Tested dev build: v0.3.1
   Test evidence: describe the completed tests, results and any accepted limitations
   ```
 
-  CI checks that the candidate is published, the dev build passed, its tag points to the exact
-  dev head, and the stable version does not already exist. New changes to dev require a new
-  candidate and a new test record. Merge the promotion with a merge commit to retain ancestry.
-- A push to `main` verifies and rebuilds the portable package from the promoted source, then
-  publishes the stable `v<base>` release. This is a rebuild, so its hashes differ from the dev ZIP.
-  Neither channel overwrites published tags/assets; failed builds publish nothing. A retry after
-  a published stable release fails safely rather than replacing it.
-- Before the next stable promotion, update the shared base version together in `Cargo.toml`,
-  `apps/desktop/package.json`, `apps/desktop/src-tauri/tauri.conf.json`, and `Cargo.lock` through
-  a feature PR to dev. Synchronize main back into dev through a PR after promotion.
+  CI checks that the release is a published pre-release, the dev build passed, and its
+  tag points to the exact dev head. New dev commits require a new candidate and test
+  record. Merge the promotion with a merge commit to retain ancestry.
+- On a push to `main`, CI checks that its source tree matches the tagged candidate's
+  tree and marks that same release stable and latest. The tested ZIP and hashes carry
+  through unchanged. Synchronize main back into dev through a PR after promotion.
+- To start a new version line, update the shared base in `Cargo.toml`,
+  `apps/desktop/package.json`, `apps/desktop/src-tauri/tauri.conf.json`, and `Cargo.lock`
+  through a feature PR to dev. CI stamps candidate versions at build time.
 
 `main` is the stable publication channel; current packages remain unsigned development software.
 Local package cleanup keeps only the newest two successful verified builds and their ZIPs;
