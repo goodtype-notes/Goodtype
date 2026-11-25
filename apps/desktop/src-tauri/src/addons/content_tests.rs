@@ -621,3 +621,223 @@ fn shape_pack_item_ports_are_strict_and_bounded() {
     file["items"][0]["ports"] = json!([{"x":0,"y":8,"other":false}]);
     assert!(serde_json::from_value::<Library>(file).is_err());
 }
+
+#[test]
+fn stretch_pack_rule_is_strict_and_survives_offline_undo_and_duplication() {
+    let mut file = shape_file();
+    let value = &mut file["items"][0];
+    value["ports"] = json!([{"x":0,"y":8},{"x":48,"y":8}]);
+    value["objects"][2] = json!({
+        "type":"shape", "x":38,"y":8,
+        "geometry":{"kind":"line","start":{"x":0,"y":0},"end":{"x":10,"y":0}}, "style":{}
+    });
+    value["stretch"] =
+        json!({"axis":[0,1], "mode":"fixedBody", "roles":["startLead","body","endLead"]});
+    let item: Item = serde_json::from_value(value.clone()).unwrap();
+    item.validate().unwrap();
+    for (key, bad) in [
+        ("axis", json!([0, 0])),
+        ("roles", json!(["body", "body", "body"])),
+        ("leadFloors", json!([11, 4])),
+        ("virtualSockets", json!([10, 38])),
+        ("unexpected", json!(true)),
+    ] {
+        let mut malformed = value.clone();
+        malformed["stretch"][key] = bad;
+        assert!(
+            serde_json::from_value::<Item>(malformed)
+                .and_then(|item| { item.validate().map_err(serde::de::Error::custom) })
+                .is_err(),
+            "{key}"
+        );
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/notebooks/minimal");
+    let source = storage::open_notebook(&fixture).unwrap();
+    write(
+        temp.path(),
+        "references/lecture.pdf",
+        &fs::read(fixture.join("references/lecture.pdf")).unwrap(),
+    );
+    storage::create_notebook(temp.path(), &source).unwrap();
+    let mut history = storage::NotebookHistory::default();
+    let source = storage::observe_page(temp.path(), &source.page.id, &mut history).unwrap();
+    let inserted = commit_shape(
+        temp.path(),
+        &source.page.id,
+        &mut history,
+        &ShapeInsertion {
+            addon_id: catalog::ENGINEERING.id.into(),
+            library_id: "circuits".into(),
+            item_id: "resistor".into(),
+            revision: source.page.revision,
+            point: Some(goodtype_core::ShapePoint { x: 100.0, y: 100.0 }),
+            scale: Some(2.0),
+            pen_color: "#223344".into(),
+            pen_width_pt: 2.0,
+        },
+        &item,
+        |_, _| panic!("no Typst labels"),
+    )
+    .unwrap();
+    let candidate = storage::open_page(temp.path(), &source.page.id).unwrap();
+    assert_eq!(candidate.page.schema_version, 5);
+    let PageObject::Group {
+        fields,
+        stretch: Some(rule),
+        child_ids,
+    } = candidate.page.objects.last().unwrap()
+    else {
+        panic!("expected stretch group");
+    };
+    assert_eq!(child_ids, &inserted.selected_ids);
+    assert_eq!(rule.limits.minimum(), 72.0);
+    let group_id = fields.id.clone();
+    let before = candidate.page.objects.clone();
+    let mut request = goodtype_core::stretch::StretchRequest {
+        page_id: candidate.page.id.clone(),
+        revision: candidate.page.revision,
+        group_id: group_id.clone(),
+        port: 1,
+        endpoint: goodtype_core::ShapePoint { x: 52.0, y: 200.0 },
+        modified_at: crate::helper::now().to_string(),
+    };
+    let after = storage::commit_group_stretch(temp.path(), &mut history, &request)
+        .unwrap()
+        .snapshot;
+    assert_eq!(after.page.revision, request.revision + 1);
+    assert!(matches!(
+        storage::commit_group_stretch(temp.path(), &mut history, &request),
+        Err(storage::StorageError::RevisionConflict { .. })
+    ));
+    request.revision = after.page.revision;
+    let unchanged = storage::commit_group_stretch(temp.path(), &mut history, &request)
+        .unwrap()
+        .snapshot;
+    assert_eq!(unchanged.page.revision, after.page.revision);
+    assert_eq!(after.page.objects.last().unwrap().fields().id, group_id);
+    assert_eq!(
+        storage::undo_notebook(temp.path(), &mut history)
+            .unwrap()
+            .snapshot
+            .page
+            .objects,
+        before
+    );
+    let mut redone = storage::redo_notebook(temp.path(), &mut history)
+        .unwrap()
+        .snapshot;
+    assert_eq!(redone.page.objects, after.page.objects);
+    let mut remap = goodtype_core::IdRemap::new("2026-11-25T00:00:00Z");
+    remap.map_object(&group_id, "copy-group".to_owned());
+    for id in &inserted.selected_ids {
+        remap.map_object(id, format!("copy-{id}"));
+    }
+    let PageObject::Group {
+        child_ids,
+        stretch: Some(rule),
+        ..
+    } = redone
+        .page
+        .objects
+        .last()
+        .unwrap()
+        .remapped(&remap)
+        .unwrap()
+    else {
+        panic!("expected copied rule")
+    };
+    assert!(
+        rule.parts
+            .iter()
+            .all(|part| child_ids.contains(&part.child_id))
+    );
+
+    let body = redone
+        .page
+        .objects
+        .iter_mut()
+        .find(|object| object.fields().id == inserted.selected_ids[1])
+        .unwrap();
+    body.fields_mut().x += 8.0;
+    let edited = storage::commit_notebook_with_undo(temp.path(), &mut history, redone)
+        .unwrap()
+        .snapshot;
+    assert!(matches!(
+        edited.page.objects.last(),
+        Some(PageObject::Group { stretch: None, .. })
+    ));
+    assert_eq!(
+        edited.page.objects.last().unwrap().fields().ports,
+        after.page.objects.last().unwrap().fields().ports
+    );
+    assert_eq!(
+        storage::undo_notebook(temp.path(), &mut history)
+            .unwrap()
+            .snapshot
+            .page
+            .objects,
+        after.page.objects
+    );
+}
+
+#[test]
+fn span_stretch_wraps_a_single_shape_and_keeps_geometry_at_insertion() {
+    let mut file = shape_file();
+    let value = &mut file["items"][0];
+    value["widthPt"] = json!(10);
+    value["objects"] = json!([value["objects"][0].clone()]);
+    value["ports"] = json!([{"x":0,"y":8},{"x":10,"y":8}]);
+    value["stretch"] = json!({"axis":[0,1], "mode":"span", "roles":["span"]});
+    let item: Item = serde_json::from_value(value.clone()).unwrap();
+    item.validate().unwrap();
+
+    let temp = tempfile::tempdir().unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/notebooks/minimal");
+    let source = storage::open_notebook(&fixture).unwrap();
+    write(
+        temp.path(),
+        "references/lecture.pdf",
+        &fs::read(fixture.join("references/lecture.pdf")).unwrap(),
+    );
+    storage::create_notebook(temp.path(), &source).unwrap();
+    let mut history = storage::NotebookHistory::default();
+    let source = storage::observe_page(temp.path(), &source.page.id, &mut history).unwrap();
+    let inserted = commit_shape(
+        temp.path(),
+        &source.page.id,
+        &mut history,
+        &ShapeInsertion {
+            addon_id: catalog::ENGINEERING.id.into(),
+            library_id: "circuits".into(),
+            item_id: "resistor".into(),
+            revision: source.page.revision,
+            point: Some(goodtype_core::ShapePoint { x: 100.0, y: 100.0 }),
+            scale: None,
+            pen_color: "#223344".into(),
+            pen_width_pt: 2.0,
+        },
+        &item,
+        |_, _| panic!("no Typst labels"),
+    )
+    .unwrap();
+    let objects = &inserted.result.snapshot.page.objects[source.page.objects.len()..];
+    let [
+        PageObject::Shape { geometry, .. },
+        PageObject::Group {
+            stretch: Some(rule),
+            child_ids,
+            ..
+        },
+    ] = objects
+    else {
+        panic!("expected one shape wrapped in a stretch group");
+    };
+    assert_eq!(child_ids, &inserted.selected_ids);
+    assert_eq!(rule.limits.minimum(), 5.0);
+    assert_eq!(
+        *geometry,
+        serde_json::from_value::<ShapeGeometry>(value["objects"][0]["geometry"].clone()).unwrap()
+    );
+}

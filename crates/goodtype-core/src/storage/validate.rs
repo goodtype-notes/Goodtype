@@ -414,7 +414,16 @@ fn validate_page_content(snapshot: &NotebookSnapshot) -> Result<(), StorageError
 
 fn validate_groups(objects: &HashMap<&str, &PageObject>) -> Result<(), StorageError> {
     for object in objects.values() {
-        if let PageObject::Group { fields, child_ids } = object {
+        if let PageObject::Group {
+            fields,
+            child_ids,
+            stretch,
+        } = object
+        {
+            if let Some(rule) = stretch {
+                rule.validate(fields, child_ids, objects)
+                    .map_err(invalid_error)?;
+            }
             let children = child_ids.iter().map(String::as_str).collect::<HashSet<_>>();
             if children.is_empty() || children.len() != child_ids.len() {
                 return invalid("groups must contain unique child IDs");
@@ -741,6 +750,7 @@ mod tests {
         candidate.page.objects.push(PageObject::Group {
             fields: fields("group-001", 0),
             child_ids: vec!["image-001".into()],
+            stretch: None,
         });
         candidate.page.reading_order = vec!["group-001".into()];
         assert!(super::validate_page_content(&candidate).is_err());

@@ -7,6 +7,18 @@ export function rotatedVector(point: Point, degrees: number): Point {
     y: point.x * Math.sin(angle) + point.y * Math.cos(angle) };
 }
 
+export type Similarity = Point & { rotation: number; scale: number };
+
+export function transformPoint(frame: Similarity, local: Point): Point {
+  const offset = rotatedVector({ x: local.x * frame.scale, y: local.y * frame.scale }, frame.rotation);
+  return { x: frame.x + offset.x, y: frame.y + offset.y };
+}
+
+export function inverseTransformPoint(frame: Similarity, page: Point): Point {
+  const offset = rotatedVector({ x: page.x - frame.x, y: page.y - frame.y }, -frame.rotation);
+  return { x: offset.x / frame.scale, y: offset.y / frame.scale };
+}
+
 type ScreenBox = { left: number; top: number; right: number; bottom: number };
 
 /** The visible page nearest the viewport center, including pages larger than the viewport. */

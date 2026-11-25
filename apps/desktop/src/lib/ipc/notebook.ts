@@ -14,7 +14,7 @@ import { locale } from "../i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { knownAssets, pageDelta } from "./pageDelta";
 
-import type { PageBackground, PageGeometry, PagePosition } from "../model";
+import type { PageBackground, PageGeometry, PagePosition, ShapePoint } from "../model";
 import type { PresetChoice } from "../page/presets";
 import type { SearchHit } from "../settings";
 import type {
@@ -64,6 +64,19 @@ export async function commitNotebook(
     assets: [...assets.values()].filter(file => referenced.has(file.path)),
     inkLayers: snapshot.inkLayers.map(layer => ({ ...layer, schemaVersion: result.snapshot.page.schemaVersion })),
   } };
+}
+
+export type StretchRequest = {
+  pageId: string;
+  revision: number;
+  groupId: string;
+  port: number;
+  endpoint: ShapePoint;
+  modifiedAt: string;
+};
+
+export function commitGroupStretch(root: string, stretch: StretchRequest): Promise<HistoryResult> {
+  return invoke("commit_notebook", { root, stretch });
 }
 
 export function searchNotebook(root: string, query: string): Promise<SearchHit[]> {

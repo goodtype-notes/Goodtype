@@ -208,7 +208,15 @@ export type PageObject =
       geometry: ShapeGeometry;
       style: ShapeStyle;
     })
-  | (ObjectFields & { type: "group"; childIds: string[] });
+  | (ObjectFields & { type: "group"; childIds: string[]; stretch?: StretchRule });
+
+export type StretchRule = {
+  axis: [number, number];
+  parts: { childId: string; role: "body" | "startLead" | "endLead" | "throughLine" | "span" }[];
+  limits:
+    | { mode: "fixedBody"; socketSeparation: number; leadFloors: [number, number]; startShare: number }
+    | { mode: "span"; minimumLength: number };
+};
 
 export type InkLayer = {
   schemaVersion: number;

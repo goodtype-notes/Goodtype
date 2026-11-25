@@ -11,7 +11,7 @@ const ROTATION_SNAP_DEGREES = 15;
  * Line ends live in the shape's own frame, so the shape's rotation is added before rounding and
  * taken off again; otherwise a rotated line would snap to angles that look arbitrary.
  */
-function snapAround(moved: Point, fixed: Point, rotationDegrees: number): Point {
+export function snapAround(moved: Point, fixed: Point, rotationDegrees: number): Point {
   const dx = moved.x - fixed.x;
   const dy = moved.y - fixed.y;
   const length = Math.hypot(dx, dy);

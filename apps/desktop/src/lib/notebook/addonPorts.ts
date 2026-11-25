@@ -1,4 +1,4 @@
-import { rotatedVector, type Point } from "../geometry/coordinates";
+import { transformPoint, type Point } from "../geometry/coordinates";
 import type { PageObject } from "../model";
 
 function localPorts(object: PageObject): Point[] {
@@ -28,8 +28,5 @@ function localPorts(object: PageObject): Point[] {
 }
 
 export function pagePorts(object: PageObject): Point[] {
-  return localPorts(object).map((port) => {
-    const offset = rotatedVector({ x: port.x * object.scale, y: port.y * object.scale }, object.rotation);
-    return { x: object.x + offset.x, y: object.y + offset.y };
-  });
+  return localPorts(object).map((port) => transformPoint(object, port));
 }

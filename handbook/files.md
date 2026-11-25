@@ -16,6 +16,12 @@ Copy the entire notebook directory. It contains the JSON manifest and pages, Typ
 
 Current builds read schemas 1 through 5. Ordinary notebooks use schema 3. Adding a calculation page requires schema 4. Pages with addon data or stored ports require schema 5. Older builds cannot open newer schemas. Saving an older page migrates its ink and preserves the original JSON files.
 
+Stretchable symbols store an optional `stretch` field on the schema-5 Group.
+It records the axis port indices, child IDs and roles, and the Group-local
+length limits. An older schema-5 reader can open the saved shapes and ports.
+Saving with that reader can remove the stretch controls while preserving the
+last saved artwork and port positions.
+
 ## Work offline
 
 Core editing, Typst compilation and PDF export run locally. Typst packages use the local cache first. You can disable package downloads and keep using cached packages. Python runtime downloads have a separate setting. Saved calculations remain readable without Python.
