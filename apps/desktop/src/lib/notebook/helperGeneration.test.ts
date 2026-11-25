@@ -65,7 +65,7 @@ function workspace() {
     navigation: { stopTouchInertia: vi.fn(), pagePointers: new Map(), announceTouchHistory: vi.fn() },
     pageViewport: undefined, paletteDragging: false, previews: { reset: vi.fn() }, resetWorkspaceEditors: vi.fn(),
     saveTemplate: vi.fn(async () => true), searchOpen: false,
-    selection: { groupedStrokeIds: [], updateInkSelection: vi.fn() },
+    selection: { endMixedTransform: vi.fn(), exitGroup: vi.fn(), groupEdits: new Map(), groupedStrokeIds: [], updateInkSelection: vi.fn() },
     settings: { ...DEFAULT_SETTINGS, undoScope: "notebook" }, shapeView: vi.fn(), sideEditor: undefined,
     sideEditorOpen: false, tauriAvailable: true, tool: "pen", windowCloseInProgress: false,
   } as unknown as SessionEnvironment;

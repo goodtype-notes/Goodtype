@@ -85,7 +85,7 @@ export type SessionEnvironment = {
   readonly calculationHistory?: (undo: boolean, pageScope: boolean) => Promise<boolean>;
   readonly calculationHistoryFlags?: () => { canUndo: boolean; canRedo: boolean };
   searchOpen: boolean;
-  readonly selection: Pick<ReturnType<typeof createSelection>, "editingShapeId" | "groupedStrokeIds" | "lassoObjectIds" | "mixedGroup" | "selectedImageId" | "selectedShapeId" | "selectedStrokeIds" | "selectedTypstId" | "updateInkSelection">;
+  readonly selection: Pick<ReturnType<typeof createSelection>, "editingShapeId" | "endMixedTransform" | "enteredGroup" | "exitGroup" | "groupEdits" | "groupedStrokeIds" | "lassoObjectIds" | "mixedGroup" | "selectedImageId" | "selectedShapeId" | "selectedStrokeIds" | "selectedTypstId" | "updateInkSelection">;
   readonly settings: AppSettings;
   readonly shapeView: (draft: ShapeDraft, overrides?: Partial<ShapeView>) => ShapeView;
   readonly sideEditor: { focus: () => void } | undefined;
@@ -529,6 +529,7 @@ export function createSession(env: SessionEnvironment) {
       images,
       shapes,
       copiedGroups,
+      groupEdits: env.selection.groupEdits,
       sharedStyle: manifest.sharedStylePath
         ? { path: manifest.sharedStylePath, source: sharedStyleSource }
         : null,
@@ -540,6 +541,9 @@ export function createSession(env: SessionEnvironment) {
 
   function applySnapshot(snapshot: NotebookSnapshot) {
     copiedGroups = [];
+    env.selection.endMixedTransform(true);
+    env.selection.exitGroup();
+    env.selection.groupEdits = new Map();
     pageSession += 1;
     if (activeSnapshot) notePageSaved(activeSnapshot, snapshot);
     const previousEntry = pageEntries.find(entry => entry.id === snapshot.page.id);
@@ -1118,6 +1122,7 @@ export function createSession(env: SessionEnvironment) {
     pageTypst = null;
     strokes = [];
     shapes = [];
+    env.selection.exitGroup();
     env.selection.lassoObjectIds = [];
     env.selection.selectedStrokeIds = [];
     env.selection.groupedStrokeIds = [];
@@ -1870,6 +1875,7 @@ export function createSession(env: SessionEnvironment) {
   function enqueueSnapshot(label: UiText, snapshot: NotebookSnapshot) {
     const requestRoot = root;
     const generation = notebookGeneration;
+    const groupEdits = env.selection.groupEdits;
     pendingTransactions += 1;
     transactionQueue = transactionQueue
       .then(async () => {
@@ -1879,6 +1885,13 @@ export function createSession(env: SessionEnvironment) {
           const result = await commitNotebook(requestRoot, snapshot, activeSnapshot);
           if (root !== requestRoot || notebookGeneration !== generation) return;
           activeSnapshot = result.snapshot;
+          if (groupEdits?.size) {
+            const pending = new Map(env.selection.groupEdits);
+            for (const [id, edit] of groupEdits) {
+              if (pending.get(id) === edit) pending.delete(id);
+            }
+            env.selection.groupEdits = pending;
+          }
           if (copiedGroups.length) {
             const savedIds = new Set(result.snapshot.page.objects.map(({ id }) => id));
             copiedGroups = copiedGroups.filter(({ id }) => !savedIds.has(id));
@@ -2107,6 +2120,8 @@ export function createSession(env: SessionEnvironment) {
       env.selection.selectedShapeId = null;
       env.selection.editingShapeId = null;
     }
+    env.selection.lassoObjectIds = env.selection.lassoObjectIds.filter(id => !replaced.has(id));
+    if (!env.selection.enteredGroup) env.selection.exitGroup();
     const taken = [...replaced.values()].every((pieces) => pieces.length === 0);
     scheduleInkCommit(notice(taken ? "workspace.erasedShape" : "workspace.erasedInk"));
     if (taken) status = notice("workspace.erasedTheShape");
