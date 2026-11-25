@@ -300,4 +300,55 @@ describe("schema version follows content, not the act of saving", () => {
     expect(projected.page.schemaVersion).toBe(2);
     expect(projected.inkLayers[0].schemaVersion).toBe(2);
   });
+
+  it("drops erased children from a pack group and removes a group left empty", () => {
+    const style = { strokeColor: "#16212b", strokeWidthPt: 1, fillColor: null, opacity: 1 };
+    const line = (id: string, order: number, groupId: string): PageObject => ({
+      ...fields(id, order), groupId, type: "shape",
+      geometry: { kind: "line", start: { x: 0, y: 0 }, end: { x: 10, y: 0 } }, style,
+    });
+    const group = (id: string, order: number, childIds: string[]): PageObject => ({
+      ...fields(id, order), type: "group", childIds,
+    });
+    const objects = [
+      line("lead-a", 0, "resistor"), line("lead-b", 1, "resistor"), group("resistor", 2, ["lead-a", "lead-b"]),
+      line("only", 3, "dot"), group("dot", 4, ["only"]),
+    ];
+    objects[0].addonData = { connectors: { refs: ["lead-b", "dot"], data: { route: "straight" } } };
+    objects[0].ports = [{ x: 5, y: 0 }];
+    const base: NotebookSnapshot = {
+      manifest: { schemaVersion: 2, id: "notebook", title: "Notebook",
+        pages: [{ id: "page-a", path: "pages/page-a.json", geometry: { widthPt: 595, heightPt: 842 } }],
+        defaultPage: { geometry: { widthPt: 595, heightPt: 842 }, background: { kind: "plain", color: "#ffffff" } },
+        sharedStylePath: null, createdAt: now, modifiedAt: now },
+      page: { schemaVersion: 2, id: "page-a", revision: 1, geometry: { widthPt: 595, heightPt: 842 },
+        background: { kind: "plain", color: "#ffffff" }, objects, readingOrder: ["resistor", "dot"],
+        inkLayers: [{ id: "ink-a", path: "ink/a.ink" }] },
+      blocks: [], assets: [],
+      inkLayers: [{ schemaVersion: 2, id: "ink-a", pageId: "page-a", strokes: [] }],
+    };
+    const view = (object: PageObject) => {
+      if (object.type !== "shape") throw new Error("shape expected");
+      return { id: object.id, x: object.x, y: object.y, rotation: object.rotation, scale: object.scale,
+        zIndex: object.zIndex, readingOrder: object.readingOrder, geometry: object.geometry, style: object.style };
+    };
+    // The eraser took "lead-b" and the dot's only child.
+    const projected = projectSnapshot({
+      base, manifest: base.manifest, pageId: "page-a", revision: 1, geometry: base.page.geometry,
+      background: base.page.background, inkLayerId: "ink-a", inkLayerPath: "ink/a.ink", strokes: [],
+      typst: [], pageTypst: null, images: [], shapes: [view(objects[0])],
+      sharedStyle: null, mixedGroup: null, groupedStrokeIds: [], now,
+    });
+
+    const ids = projected.page.objects.map(({ id }) => id);
+    expect(ids).toEqual(["lead-a", "resistor"]);
+    expect(projected.page.objects.find(({ id }) => id === "resistor")).toMatchObject({ childIds: ["lead-a"] });
+    expect(projected.page.readingOrder).toEqual(["resistor"]);
+    expect(projected.page.schemaVersion).toBe(5);
+    expect(projected.page.objects[0]).toMatchObject({
+      addonData: { connectors: { refs: [], data: { route: "straight" } } },
+      ports: [{ x: 5, y: 0 }],
+    });
+    expect(objects[0].addonData.connectors.refs).toEqual(["lead-b", "dot"]);
+  });
 });

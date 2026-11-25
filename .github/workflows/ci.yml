@@ -7,10 +7,11 @@ on:
     types: [opened, synchronize, reopened, edited, ready_for_review]
   workflow_dispatch:
 
-# Keep every merged dev candidate; only superseded PR checks may be cancelled.
+# Hold the dev slot from version selection through publication.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event_name == 'push' && github.ref || github.run_id }}
+  queue: max
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -38,6 +39,7 @@ jobs:
 
   windows:
     name: Windows verification
+    if: github.event_name != 'push' || github.ref == 'refs/heads/dev'
     runs-on: windows-2025
     timeout-minutes: 90
     steps:
@@ -48,12 +50,17 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Reuse compiled Rust dependencies between runs; every runner otherwise rebuilds them all.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-on-failure: true
       - run: cargo xtask doctor
       - run: cargo xtask verify
       - name: Build and test portable Windows package
         shell: pwsh
         env:
-          BUILD_CHANNEL: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' && 'dev' || 'stable') || 'local' }}
+          BUILD_CHANNEL: ${{ github.event_name == 'push' && 'dev' || 'local' }}
+          GH_TOKEN: ${{ github.event_name == 'push' && github.token || '' }}
         run: ./scripts/build-windows-demo.ps1 -Channel $env:BUILD_CHANNEL
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2, same as the importers
         with:
@@ -63,10 +70,12 @@ jobs:
             target/Goodtype-Windows-*.json
             target/Goodtype-Windows-*.sha256
           if-no-files-found: error
+          overwrite: true
           retention-days: 14
 
   build-smoke:
     name: ${{ matrix.os }} build smoke
+    if: github.event_name != 'push' || github.ref == 'refs/heads/dev'
     strategy:
       fail-fast: false
       matrix:
@@ -83,6 +92,10 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Reuse compiled Rust dependencies between runs; every runner otherwise rebuilds them all.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-on-failure: true
       # Tinymist Gate 1 currently ships only the pinned Windows x64 sidecar. Tauri otherwise
       # derives a target-specific external-binary name here and rejects these source-only smoke
       # builds before Rust is checked. Keep the native sidecar mandatory in Windows verification;
@@ -94,8 +107,9 @@ jobs:
       - run: pnpm build
 
   release:
-    name: Publish Windows release
-    if: github.event_name == 'push'
+    name: Publish Windows pre-release
+    environment: portable-release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     needs: [branch-policy, windows, build-smoke]
     runs-on: ubuntu-24.04
     permissions:
@@ -110,8 +124,28 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2, same as the importers
         with:
           name: windows-x64
-          path: release-assets
-      - name: Publish an immutable candidate or stable version
-        run: node scripts/release.mjs publish release-assets
+          path: target/release-assets
+      - name: Publish the Windows candidate
+        run: node scripts/release.mjs publish target/release-assets
+        env:
+          GOODTYPE_RELEASE_SIGNING_KEY: ${{ secrets.GOODTYPE_RELEASE_SIGNING_KEY }}
+          GH_TOKEN: ${{ github.token }}
+
+  promote:
+    name: Promote tested Windows release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+      - run: node scripts/release.mjs promote
         env:
           GH_TOKEN: ${{ github.token }}

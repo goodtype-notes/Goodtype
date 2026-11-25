@@ -1,6 +1,7 @@
-import type { AppSettings } from "../settings";
+import { contributionText, type AddonContribution } from "../ipc/addons";
+import type { AppSettings, HelperPermission } from "../settings";
 import { LANGUAGES, translate, formatNumber, type Translator } from "../i18n";
-import { paletteTools, type PaletteCommand } from "../notebook/palette";
+import { addonPaletteId, paletteTools } from "../notebook/palette";
 
 /**
  * What Settings holds, described as data rather than markup.
@@ -24,9 +25,10 @@ import { paletteTools, type PaletteCommand } from "../notebook/palette";
  * diagnostic belongs in Settings rather than one tap from the page, but it is not a preference,
  * so it needs somewhere to send the request.
  */
-export type SettingActions = { openMetrics: () => void };
+export type SettingActions = { restartForUpdate?: () => Promise<void>; openMetrics: () => void; changePython: () => void; browseAddons?: () => void };
 
 export type SettingControl =
+  | { kind: "addonPolicy"; preference: "autoCheck" | "allowDirectApply" }
   | {
       kind: "toggle";
       read: (settings: AppSettings) => boolean;
@@ -60,6 +62,7 @@ export type SettingItem = {
   id: string;
   label: string;
   hint?: string;
+  section?: string;
   /** Words that should find this setting but do not appear in its own text. */
   keywords?: string[];
   control: SettingControl;
@@ -74,12 +77,21 @@ export type SettingGroup = {
   items: SettingItem[];
 };
 
-export function settingGroups(t: Translator = translate, fonts: string[] = []): SettingGroup[] { return [
+export function settingGroups(t: Translator = translate, fonts: string[] = [], aiEnabled = false, themes: { value: string; label: string }[] = [], addons: AddonContribution[] = [], locale = "en"): SettingGroup[] { const groups: SettingGroup[] = [
   {
     id: "appearance",
     title: t("workspace.appearance"),
     icon: "M12 3a9 9 0 1 0 0 18h2a2 2 0 0 0 0-4h-1a2 2 0 0 1 0-4h3a5 5 0 0 0 0-10z",
     items: [{
+      id: "theme",
+      label: t("contentPacks.theme"),
+      control: {
+        kind: "select",
+        options: [{ value: "", label: t("contentPacks.defaultTheme") }, ...themes],
+        read: settings => themes.some(theme => theme.value === settings.themeId) ? settings.themeId : "",
+        write: (settings, themeId) => ({ ...settings, themeId }),
+      },
+    }, {
       id: "uiLanguage",
       label: t("language.title"),
       hint: t("language.hint"),
@@ -206,7 +218,14 @@ export function settingGroups(t: Translator = translate, fonts: string[] = []): 
     icon: "M4 7h16M4 12h16M4 17h16M9 4v16",
     blurb:
       t("workspace.takeToolsYouNeverUseOffThe"),
-    items: paletteTools(t).map((tool) => paletteToggle(tool.id, tool.label, t)),
+    items: [
+      ...paletteTools(t).map(tool => paletteToggle(tool.id, tool.label, t)),
+      ...addons.filter(addon => addon.enabled).flatMap(addon => (addon.tools ?? []).map(tool => ({
+        ...paletteToggle(addonPaletteId(addon.addonId, tool.id), contributionText(addon, tool.label, locale), t),
+        hint: contributionText(addon, "name", locale),
+        section: t("workspace.paletteFromAddons"),
+      }))),
+    ],
   },
   {
     id: "editing",
@@ -297,6 +316,25 @@ export function settingGroups(t: Translator = translate, fonts: string[] = []): 
     ],
   },
   {
+    id: "python",
+    title: "Python",
+    icon: "M4 5h16M4 12h16M4 19h16",
+    items: [{
+      id: "pythonRuntime",
+      label: t("calculation.pythonRuntime"),
+      hint: t("calculation.pythonRuntimeHint"),
+      keywords: [t("calculation.pythonRuntimeSearch")],
+      control: { kind: "action", buttonLabel: t("calculation.changePython"), run: actions => actions.changePython() },
+    }, {
+      id: "pythonPackageDownloads",
+      label: t("calculation.downloadPackages"),
+      hint: t("calculation.downloadHint"),
+      keywords: [t("calculation.downloadSearch")],
+      control: { kind: "toggle", read: settings => settings.pythonPackageDownloads,
+        write: (settings, value) => ({ ...settings, pythonPackageDownloads: value }) },
+    }],
+  },
+  {
     id: "motion",
     title: t("workspace.motion"),
     icon: "M4 12h5l2-5 3 10 2-5h4",
@@ -348,10 +386,61 @@ export function settingGroups(t: Translator = translate, fonts: string[] = []): 
       },
     ],
   },
-]; }
+  {
+    id: "aiHelper", title: t("helper.title"), icon: "M5 5h14v10H10l-5 4Z",
+    blurb: t("helper.about"), items: [
+      { id: "helperEnabled", label: t("helper.enable"), keywords: [...t("helper.search").split(" "), ...t("codex.search").split(" ")], control: { kind: "toggle", read: s => s.aiHelper.enabled, write: (s, enabled) => ({ ...s, aiHelper: { ...s.aiHelper, enabled } }) } },
+      { id: "helperUsage", label: t("helper.usage"), hint: t("helper.usageHint"), control: { kind: "choice", options: [{ value: "low", label: t("helper.low"), hint: t("helper.lowHint") }, { value: "balanced", label: t("helper.balanced"), hint: t("helper.balancedHint") }, { value: "detailed", label: t("helper.detailed"), hint: t("helper.detailedHint") }], read: s => s.aiHelper.usage, write: (s, usage) => ({ ...s, aiHelper: { ...s.aiHelper, usage: usage as AppSettings["aiHelper"]["usage"] } }) } },
+      { id: "helperWebSearch", label: t("helper.webSearch"), hint: t("helper.webHint"), control: { kind: "toggle", read: s => s.aiHelper.webSearch, write: (s, webSearch) => ({ ...s, aiHelper: { ...s.aiHelper, webSearch } }) } },
+      ...(["pages", "presets", "pageNames"] as const).map(key => {
+        const name = ({ pages: "Pages", presets: "Presets", pageNames: "Names" } as const)[key];
+        return { id: `helperPermission${name}`, label: t(`helper.permission${name}`), hint: t(`helper.permission${name}Hint`), control: { kind: "choice" as const, options: (["allow", "ask", "never"] as const).map(value => {
+          const word = ({ allow: "Allow", ask: "Ask", never: "Never" } as const)[value];
+          return { value, label: t(`helper.permission${word}`), hint: t(`helper.permission${word}Hint`) };
+        }), read: (s: AppSettings) => s.aiHelper.permissions[key], write: (s: AppSettings, value: string) => ({ ...s, aiHelper: { ...s.aiHelper, permissions: { ...s.aiHelper.permissions, [key]: value as HelperPermission } } }) } };
+      }),
+    ],
+  },
+];
+  groups.push({
+    id: "updates", title: t("appUpdates.title"), blurb: t("appUpdates.privacy"), icon: "M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4",
+    items: [{ id: "autoCheckAppReleases", label: t("appUpdates.auto"), control: { kind: "toggle", read: s => s.autoCheckAppReleases, write: (s, enabled) => ({ ...s, autoCheckAppReleases: enabled }) } },
+      { id: "includeBetaReleases", label: t("appUpdates.beta"), control: { kind: "toggle", read: s => s.includeBetaReleases, write: (s, enabled) => ({ ...s, includeBetaReleases: enabled }) } }],
+  });
+  groups.push({
+    id: "addons",
+    title: t("addons.manager.title"),
+    icon: "M4 4h7v5h2V4h7v7h-5v2h5v7h-7v-5h-2v5H4v-7h5v-2H4z",
+    items: [
+      {
+        id: "addons:direct-apply",
+        label: t("addons.manager.global"),
+        hint: t("addons.manager.globalHint"),
+        keywords: t("addons.manager.search").split(" "),
+        control: { kind: "addonPolicy", preference: "allowDirectApply" },
+      },
+      {
+        id: "addons:auto-check",
+        label: t("addons.manager.autoCheck"),
+        hint: t("addons.manager.autoCheckHint"),
+        keywords: t("addons.manager.search").split(" "),
+        control: { kind: "addonPolicy", preference: "autoCheck" },
+      },
+      {
+        id: "addons:browse",
+        label: t("addons.manager.title"),
+        keywords: t("addons.manager.search").split(" "),
+        control: { kind: "action", buttonLabel: t("addons.store.browse"), run: actions => actions.browseAddons?.() },
+      },
+    ],
+  });
+  if (aiEnabled) return groups;
+  const enable = groups.find(group => group.id === "aiHelper")!.items[0];
+  return groups.filter(group => group.id !== "aiHelper").map(group => group.id === "appearance" ? { ...group, items: [...group.items, enable] } : group);
+}
 
 /** At least one pen stays on the bar; Rust holds the same line for an edited settings file. */
-function lastPenShown(settings: AppSettings, id: PaletteCommand): boolean {
+function lastPenShown(settings: AppSettings, id: AppSettings["hiddenTools"][number]): boolean {
   const otherPen = id === "pen-1" ? "pen-2" : id === "pen-2" ? "pen-1" : null;
   return (
     otherPen !== null &&
@@ -360,7 +449,7 @@ function lastPenShown(settings: AppSettings, id: PaletteCommand): boolean {
   );
 }
 
-function paletteToggle(id: PaletteCommand, label: string, t: Translator): SettingItem {
+function paletteToggle(id: AppSettings["hiddenTools"][number], label: string, t: Translator): SettingItem {
   return {
     id: `palette-${id}`,
     label,
@@ -397,7 +486,8 @@ export function searchSettings(query: string, groups = settingGroups()): Setting
   return groups.flatMap((group) =>
     group.items.map((item) => ({ group, item })),
   ).filter(({ group, item }) => {
-    const haystack = [group.title, item.label, item.hint ?? "", ...(item.keywords ?? [])]
+    const actionLabel = item.control.kind === "action" ? item.control.buttonLabel : "";
+    const haystack = [group.title, item.label, actionLabel, item.hint ?? "", ...(item.keywords ?? [])]
       .join(" ")
       .toLowerCase();
     return words.every((word) => haystack.includes(word));

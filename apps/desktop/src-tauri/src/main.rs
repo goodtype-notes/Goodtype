@@ -1,33 +1,115 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod addons;
+mod computation;
 mod export;
-mod importer;
+mod helper;
 mod library;
 mod notebook;
 mod preset;
+mod recognition;
+pub mod sandbox;
 mod settings;
 mod store;
 mod tinymist;
 mod typst;
+mod updates;
 mod workspace;
 
 use tauri::Manager;
 
 fn main() {
+    if updates::install::helper_entry() {
+        return;
+    }
     tauri::Builder::default()
+        .manage(updates::install::Pending::default())
         .plugin(tauri_plugin_dialog::init())
         .manage(notebook::NotebookHistories::default())
         .manage(workspace::AllowedRoots::default())
         .manage(settings::RemotePackages::default())
+        .manage(computation::RuntimeState::default())
+        .manage(helper::Helper::default())
         .manage(tinymist::Tinymist::default())
-        .manage(importer::Importers::default())
+        .manage(addons::Importers::default())
+        .manage(addons::registry::Checks::default())
+        .manage(recognition::math_process::MathProcess::default())
+        .manage(addons::session::Runtime::default())
+        .manage(addons::objects::Reactions::default())
+        .manage(addons::selection::Proposals::default())
+        .manage(addons::contributions::PendingForms::default())
         .setup(|app| {
             let handle = app.handle().clone();
+            if let Err(error) = addons::content::setup(&handle) {
+                eprintln!("Content package setup failed: {error}");
+            }
+            if let Err(error) = addons::manager::startup(&handle) {
+                eprintln!("Addon startup verification failed: {error}");
+            }
+            // Crash leftovers: scratch before any session can start, then profiles and grants.
+            addons::session::sweep_scratch(&handle);
+            let sweeper = handle.clone();
+            std::thread::spawn(move || addons::session::sweep_grants(&sweeper));
             let policy = app.state::<settings::RemotePackages>();
-            settings::seed_remote_packages(&handle, &policy);
+            if let Ok(settings) = settings::load_app_settings(handle.clone()) {
+                policy.set(settings.remote_packages);
+                if let Err(error) = app
+                    .state::<helper::Helper>()
+                    .apply(&handle, settings.ai_helper)
+                {
+                    eprintln!("AI helper startup failed: {error}");
+                }
+                app.state::<computation::RuntimeState>().downloads.store(
+                    settings.python_package_downloads,
+                    std::sync::atomic::Ordering::SeqCst,
+                );
+            }
+            updates::install::confirm_start();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            helper::codex::helper_codex_status,
+            helper::codex::helper_codex_run,
+            helper::codex::helper_codex_stop,
+            helper::codex::helper_codex_close,
+            helper::helper_status,
+            helper::proposals::helper_proposals,
+            helper::preset_install::helper_install_preset,
+            helper::proposals::helper_dismiss_proposal,
+            helper::proposals::helper_request_change,
+            helper::proposals::helper_edit_proposal,
+            notebook::insert_helper_proposal,
+            notebook::invoke_addon_selection,
+            notebook::insert_addon_proposal,
+            addons::selection::addon_selection_commands,
+            addons::manager::addon_set_field,
+            addons::contributions::addon_contributions,
+            addons::objects::addon_object_action,
+            addons::objects::addon_react,
+            addons::objects::addon_apply_reaction,
+            addons::export::addon_export,
+            addons::contributions::addon_form_preview,
+            addons::contributions::addon_form_insert,
+            addons::contributions::addon_form_add_pages,
+            addons::contributions::addon_form_dismiss,
+            addons::selection::addon_cancel,
+            addons::selection::addon_edit,
+            addons::selection::addon_dismiss,
+            notebook::apply_helper_cell_proposal,
+            notebook::apply_helper_page_proposal,
+            helper::helper_install_relay,
+            helper::helper_share,
+            helper::helper_unshare,
+            helper::helper_revoke_attachment,
+            helper::helper_revoke_notebook,
+            helper::helper_context_reply,
+            helper::helper_answer_connection,
+            helper::helper_answer_scope,
+            helper::helper_revoke,
+            helper::helper_activity,
+            updates::check_app_release,
+            updates::install::stage_app_release,
+            updates::install::arm_app_restart,
             library::library_root,
             library::pick_library_root,
             library::list_library,
@@ -42,14 +124,31 @@ fn main() {
             library::library_favourites,
             library::set_library_favourite,
             library::list_library_favourites,
-            importer::importer_status,
-            importer::importer_install,
-            importer::importer_check_update,
-            importer::importer_update,
-            importer::importer_cancel,
-            importer::importer_dismiss,
-            importer::import_pick_source,
-            importer::import_start,
+            addons::addon_catalog,
+            addons::content::addon_content,
+            notebook::insert_content_shape,
+            #[cfg(debug_assertions)]
+            addons::content::addon_sideload_content,
+            addons::addon_install,
+            addons::addon_update,
+            addons::details::addon_details,
+            addons::manager::addon_list,
+            addons::manager::addon_approve,
+            addons::manager::addon_reset_policy,
+            addons::manager::addon_set_auto_check,
+            addons::registry::addon_check_registry,
+            addons::manager::addon_set_enabled,
+            addons::manager::addon_remove,
+            addons::manager::addon_rollback,
+            addons::manager::addon_set_direct_apply,
+            addons::importer_status,
+            addons::importer_install,
+            addons::importer_check_update,
+            addons::importer_update,
+            addons::importer_cancel,
+            addons::importer_dismiss,
+            addons::import::import_pick_source,
+            addons::import::import_start,
             workspace::phase0_notebook_root,
             workspace::pick_notebook_root,
             workspace::open_recent_root,
@@ -58,7 +157,7 @@ fn main() {
             workspace::record_notebook_opened,
             workspace::record_notebook_page,
             workspace::record_notebook_session,
-            workspace::close_notebook_session,
+            helper::helper_close_notebook_session,
             workspace::write_phase0_metrics,
             settings::load_app_settings,
             settings::save_app_settings,
@@ -70,6 +169,21 @@ fn main() {
             notebook::open_page,
             notebook::focus_page,
             notebook::create_page,
+            notebook::create_calculation_page,
+            notebook::import_calculation_notebook,
+            computation::python_runtime_status,
+            computation::python_runtime_install,
+            computation::python_runtime_cancel,
+            computation::python_runtime_forget_local,
+            computation::local::python_runtime_discover,
+            computation::local::python_runtime_probe,
+            computation::run_calculation_cell,
+            computation::end_calculation_session,
+            notebook::read_calculation,
+            notebook::layout_calculation,
+            notebook::calculation_execution_plan,
+            notebook::edit_calculation,
+            notebook::calculation_history,
             notebook::pick_pdf_reference,
             notebook::read_pdf_reference,
             notebook::import_pdf_pages,
@@ -78,6 +192,7 @@ fn main() {
             notebook::redo_notebook,
             notebook::duplicate_page,
             notebook::delete_page,
+            notebook::delete_pages,
             notebook::reorder_pages,
             notebook::undo_page_structure,
             notebook::redo_page_structure,
@@ -102,7 +217,18 @@ fn main() {
             typst::analyze_typst,
             export::export_notebook_pdf,
             export::render_notebook_cover,
+            recognition::recognition_capabilities,
+            recognition::recognize_ink_text,
+            recognition::recognize_ink_math,
+            recognition::prepare_math_recognition,
+            addons::recognize::remove_math_recognizer,
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run Goodtype");
+        .build(tauri::generate_context!())
+        .expect("failed to build Goodtype")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                app.state::<helper::Helper>().stop();
+                updates::install::launch_on_exit(app);
+            }
+        });
 }

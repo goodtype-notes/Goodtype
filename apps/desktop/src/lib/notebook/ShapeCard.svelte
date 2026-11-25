@@ -14,6 +14,7 @@
     kind,
     fill,
     constrain,
+    endSnap,
     drawAndHold,
     minimumLineLengthPt = 6,
     onMinimumLineLengthChange,
@@ -24,6 +25,7 @@
     onKindChange,
     onFillChange,
     onConstrainChange,
+    onEndSnapChange,
     onDrawAndHoldChange,
     onPatternChange,
     onSpacingChange,
@@ -33,6 +35,7 @@
     kind: ShapeKind;
     fill: boolean;
     constrain: boolean;
+    endSnap: boolean;
     drawAndHold: boolean;
     minimumLineLengthPt?: number;
     onMinimumLineLengthChange?: (length: number) => void;
@@ -43,6 +46,7 @@
     onKindChange: (kind: ShapeKind) => void;
     onFillChange: (fill: boolean) => void;
     onConstrainChange: (constrain: boolean) => void;
+    onEndSnapChange: (enabled: boolean) => void;
     onDrawAndHoldChange: (enabled: boolean) => void;
     onPatternChange: (pattern: StrokePattern) => void;
     onSpacingChange: (spacing: number) => void;
@@ -113,6 +117,7 @@
 
 <div
   class="shape-card"
+ 
   class:point-down={dock === "bottom"}
   class:point-up={dock === "top"}
   class:point-left={dock === "left"}
@@ -139,6 +144,7 @@
       <span>{$t("workspace.currentPenStroke", { "value1": colorName(strokeColor) })}</span>
     </div>
 
+    <h3 class="group-heading">{$t("workspace.shapeGroupWhat")}</h3>
     <section>
       <span class="section-label">{$t("workspace.draw")}</span>
       <div class="shape-grid" role="radiogroup" aria-label={$t("workspace.shapeType")}>
@@ -182,7 +188,17 @@
       {/if}
     </section>
 
-    <div class="divider"></div>
+    <section class="rows">
+      {@render toggle(
+        $t("workspace.fillClosedShapes"),
+        $t("workspace.aQuietTintUsingTheStrokeColour"),
+        fill,
+        !isClosed,
+        () => onFillChange(!fill),
+      )}
+    </section>
+
+    <h3 class="group-heading behaviour">{$t("workspace.shapeGroupBehaviour")}</h3>
     <section class="rows">
       {@render toggle(
         $t("workspace.keepProportions"),
@@ -192,11 +208,11 @@
         () => onConstrainChange(!constrain),
       )}
       {@render toggle(
-        $t("workspace.fillClosedShapes"),
-        $t("workspace.aQuietTintUsingTheStrokeColour"),
-        fill,
-        !isClosed,
-        () => onFillChange(!fill),
+        $t("workspace.snapEnds"),
+        $t("workspace.snapEndsHint"),
+        endSnap,
+        false,
+        () => onEndSnapChange(!endSnap),
       )}
       {@render toggle(
         $t("workspace.drawAndHold"),
@@ -225,7 +241,7 @@
     border: 1px solid var(--edge);
     border-radius: var(--radius-lg);
     background: var(--panel);
-    box-shadow: 0 22px 54px rgb(0 0 0 / 58%);
+    box-shadow: var(--shadow-panel);
     color: var(--text);
   }
 
@@ -235,52 +251,62 @@
   .point-left .arrow { top: clamp(12px, calc(var(--arrow, 150px) - 5px), calc(100% - 22px)); left: -6px; border-bottom: 1px solid var(--edge); border-left: 1px solid var(--edge); }
   .point-right .arrow { top: clamp(12px, calc(var(--arrow, 150px) - 5px), calc(100% - 22px)); right: -6px; border-top: 1px solid var(--edge); border-right: 1px solid var(--edge); }
 
-  header { display: flex; height: var(--control); flex: none; align-items: center; padding: 0 6px 0 12px; border-bottom: 1px solid var(--edge-soft); gap: 8px; }
-  .name { flex: 1; font-size: var(--text-md); font-weight: 600; }
+  header { display: flex; height: var(--control); flex: none; align-items: center; margin-top: 4px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--edge-soft); gap: 8px; }
+  .name { flex: 1; font-size: var(--text-lg); font-weight: 600; line-height: 1.25; }
   .meta { color: var(--quiet); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
   .chrome { display: grid; width: var(--control-dense); height: var(--control-dense); padding: 0; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; place-items: center; }
   .chrome:hover { background: var(--wash); color: var(--text); }
+  .chrome:active { background: var(--wash-strong); }
   .chrome svg { width: var(--icon-dense); height: var(--icon-dense); fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: var(--stroke-dense); }
 
-  .body { display: flex; min-height: 0; flex-direction: column; padding: 12px; gap: 13px; overflow-y: auto; }
-  section { display: flex; flex-direction: column; gap: 7px; }
-  .section-label { color: var(--muted); font-size: var(--text-sm); }
-  .preview { position: relative; display: grid; height: 64px; border-radius: var(--radius); background: var(--paper); color: #59616b; place-items: center; overflow: hidden; }
+  .body { display: flex; min-height: 0; flex-direction: column; padding: 12px; gap: 12px; overflow-y: auto; }
+  section { display: flex; flex-direction: column; gap: 8px; }
+  .section-label { color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
+
+  /* Two groups: what is drawn, then how drawing behaves. */
+  .group-heading { margin: 0; color: var(--text); font-size: var(--text-md); font-weight: 600; line-height: 1.4; }
+  .group-heading.behaviour { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--edge-soft); }
+
+  .preview { position: relative; display: grid; height: 64px; flex: none; border-radius: var(--radius); background: var(--paper); color: #59616b; place-items: center; overflow: hidden; }
   .preview svg { position: absolute; inset: 0; width: 100%; height: 54px; }
   .preview path { stroke-linecap: round; }
-  .preview span { position: absolute; right: 8px; bottom: 5px; font-size: 10px; }
+  .preview span { position: absolute; right: 8px; bottom: 5px; font-size: var(--text-sm); }
 
-  .shape-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .shape-grid button { display: flex; min-height: var(--control-touch); align-items: center; padding: 0 10px; border: 1px solid var(--edge); border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; gap: 8px; transition: background 140ms ease, border-color 140ms ease, color 140ms ease; }
-  .shape-grid button:hover { background: var(--wash); color: var(--text); }
-  .shape-grid button.current { border-color: var(--blueprint); background: rgb(76 141 240 / 14%); color: var(--text); }
+  .shape-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .shape-grid button { display: flex; min-height: var(--control-touch); align-items: center; padding: 0 12px; border: 1px solid var(--edge); border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; gap: 8px; transition: background var(--fast) ease, border-color var(--fast) ease, color var(--fast) ease; }
+  .shape-grid button:hover { background: var(--wash); border-color: var(--edge-strong); color: var(--text); }
+  .shape-grid button:active { background: var(--wash-strong); }
+  .shape-grid button.current { border-color: var(--accent-edge); background: var(--accent-fill); color: var(--text); font-weight: 600; }
   .shape-grid svg { width: var(--icon); height: var(--icon); flex: none; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: var(--stroke); }
   .shape-grid svg circle { fill: currentColor; stroke: none; }
   .shape-grid button span { font-size: var(--text-md); }
-  .pattern-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-  .pattern-grid button { display: grid; min-height: var(--control-touch); place-items: center; padding: 6px 4px; border: 1px solid var(--edge); border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; gap: 2px; font: inherit; font-size: var(--text-sm); }
-  .pattern-grid button:hover { background: var(--wash); color: var(--text); }
-  .pattern-grid button.current { border-color: var(--blueprint); background: rgb(76 141 240 / 14%); color: var(--text); }
-  .pattern-grid button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 1px; }
-  .spacing { margin-top: 8px; }
+  .pattern-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .pattern-grid button { display: grid; min-height: var(--control-touch); place-items: center; padding: 6px 4px; border: 1px solid var(--edge); border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; gap: 2px; font: inherit; font-size: var(--text-sm); transition: background var(--fast) ease, border-color var(--fast) ease; }
+  .pattern-grid button:hover { background: var(--wash); border-color: var(--edge-strong); color: var(--text); }
+  .pattern-grid button:active { background: var(--wash-strong); }
+  .pattern-grid button.current { border-color: var(--accent-edge); background: var(--accent-fill); color: var(--text); font-weight: 600; }
+  .pattern-grid button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
+  .spacing { margin-top: 4px; }
   .pattern-grid svg { width: 100%; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 
-  .divider { height: 1px; background: var(--edge-soft); }
-  .rows { gap: 2px; }
-  .row { display: flex; min-height: var(--control-touch); align-items: center; justify-content: space-between; gap: 10px; }
-  .row.disabled { opacity: 0.45; }
-  .row-name { display: flex; min-width: 0; flex-direction: column; font-size: var(--text-md); gap: 2px; }
+  .rows { gap: 0; }
+  .row { display: flex; min-height: var(--control-touch); align-items: center; justify-content: space-between; gap: 12px; }
+  .row + .row { border-top: 1px solid var(--edge-soft); }
+  .row.disabled { opacity: var(--disabled); }
+  .row-name { display: flex; min-width: 0; flex-direction: column; font-size: var(--text-md); line-height: 1.4; gap: 2px; }
   .row-name span { color: var(--quiet); font-size: var(--text-sm); }
-  .toggle { position: relative; width: 34px; height: 20px; flex: none; padding: 0; border: 0; border-radius: var(--radius-pill); background: rgb(255 255 255 / 14%); cursor: pointer; }
-  .toggle span { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: transform 120ms ease, background 120ms ease; }
+  .toggle { position: relative; width: 34px; height: 20px; flex: none; padding: 0; border: 0; border-radius: var(--radius-pill); background: var(--track); cursor: pointer; transition: background var(--fast) ease; }
+  .toggle:hover:not(:disabled):not(.on) { background: var(--edge-strong); }
+  .toggle:disabled { cursor: default; }
+  .toggle span { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: transform var(--fast) ease, background var(--fast) ease; }
   .toggle.on { background: var(--blueprint); }
-  .toggle.on span { background: #fff; transform: translateX(14px); }
+  .toggle.on span { background: var(--text); transform: translateX(14px); }
 
   .chrome:focus-visible,
   .shape-grid button:focus-visible,
-  .toggle:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 1px; }
+  .toggle:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 
   @media (prefers-reduced-motion: reduce) {
-    .shape-grid button, .toggle span { transition: none; }
+    .shape-grid button, .pattern-grid button, .toggle, .toggle span { transition: none; }
   }
 </style>

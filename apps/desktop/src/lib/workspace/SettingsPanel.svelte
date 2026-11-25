@@ -1,5 +1,13 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import AppUpdates from "./AppUpdates.svelte";
+  import ConfirmDialog from "./ConfirmDialog.svelte";
+  import AddonSettings from "./addons/AddonSettings.svelte";
+  import { matchesField } from "./addons/formModel";
+  import { locale as addonLocale } from "../i18n";
+  import { addonContributions, type AddonContribution, listAddons, resetAddonPolicy, setAddonAutoCheck, setAddonDirectApply, type AddonManager } from "../ipc/addons";
+  import CodexSettings from "../helper/CodexSettings.svelte";
+  import HelperSetup from "../helper/HelperSetup.svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { typstFontFamilies } from "../ipc/typst";
   import { t } from "../i18n";
   import type { AppSettings } from "../settings";
@@ -32,6 +40,8 @@
     onClose,
     selectedBlockFont = null,
     onFontChange,
+    initialGroup = "appearance",
+    themes = [],
   }: {
     settings: AppSettings;
     /** What the entries that *do* something rather than store something should call. */
@@ -40,6 +50,8 @@
     onClose: () => void;
     selectedBlockFont?: string | null;
     onFontChange?: (font: string) => void;
+    initialGroup?: string;
+    themes?: { value: string; label: string }[];
   } = $props();
 
   let fonts = $state<string[]>(["DejaVu Sans Mono", "Libertinus Serif", "New Computer Modern"]);
@@ -48,8 +60,63 @@
     if (!("__TAURI_INTERNALS__" in window)) return;
     void typstFontFamilies().then(value => { fonts = value; }).catch(() => { fontLoadFailed = true; });
   });
-  const groups = $derived(settingGroups($t, [...new Set([...fonts, settings.inlineTextFont, selectedBlockFont].filter((font): font is string => Boolean(font)))]));
-  let groupId = $state("appearance");
+  let contributions = $state.raw<AddonContribution[]>([]);
+  let addonManager = $state.raw<AddonManager>();
+  const groups = $derived(settingGroups($t, [...new Set([...fonts, settings.inlineTextFont, selectedBlockFont].filter((font): font is string => Boolean(font)))], settings.aiHelper.enabled, themes, contributions, $addonLocale));
+  let addonError = $state<"loadFailed" | "policyFailed" | null>(null);
+  let confirmReset = $state(false);
+  let policyPending = $state(false);
+
+  let addonRequest = 0;
+  async function refreshAddons() {
+    const request = ++addonRequest;
+    void addonContributions().then(found => { if (request === addonRequest) contributions = found; }).catch(() => {});
+    try {
+      const next = await listAddons();
+      if (request !== addonRequest) return;
+      addonManager = next;
+      if (addonError === "loadFailed") addonError = null;
+    } catch {
+      if (request === addonRequest) addonError = "loadFailed";
+    }
+  }
+
+  async function resetPolicy() {
+    confirmReset = false;
+    policyPending = true;
+    addonError = null;
+    try {
+      await resetAddonPolicy();
+      await refreshAddons();
+    } catch {
+      addonError = "policyFailed";
+    } finally {
+      policyPending = false;
+    }
+  }
+
+  $effect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    void refreshAddons();
+  });
+
+  async function toggleAddonPolicy(preference: "autoCheck" | "allowDirectApply") {
+    if (!addonManager || policyPending) return;
+    policyPending = true;
+    addonError = null;
+    try {
+      if (preference === "autoCheck") await setAddonAutoCheck(!addonManager.autoCheck);
+      else await setAddonDirectApply(null, !addonManager.allowDirectApply);
+      await refreshAddons();
+    } catch {
+      addonError = "policyFailed";
+    } finally {
+      policyPending = false;
+    }
+  }
+
+  let groupId = $state(untrack(() => initialGroup));
+  $effect(() => { if (!groups.some(group => group.id === groupId)) groupId = "appearance"; });
   let query = $state("");
   let panel = $state<HTMLElement>();
   let field = $state<HTMLInputElement>();
@@ -58,6 +125,9 @@
     groups.find((entry) => entry.id === groupId) ?? groups[0],
   );
   const hits = $derived(searchSettings(query, groups));
+  const addonHits = $derived(contributions.filter(addon => addon.settings.some(field => matchesField(addon, field, query, $addonLocale))));
+  const addonHitCount = $derived(addonHits.reduce((count, addon) => count +
+    addon.settings.filter(field => matchesField(addon, field, query, $addonLocale)).length, 0));
   const searching = $derived(query.trim().length > 0);
 
   function apply(item: SettingItem, value: boolean | string | number) {
@@ -93,8 +163,8 @@
       return;
     }
     if (event.key !== "Tab" || !panel) return;
-    const stops = [...panel.querySelectorAll<HTMLElement>("button, input, select")].filter(
-      (stop) => !(stop as HTMLButtonElement).disabled && stop.tabIndex >= 0,
+    const stops = [...panel.querySelectorAll<HTMLElement>("button, input, select, summary")].filter(
+      (stop) => !(stop as HTMLButtonElement).disabled && stop.tabIndex >= 0 && stop.getClientRects().length > 0,
     );
     if (stops.length < 2) return;
     const first = stops[0];
@@ -127,6 +197,20 @@
       disabled={item.control.locked?.(settings) ?? false}
       onclick={() => apply(item, !on)}
     ><span></span></button>
+  {:else if item.control.kind === "addonPolicy"}
+    {@const preference = item.control.preference}
+    {@const enabled = addonManager?.[preference] ?? (preference === "autoCheck")}
+    <button type="button" role="switch" aria-checked={enabled}
+      aria-label={item.label} aria-describedby={item.hint ? item.id + "-hint" : undefined}
+      class="toggle" class:on={enabled}
+      disabled={!addonManager || addonManager.recovery || policyPending} onclick={() => void toggleAddonPolicy(preference)}><span></span></button>
+    {#if addonManager?.recovery && preference === "allowDirectApply"}
+      <p role="alert" class="hint">{$t("addons.manager.recovery")}</p>
+      <button type="button" class="run" disabled={policyPending} onclick={() => confirmReset = true}>
+        {$t("addons.manager.resetPolicy")}
+      </button>
+    {/if}
+    {#if addonError}<p role="alert" class="hint">{$t(`addons.manager.${addonError}`)}</p>{/if}
   {:else if item.control.kind === "action"}
     {@const control = item.control}
     <button type="button" class="run" onclick={() => control.run(actions)}>{control.buttonLabel}</button>
@@ -172,11 +256,11 @@
 {/snippet}
 
 {#snippet setting(item: SettingItem, where?: string)}
-  <div class="setting" class:stacked={item.control.kind !== "toggle"}>
+  <div class="setting" class:stacked={item.control.kind !== "toggle" && item.control.kind !== "addonPolicy"}>
     <div class="words">
       <span class="name">{item.label}</span>
       {#if where}<span class="where">{where}</span>{/if}
-      {#if item.hint}<span class="hint">{item.hint}</span>{/if}
+      {#if item.hint}<span class="hint" id={item.id + "-hint"}>{item.hint}</span>{/if}
     </div>
     {@render control(item)}
   </div>
@@ -235,7 +319,6 @@
           >
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={entry.icon} /></svg>
             {entry.title}
-            <span class="tally">{entry.items.length}</span>
           </button>
         {/each}
       </div>
@@ -243,12 +326,15 @@
       <div class="pane">
         {#if searching}
           <div class="pane-head">
-            <h2>{$t("counts.results", { count: hits.length })}</h2>
+            <h2>{$t("counts.results", { count: hits.length + addonHitCount })}</h2>
           </div>
-          {#if hits.length}
+          {#if hits.length || addonHitCount}
             <div class="settings">
               {#each hits as hit (hit.item.id)}
                 {@render setting(hit.item, hit.group.title)}
+              {/each}
+              {#each addonHits as addon (addon.addonId)}
+                <AddonSettings {addon} {query} disabled={addonManager?.recovery} />
               {/each}
             </div>
           {:else}
@@ -262,9 +348,14 @@
             {#if group.blurb}<p class="blurb">{group.blurb}</p>{/if}
           </div>
           <div class="settings">
-            {#each group.items as item (item.id)}
+            {#each group.items as item, index (item.id)}
+              {#if item.section && item.section !== group.items[index - 1]?.section}
+                <h3 class="setting-section">{item.section}</h3>
+              {/if}
               {@render setting(item)}
             {/each}
+            {#if group.id === "updates"}{#key settings.includeBetaReleases}<AppUpdates restart={actions.restartForUpdate} beta={settings.includeBetaReleases} />{/key}{/if}
+            {#if group.id === "aiHelper" && settings.aiHelper.enabled}<CodexSettings {settings} {onChange} /><HelperSetup />{/if}
           </div>
         {/if}
       </div>
@@ -272,19 +363,25 @@
   </div>
 </div>
 
+{#if confirmReset}
+  <ConfirmDialog title={$t("addons.manager.resetTitle")} detail={$t("addons.manager.resetDetail")}
+    confirmLabel={$t("addons.manager.resetPolicy")} onCancel={() => confirmReset = false}
+    onConfirm={() => void resetPolicy()} />
+{/if}
+
 <style>
   .select-shell { position: relative; display: inline-flex; width: min(360px, 100%); }
-  .setting-select { width: 100%; height: var(--control); padding: 0 32px 0 10px; border: 0; border-radius: var(--radius); background: var(--wash); color: var(--text); color-scheme: dark; font: inherit; font-size: var(--text-md); appearance: none; }
-  .setting-select:focus-visible { outline: 2px solid var(--blueprint); outline-offset: 1px; }
-  .select-shell svg { position: absolute; top: 50%; right: 8px; width: var(--icon-dense); height: var(--icon-dense); transform: translateY(-50%); fill: none; stroke: var(--muted); stroke-width: var(--stroke-dense); stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+  .setting-select { box-sizing: border-box; width: 100%; height: var(--control); padding: 0 32px 0 12px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); color: var(--text); color-scheme: dark; font: inherit; font-size: var(--text-md); appearance: none; transition: border-color var(--fast) ease; }
+  .setting-select:hover { border-color: var(--edge-strong); }
+  .select-shell svg { position: absolute; top: 50%; right: 10px; width: var(--icon-dense); height: var(--icon-dense); transform: translateY(-50%); fill: none; stroke: var(--muted); stroke-width: var(--stroke-dense); stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
   .panel-scrim {
     position: fixed;
     z-index: 80;
     inset: 0;
     display: grid;
-    background: rgb(10 12 15 / 55%);
+    background: rgb(8 10 12 / 60%);
     place-items: center;
-    animation: scrim-in 140ms ease-out;
+    animation: scrim-in var(--enter) ease-out;
   }
 
   @keyframes scrim-in {
@@ -294,39 +391,41 @@
   .panel {
     display: flex;
     width: min(760px, calc(100vw - 32px));
-    height: min(520px, calc(100vh - 80px));
+    height: min(560px, calc(100vh - 80px));
     flex-direction: column;
     border: 1px solid var(--edge);
     border-radius: var(--radius-lg);
-    background: var(--surround);
-    box-shadow: 0 30px 70px rgb(0 0 0 / 55%);
+    background: var(--panel);
+    box-shadow: var(--shadow-modal);
     color: var(--text);
+    font: var(--text-md) var(--font-ui);
     overflow: hidden;
-    animation: panel-in 150ms cubic-bezier(0.2, 0.7, 0.3, 1);
+    animation: panel-in var(--enter) ease-out;
   }
 
+  .panel:focus { outline: none; }
+
   @keyframes panel-in {
-    from { opacity: 0; transform: translateY(-8px) scale(0.985); }
+    from { opacity: 0; transform: translateY(4px); }
   }
 
   header {
     display: flex;
     flex: none;
     align-items: center;
-    padding: 12px 12px 12px 20px;
+    padding: 16px 16px 16px 24px;
     border-bottom: 1px solid var(--edge-soft);
-    background: var(--panel);
-    gap: 14px;
+    gap: 16px;
   }
 
-  .subject { display: flex; min-width: 0; flex-direction: column; }
-  .subject strong { font-size: var(--text-lg); font-weight: 600; }
+  .subject { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+  .subject strong { font-family: var(--font-display); font-size: var(--text-xl); font-weight: 600; line-height: 1.25; }
 
+  /* "Local preferences" qualifies the title, so it reads after it as a lead line. */
   .eyebrow {
-    color: var(--quiet);
-    font-size: var(--text-xs);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+    order: 1;
+    color: var(--muted);
+    font-size: var(--text-sm);
   }
 
   .search {
@@ -336,16 +435,17 @@
     align-items: center;
     max-width: 300px;
     margin-left: auto;
-    padding: 0 10px;
+    padding: 0 12px;
     border: 1px solid var(--edge);
     border-radius: var(--radius);
-    background: var(--surround);
+    background: var(--inset);
     color: var(--muted);
     gap: 8px;
-    transition: border-color 120ms ease;
+    transition: border-color var(--fast) ease;
   }
 
-  .search:focus-within { border-color: var(--blueprint); }
+  .search:hover { border-color: var(--edge-strong); }
+  .search:focus-within { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 
   .search svg {
     width: var(--icon-dense);
@@ -380,9 +480,11 @@
     color: var(--muted);
     cursor: pointer;
     place-items: center;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
   .close:hover { background: var(--wash); color: var(--text); }
+  .close:active { background: var(--wash-strong); }
 
   .close svg {
     width: var(--icon-dense);
@@ -397,20 +499,21 @@
 
   .nav {
     display: flex;
-    width: 190px;
+    width: 200px;
     flex: none;
     flex-direction: column;
     padding: 12px;
     border-right: 1px solid var(--edge-soft);
-    gap: 2px;
+    gap: 4px;
     overflow-y: auto;
   }
 
   .nav button {
     display: flex;
     height: var(--control);
+    flex: none;
     align-items: center;
-    padding: 0 10px;
+    padding: 0 12px;
     border: 0;
     border-radius: var(--radius);
     background: transparent;
@@ -419,12 +522,13 @@
     font-size: var(--text-md);
     text-align: left;
     cursor: pointer;
-    gap: 10px;
-    transition: background 120ms ease, color 120ms ease;
+    gap: 12px;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
   .nav button:hover { background: var(--wash); color: var(--text); }
-  .nav button.on { background: rgb(76 141 240 / 16%); color: var(--text); }
+  .nav button:active { background: var(--wash-strong); }
+  .nav button.on { background: var(--accent-fill); color: var(--text); font-weight: 600; }
 
   .nav svg {
     width: var(--icon-dense);
@@ -437,30 +541,25 @@
     stroke-width: var(--stroke-dense);
   }
 
-  .tally {
-    margin-left: auto;
-    color: var(--quiet);
-    font-size: var(--text-xs);
-    font-variant-numeric: tabular-nums;
-  }
-
   .pane {
     min-width: 0;
     flex: 1;
-    padding: 18px 22px 22px;
+    padding: 24px;
     overflow-y: auto;
   }
 
-  .pane-head { margin-bottom: 14px; }
-  .pane-head h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; }
+  .pane-head { margin-bottom: 12px; }
+  .pane-head h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; line-height: 1.25; }
 
   .blurb {
-    max-width: 46ch;
-    margin: 6px 0 0;
+    max-width: 52ch;
+    margin: 4px 0 0;
     color: var(--muted);
     font-size: var(--text-sm);
-    line-height: 1.5;
+    line-height: 1.4;
   }
+
+  .setting-section { margin: 24px 0 12px; color: var(--text); font-size: var(--text-md); font-weight: 600; }
 
   .settings { display: flex; flex-direction: column; }
 
@@ -468,25 +567,23 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    padding: 14px 0;
+    padding: 12px 0;
     border-top: 1px solid var(--edge-soft);
-    gap: 20px;
+    gap: 24px;
   }
 
   .setting:first-child { border-top: 0; padding-top: 4px; }
 
   /* A slider or a set of choices needs the width, so it drops under its own label rather than
      fighting the description for the same line. */
-  .setting.stacked { flex-direction: column; gap: 10px; }
+  .setting.stacked { flex-direction: column; gap: 12px; }
 
-  .words { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
-  .name { font-size: var(--text-md); }
+  .words { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+  .name { font-size: var(--text-md); line-height: 1.4; }
 
   .where {
     color: var(--quiet);
-    font-size: var(--text-xs);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    font-size: var(--text-sm);
     order: -1;
   }
 
@@ -494,79 +591,84 @@
     max-width: 52ch;
     color: var(--muted);
     font-size: var(--text-sm);
-    line-height: 1.5;
+    line-height: 1.4;
   }
 
   .toggle {
     position: relative;
-    width: 38px;
-    height: 22px;
+    width: 34px;
+    height: 20px;
     flex: none;
     margin-top: 2px;
     padding: 0;
     border: 0;
     border-radius: var(--radius-pill);
-    background: rgb(255 255 255 / 14%);
+    background: var(--track);
     cursor: pointer;
-    transition: background 140ms ease;
+    transition: background var(--fast) ease;
   }
 
   .toggle span {
     position: absolute;
     top: 3px;
     left: 3px;
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
     background: var(--muted);
-    transition: transform 140ms ease, background 140ms ease;
+    transition: transform var(--fast) ease, background var(--fast) ease;
   }
 
   .toggle.on { background: var(--blueprint); }
-  .toggle.on span { background: #fff; transform: translateX(16px); }
-  .toggle:disabled { opacity: 0.45; cursor: not-allowed; }
+  .toggle.on span { background: var(--text); transform: translateX(14px); }
+  .toggle:disabled { opacity: var(--disabled); cursor: default; }
 
   /* An action is not a preference, so it is a button rather than a control with a state. */
-  .run {
+  .settings :global(.run) {
     height: var(--control);
     flex: none;
-    padding: 0 14px;
-    border: 1px solid var(--edge);
+    padding: 0 16px;
+    border: 0;
     border-radius: var(--radius);
-    background: transparent;
+    background: var(--wash);
     color: var(--text);
     font: inherit;
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
     cursor: pointer;
-    transition: background 120ms ease;
+    transition: background var(--fast) ease;
   }
 
-  .run:hover { background: var(--wash); }
+  .settings :global(.run:hover:not(:disabled)) { background: var(--wash-strong); }
+  .settings :global(.run:disabled) { opacity: var(--disabled); cursor: default; }
 
   .choices {
     display: flex;
     align-self: stretch;
-    gap: 6px;
+    padding: 3px;
+    border: 1px solid var(--edge);
+    border-radius: var(--radius);
+    background: var(--inset);
+    gap: 3px;
   }
 
   .choice {
-    height: var(--control);
+    height: calc(var(--control) - 8px);
     flex: 1;
-    border: 1px solid var(--edge);
+    border: 0;
     border-radius: var(--radius);
     background: transparent;
     color: var(--muted);
     font: inherit;
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
     cursor: pointer;
-    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
   .choice:hover { background: var(--wash); color: var(--text); }
 
   .choice.on {
-    border-color: rgb(76 141 240 / 60%);
-    background: rgb(76 141 240 / 16%);
+    background: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
     color: var(--text);
   }
 
@@ -580,7 +682,7 @@
   .slider input { flex: 1; accent-color: var(--blueprint); }
 
   .slider output {
-    min-width: 46px;
+    min-width: 48px;
     color: var(--text);
     font-size: var(--text-sm);
     font-variant-numeric: tabular-nums;
@@ -588,30 +690,38 @@
   }
 
   .empty {
-    max-width: 46ch;
+    max-width: 52ch;
     margin: 0;
     color: var(--muted);
-    font-size: var(--text-sm);
-    line-height: 1.55;
+    font-size: var(--text-md);
+    line-height: 1.4;
   }
 
-  button:focus-visible,
-  .search:focus-within { outline: none; }
+  button:focus-visible { outline: none; }
 
   .nav button:focus-visible,
   .close:focus-visible,
   .toggle:focus-visible,
   .choice:focus-visible,
-  .run:focus-visible,
+  .settings :global(.run:focus-visible),
+  .setting-select:focus-visible,
   .slider input:focus-visible {
     outline: 2px solid var(--blueprint-light);
-    outline-offset: 1px;
+    outline-offset: 2px;
   }
 
+  /* Inside the clipped, scrolling nav the ring sits inside the row. */
+  .nav button:focus-visible { outline-offset: -2px; }
+
   @media (max-width: 720px) {
-    .nav { width: 62px; padding: 12px 8px; }
+    .nav { width: 64px; padding: 12px 8px; }
     .nav button { justify-content: center; padding: 0; font-size: 0; gap: 0; }
-    .nav .tally { display: none; }
+  }
+
+  @media (pointer: coarse) {
+    .nav button, .close, .run, .search, .setting-select { min-height: var(--control-touch); }
+    .close { min-width: var(--control-touch); }
+    .choice { min-height: calc(var(--control-touch) - 8px); }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -622,6 +732,9 @@
     .toggle span,
     .nav button,
     .choice,
+    .close,
+    .run,
+    .setting-select,
     .search { transition: none; }
   }
 </style>

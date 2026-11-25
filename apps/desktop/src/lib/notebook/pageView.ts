@@ -1,12 +1,12 @@
 import type { TypstCompileResult } from "../editor/typst";
-import type { InkLayer, PageObject, ShapeGeometry, ShapeStyle, Stroke } from "../model";
+import type { ObjectFields, InkLayer, PageObject, ShapeGeometry, ShapeStyle, Stroke } from "../model";
 
 // One view model for a page, shared by every renderer. Before this existed, the active page and
 // its neighbours each derived objects, sources, and asset URLs their own way, which is what let
 // the two paths drift apart. Deriving both from here keeps one page looking the same whether it
 // is being edited or merely displayed.
 
-export type BlockView = {
+export type BlockView = Partial<Pick<ObjectFields, "addonData" | "groupId">> & {
   id: string;
   path: string;
   source: string;
@@ -35,7 +35,7 @@ export type PageTypstView = {
   readingOrder: number;
 };
 
-export type ImageView = {
+export type ImageView = Partial<Pick<ObjectFields, "addonData" | "groupId">> & {
   id: string;
   path: string;
   url: string;
@@ -50,7 +50,7 @@ export type ImageView = {
   readingOrder: number;
 };
 
-export type ShapeView = {
+export type ShapeView = Partial<Pick<ObjectFields, "addonData" | "ports" | "groupId">> & {
   id: string;
   x: number;
   y: number;
@@ -95,6 +95,7 @@ export function blockViewsFromSnapshot(snapshot: SnapshotLike): BlockView[] {
     .map((object) => ({
       id: object.id,
       path: object.sourcePath,
+      ...(object.addonData !== undefined ? { addonData: object.addonData } : {}),
       source: decode(
         snapshot.blocks.find((file) => file.path === object.sourcePath),
       ),
@@ -142,6 +143,7 @@ export function imageViewsFromSnapshot(
         {
           id: object.id,
           path: object.sourcePath,
+          ...(object.addonData !== undefined ? { addonData: object.addonData } : {}),
           url,
           alt: object.altText,
           x: object.x,
@@ -171,6 +173,8 @@ export function shapeViewsFromSnapshot(snapshot: SnapshotLike): ShapeView[] {
       scale: object.scale,
       zIndex: object.zIndex,
       readingOrder: object.readingOrder,
+      ...(object.addonData !== undefined ? { addonData: object.addonData } : {}),
+      ...(object.ports !== undefined ? { ports: object.ports } : {}),
       geometry: object.geometry,
       style: object.style,
     }));

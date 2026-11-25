@@ -22,6 +22,13 @@ function messages(value: object, prefix = ""): Record<string, string> {
 }
 
 describe("bundled English and German interface", () => {
+  it("labels a single focus line and a range in both languages", () => {
+    for (const [language, single, range] of [["en", "Line 3", "Lines 3\u20135"], ["de", "Zeile 3", "Zeilen 3\u20135"]]) {
+      setLanguage(language);
+      expect(translate("aiEntry.lines", { count: 1, from: 3, to: 3 })).toBe(single);
+      expect(translate("aiEntry.lines", { count: 3, from: 3, to: 5 })).toBe(range);
+    }
+  });
   it("ships matching, non-empty messages and interpolation placeholders", () => {
     const english = messages(en), german = messages(de);
     expect(Object.keys(german).sort()).toEqual(Object.keys(english).sort());
@@ -90,10 +97,20 @@ describe("bundled English and German interface", () => {
     if (smoothing.control.kind === "slider") expect(smoothing.control.format(0.2)).toBe("0,20");
   });
 
+  it("finds Browse addons and the global policies in both languages", () => {
+    for (const language of ["en", "de"] as const) {
+      setLanguage(language);
+      const groups = settingGroups(get(t));
+      expect(searchSettings(translate("addons.store.browse"), groups).map(hit => hit.item.id)).toContain("addons:browse");
+      expect(searchSettings(translate("addons.manager.global"), groups).map(hit => hit.item.id)).toContain("addons:direct-apply");
+      expect(searchSettings(translate("addons.manager.autoCheck"), groups).map(hit => hit.item.id)).toContain("addons:auto-check");
+    }
+  });
+
   it("renders German semantic controls and escapes user-provided details", () => {
     setLanguage("de");
     const { body } = render(SettingsPanel, { props: {
-      settings: { ...DEFAULT_SETTINGS, uiLanguage: "de" }, actions: { openMetrics() {} }, onChange() {}, onClose() {},
+      settings: { ...DEFAULT_SETTINGS, uiLanguage: "de" }, actions: { openMetrics() {}, changePython() {} }, onChange() {}, onClose() {},
     } });
     expect(body).toContain('aria-label="Einstellungen"');
     expect(body).toContain('role="radio"');

@@ -11,7 +11,14 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
+static SETTINGS_WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(crate) static PAGE_WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 const MAX_SETTINGS_BYTES: usize = 64 * 1024;
+// Page workers share this file with session/pin/move updates. Serialize the
+// entire read/modify/write so an unrelated update cannot restore an older page.
+static RECENTS_IO: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 const MAX_RECENTS: usize = 30;
 
 /// The frontend may have an unsaved session choice. Only supported language IDs select copy.
@@ -52,6 +59,8 @@ impl Default for LassoTargets {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
+    pub theme_id: String,
+    pub ai_helper: crate::helper::HelperSettings,
     pub ui_language: String,
     pub inline_text_font: String,
     pub pen_presets: Vec<PenPreset>,
@@ -87,6 +96,8 @@ pub struct AppSettings {
     /// Gap factor for the Shapes tool's pattern.
     pub shape_pattern_spacing: f64,
     pub shape_constrain: bool,
+    /// Line ends and rectangle corners drawn or dragged with the Shapes tool meet nearby ends.
+    pub shape_end_snap: bool,
     /// Pen shortcut: pause at the end of a deliberate mark to promote it into a shape.
     pub draw_and_hold_shapes: bool,
     pub held_line_minimum_pt: f64,
@@ -110,6 +121,9 @@ pub struct AppSettings {
     /// Allow downloading Typst Universe packages on a cache miss. Cached packages
     /// keep working either way.
     pub remote_packages: bool,
+    pub include_beta_releases: bool,
+    pub auto_check_app_releases: bool,
+    pub python_package_downloads: bool,
     /// Scrolling on past the last page, against resistance, adds a page in the notebook paper.
     pub pull_to_add_page: bool,
     /// Whether one finger draws with the active tool. Off keeps touch for navigation only.
@@ -128,6 +142,7 @@ pub struct AppSettings {
     pub eraser_mode: String,
     /// Palette tiles the writer has taken off the bar. Their shortcuts keep working.
     pub hidden_tools: Vec<String>,
+    pub addon_stroke_slots: std::collections::BTreeMap<String, AddonStrokeSlot>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -179,12 +194,29 @@ const PALETTE_TOOLS: [&str; 8] = [
     "typst-block",
 ];
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddonStrokeSlot {
+    pub style: goodtype_core::ShapeStyle,
+    pub widths: Vec<f64>,
+    pub colors: Vec<String>,
+}
+
+fn addon_tool_id(id: &str) -> bool {
+    id.strip_prefix("addon:")
+        .and_then(|id| id.split_once('/'))
+        .is_some_and(|(addon, tool)| {
+            crate::addons::valid_addon_identifier(addon)
+                && crate::addons::valid_addon_identifier(tool)
+        })
+}
+
 /// Keeps known tile ids once each, and never lets both pens leave the bar: a palette with no pen
 /// on it has nothing left to write with by tap.
 fn sanitize_hidden_tools(hidden: Vec<String>) -> Vec<String> {
     let mut kept: Vec<String> = Vec::new();
     for id in hidden {
-        if PALETTE_TOOLS.contains(&id.as_str()) && !kept.contains(&id) {
+        if (PALETTE_TOOLS.contains(&id.as_str()) || addon_tool_id(&id)) && !kept.contains(&id) {
             kept.push(id);
         }
     }
@@ -261,6 +293,7 @@ impl Default for AppSettings {
             shape_pattern: default_pen_pattern(),
             shape_pattern_spacing: 1.0,
             shape_constrain: false,
+            shape_end_snap: true,
             draw_and_hold_shapes: true,
             held_line_minimum_pt: 6.0,
             history_corner: "auto".into(),
@@ -279,7 +312,12 @@ impl Default for AppSettings {
             touch_glide: 2.0,
             page_text_baseline_grid: true,
             page_text_line_wrap: true,
+            ai_helper: Default::default(),
+            theme_id: String::new(),
             remote_packages: true,
+            include_beta_releases: false,
+            auto_check_app_releases: false,
+            python_package_downloads: true,
             pull_to_add_page: true,
             draw_with_finger: false,
             touch_history: true,
@@ -289,6 +327,7 @@ impl Default for AppSettings {
             eraser_reach: "everything".into(),
             eraser_mode: "stroke".into(),
             hidden_tools: Vec::new(),
+            addon_stroke_slots: Default::default(),
         }
     }
 }
@@ -358,6 +397,13 @@ fn sanitize_widths(widths: Vec<f64>, fallback: &[f64], minimum: f64, maximum: f6
 /// Settings come from an editable file, so every numeric field is clamped to the documented
 /// interaction bounds before it can reach the pen pipeline.
 fn sanitize(mut settings: AppSettings) -> AppSettings {
+    if settings.theme_id.len() > 97
+        || !settings.theme_id.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-')
+        })
+    {
+        settings.theme_id.clear();
+    }
     settings.inline_text_font = settings.inline_text_font.trim().to_owned();
     if settings.inline_text_font.len() > 200
         || settings.inline_text_font.chars().any(char::is_control)
@@ -500,6 +546,19 @@ fn sanitize(mut settings: AppSettings) -> AppSettings {
         settings.eraser_mode = defaults.eraser_mode;
     }
     settings.hidden_tools = sanitize_hidden_tools(settings.hidden_tools);
+    settings.addon_stroke_slots.retain(|id, slot| {
+        slot.widths = sanitize_widths(
+            std::mem::take(&mut slot.widths),
+            &defaults.pen_widths,
+            0.2,
+            12.0,
+        );
+        slot.colors = sanitize_swatches(std::mem::take(&mut slot.colors), &defaults.pen_swatches);
+        addon_tool_id(id)
+            && valid_color(&slot.style.stroke_color)
+            && slot.style.validate().is_ok()
+            && slot.style.fill_color.is_none()
+    });
     settings
 }
 
@@ -525,7 +584,7 @@ pub struct RecentNotebook {
     pub last_page_id: Option<String>,
 }
 
-fn config_file(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
+pub(crate) fn config_file(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
     let directory = app
         .path()
         .app_config_dir()
@@ -560,15 +619,48 @@ pub fn load_app_settings(app: tauri::AppHandle) -> Result<AppSettings, String> {
 }
 
 #[tauri::command]
-pub fn save_app_settings(
+pub async fn save_app_settings(
     app: tauri::AppHandle,
     packages: tauri::State<'_, RemotePackages>,
+    python: tauri::State<'_, crate::computation::RuntimeState>,
+    settings: AppSettings,
+) -> Result<AppSettings, String> {
+    let _ = (packages, python);
+    let permit = SETTINGS_WRITES.lock().await;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _permit = permit;
+        let packages = app.state::<RemotePackages>();
+        let python = app.state::<crate::computation::RuntimeState>();
+        let settings = persist_settings(
+            &config_file(&app, "settings.json")?,
+            &packages,
+            &python.downloads,
+            settings,
+        )?;
+        app.state::<crate::helper::Helper>()
+            .apply(&app, settings.ai_helper.clone())?;
+        Ok(settings)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+// Persistence and policy publication form one serialized operation. A failed write
+// must leave both in-memory download policies at their last confirmed values.
+fn persist_settings(
+    path: &Path,
+    packages: &RemotePackages,
+    downloads: &std::sync::atomic::AtomicBool,
     settings: AppSettings,
 ) -> Result<AppSettings, String> {
     let settings = sanitize(settings);
-    write_config(&app, "settings.json", &settings)?;
-    // Keep the compile path's in-memory policy in step with what was just stored.
+    crate::store::write_json(path, &settings, MAX_SETTINGS_BYTES)
+        .map_err(|error| format!("settings.json: {error}"))?;
     packages.set(settings.remote_packages);
+    downloads.store(
+        settings.python_package_downloads,
+        std::sync::atomic::Ordering::SeqCst,
+    );
     Ok(settings)
 }
 
@@ -646,6 +738,7 @@ pub fn relocate_recent_roots(
     app: &tauri::AppHandle,
     moves: &[(PathBuf, PathBuf)],
 ) -> Result<(), String> {
+    let _recents_io = RECENTS_IO.lock().map_err(|error| error.to_string())?;
     let mut recents = read_config::<RecentNotebooks>(app, "recents.json")?;
     let mut changed = false;
     for entry in &mut recents.entries {
@@ -677,6 +770,7 @@ pub fn record_recent_session(
     roots: Vec<String>,
     active_root: Option<String>,
 ) -> Result<(), String> {
+    let _recents_io = RECENTS_IO.lock().map_err(|error| error.to_string())?;
     let mut recents = read_config::<RecentNotebooks>(app, "recents.json")?;
     let mut open_roots = Vec::new();
     for root in roots {
@@ -691,6 +785,7 @@ pub fn record_recent_session(
 }
 
 pub fn clear_active_recent(app: &tauri::AppHandle, root: &str) -> Result<(), String> {
+    let _recents_io = RECENTS_IO.lock().map_err(|error| error.to_string())?;
     let mut recents = read_config::<RecentNotebooks>(app, "recents.json")?;
     let before = recents.open_roots.len();
     recents.open_roots.retain(|known| known != root);
@@ -710,6 +805,7 @@ pub fn record_recent(
     title: &str,
     opened_at: &str,
 ) -> Result<(), String> {
+    let _recents_io = RECENTS_IO.lock().map_err(|error| error.to_string())?;
     let mut recents = read_config::<RecentNotebooks>(app, "recents.json")?;
     let pinned = recents
         .entries
@@ -747,6 +843,7 @@ pub fn record_recent(
 }
 
 pub fn record_recent_page(app: &tauri::AppHandle, root: &str, page_id: &str) -> Result<(), String> {
+    let _recents_io = RECENTS_IO.lock().map_err(|error| error.to_string())?;
     if page_id.is_empty() || page_id.len() > 128 {
         return Err("page id must be present and bounded".to_owned());
     }
@@ -766,6 +863,7 @@ pub fn set_notebook_pinned(
     root: String,
     pinned: bool,
 ) -> Result<Vec<RecentNotebook>, String> {
+    let _recents_io = RECENTS_IO.lock().map_err(|error| error.to_string())?;
     let mut recents = read_config::<RecentNotebooks>(&app, "recents.json")?;
     for entry in &mut recents.entries {
         if entry.root == root {
@@ -781,6 +879,7 @@ pub fn remove_recent_notebook(
     app: tauri::AppHandle,
     root: String,
 ) -> Result<Vec<RecentNotebook>, String> {
+    let _recents_io = RECENTS_IO.lock().map_err(|error| error.to_string())?;
     let mut recents = read_config::<RecentNotebooks>(&app, "recents.json")?;
     recents.entries.retain(|entry| entry.root != root);
     recents.open_roots.retain(|known| known != &root);
@@ -815,15 +914,68 @@ impl RemotePackages {
     }
 }
 
-/// Seed the in-memory policy from the stored settings at startup.
-pub fn seed_remote_packages(app: &tauri::AppHandle, policy: &RemotePackages) {
-    if let Ok(settings) = read_config::<AppSettings>(app, "settings.json") {
-        policy.set(sanitize(settings).remote_packages);
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn failed_settings_write_keeps_both_policies() {
+        let temporary = tempfile::tempdir().unwrap();
+        let policy = super::RemotePackages::default();
+        policy.set(false);
+        let downloads = std::sync::atomic::AtomicBool::new(false);
+        let settings = super::AppSettings {
+            remote_packages: true,
+            python_package_downloads: true,
+            ..Default::default()
+        };
+        // A directory cannot be replaced by the atomic file writer.
+        assert!(super::persist_settings(temporary.path(), &policy, &downloads, settings).is_err());
+        assert!(!policy.allowed());
+        assert!(!downloads.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn settings_workers_commit_in_admission_order() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("settings.json");
+        let first = super::SETTINGS_WRITES.lock().await;
+        let next_path = path.clone();
+        let next = tokio::spawn(async move {
+            let permit = super::SETTINGS_WRITES.lock().await;
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                super::persist_settings(
+                    &next_path,
+                    &super::RemotePackages::default(),
+                    &std::sync::atomic::AtomicBool::new(false),
+                    super::AppSettings {
+                        ui_language: "de".into(),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            })
+            .await
+            .unwrap();
+        });
+        let first_path = path.clone();
+        tokio::task::spawn_blocking(move || {
+            let _permit = first;
+            super::persist_settings(
+                &first_path,
+                &super::RemotePackages::default(),
+                &std::sync::atomic::AtomicBool::new(false),
+                super::AppSettings::default(),
+            )
+            .unwrap();
+        })
+        .await
+        .unwrap();
+        next.await.unwrap();
+        let saved: super::AppSettings =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(saved.ui_language, "de");
+    }
+
     #[test]
     fn ui_language_defaults_normalizes_and_round_trips_without_resetting_other_preferences() {
         let legacy: super::AppSettings = serde_json::from_str(r#"{"touchGlide":1.5}"#).unwrap();
@@ -842,6 +994,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn legacy_settings_default_helper_off_and_round_trip() {
+        let legacy: super::AppSettings = serde_json::from_str(r#"{"touchGlide":1.5}"#).unwrap();
+        assert!(!legacy.ai_helper.enabled);
+        assert!(legacy.ai_helper.web_search);
+        assert_eq!(legacy.ai_helper.usage, crate::helper::Usage::Balanced);
+        let loaded: super::AppSettings =
+            serde_json::from_str(&serde_json::to_string(&legacy).unwrap()).unwrap();
+        assert!(!loaded.ai_helper.enabled);
+        assert_eq!(loaded.touch_glide, 1.5);
+    }
+
+    #[test]
+    fn legacy_settings_turn_shape_end_snapping_on() {
+        let legacy: super::AppSettings =
+            serde_json::from_str(r#"{"shapeConstrain":true}"#).unwrap();
+        assert!(legacy.shape_end_snap);
+        let off: super::AppSettings = serde_json::from_str(r#"{"shapeEndSnap":false}"#).unwrap();
+        assert!(!super::sanitize(off).shape_end_snap);
+    }
     #[test]
     fn native_labels_accept_only_supported_language_ids() {
         assert_eq!(super::dialog_label(Some("de"), "Open", "Öffnen"), "Öffnen");
@@ -898,6 +1070,31 @@ mod tests {
         assert_eq!(settings.eraser_mode, "stroke");
         assert!(settings.hidden_tools.is_empty());
         assert!(!settings.highlighter_taper);
+    }
+
+    #[test]
+    fn addon_stroke_slot_and_visibility_survive_device_settings_round_trip() {
+        let settings: AppSettings = serde_json::from_value(serde_json::json!({
+            "hiddenTools": ["addon:connectors/connect", "addon:../connect"],
+            "addonStrokeSlots": {
+                "addon:connectors/connect": {
+                    "style": {"strokeColor": "#123abc", "strokeWidthPt": 2.0,
+                        "opacity": 0.7, "pattern": "dashed", "patternSpacing": 1.5},
+                    "widths": [1.0, 2.0], "colors": ["#123abc"]
+                }
+            }
+        }))
+        .unwrap();
+        let serialized = serde_json::to_value(sanitize(settings)).unwrap();
+        assert_eq!(
+            serialized["hiddenTools"],
+            serde_json::json!(["addon:connectors/connect"])
+        );
+        let style = &serialized["addonStrokeSlots"]["addon:connectors/connect"]["style"];
+        assert_eq!(style["strokeColor"], "#123abc");
+        assert_eq!(style["patternSpacing"], 1.5);
+        assert_eq!(style["opacity"], 0.7);
+        assert!(AppSettings::default().addon_stroke_slots.is_empty());
     }
 
     #[test]

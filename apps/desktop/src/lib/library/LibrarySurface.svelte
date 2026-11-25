@@ -7,9 +7,9 @@
   import NotebookSetup from "./NotebookSetup.svelte";
   import type { NotebookSetup as NotebookSetupValue } from "../page/presets";
   import NotebookCover from "./NotebookCover.svelte";
+  import { importAddons, type ImportAddon } from "../ipc/addons";
   import ImportPanel from "./ImportPanel.svelte";
   import {
-    IMPORTERS,
     allImporterStatus,
     importerBusy,
     type ImporterId,
@@ -54,6 +54,7 @@
     onStatus,
     showNotebookSetup = false,
     onSettings,
+    onAddons,
   }: {
     tauriAvailable: boolean;
     coverRevision?: number;
@@ -77,6 +78,7 @@
     onLocationChange?: (location: ShelfLocation) => void;
     onStatus: (message: UiText) => void;
     showNotebookSetup?: boolean;
+    onAddons?: () => void;
     onSettings?: () => void;
   } = $props();
 
@@ -123,22 +125,24 @@
   let menu = $state<"new" | "sort" | null>(null);
   let entryMenu = $state<string | null>(null);
   let prompt = $state<Prompt | null>(null);
-  /// The import panel (Goodnotes or OneNote). Jobs run in Rust, so it reopens on its own when the
+  /// The import panel. Jobs run in Rust, so it reopens on its own when the
   /// Library comes back while an import is running or has a result waiting.
   let importing = $state(false);
   /// The source the panel opens on: the one with a job, else the one used last this session.
-  let importTool = $state<ImporterId>("goodnotes");
+  let importTool = $state<ImporterId>("");
+  let importSources = $state.raw<ImportAddon[]>([]);
   /// While the panel is closed: a job still running, or a finished one with a result to read.
   let importJob = $state<"running" | "done" | null>(null);
   let importPoll: ReturnType<typeof setInterval> | undefined;
 
   /** The source whose job needs attention: running first, then a result waiting to be read. */
   function sourceWithJob(statuses: Record<ImporterId, ImporterStatus>): ImporterId | null {
+    const ids = Object.keys(statuses);
     const kind = (id: ImporterId) => statuses[id].activity.kind;
     return (
-      IMPORTERS.find((id) => importerBusy(statuses[id].activity)) ??
-      IMPORTERS.find((id) => kind(id) === "finished" || kind(id) === "importFailed") ??
-      IMPORTERS.find((id) => kind(id) !== "idle") ??
+      ids.find((id) => importerBusy(statuses[id].activity)) ??
+      ids.find((id) => kind(id) === "finished" || kind(id) === "importFailed") ??
+      ids.find((id) => kind(id) !== "idle") ??
       null
     );
   }
@@ -151,10 +155,21 @@
   async function openImport() {
     stopImportPoll();
     try {
-      importTool = sourceWithJob(await allImporterStatus()) ?? importTool;
+      importSources = await importAddons();
+    } catch (error) {
+      failure = message(error);
+      return;
+    }
+    try {
+      const statuses = await allImporterStatus();
+      importSources = importSources.filter(({ id }) => !statuses[id]?.disabled);
+      importTool = sourceWithJob(statuses) ?? importTool;
     } catch {
       // The panel reports a status it cannot read itself.
     }
+    const first = importSources[0];
+    if (!first) return;
+    if (!importSources.some(({ id }) => id === importTool)) importTool = first.id;
     importJob = null;
     importing = true;
   }
@@ -171,12 +186,12 @@
     const check = async () => {
       try {
         const statuses = await allImporterStatus();
-        if (IMPORTERS.some((id) => importerBusy(statuses[id].activity))) {
+        if (Object.values(statuses).some(({ activity }) => importerBusy(activity))) {
           importJob = "running";
           return;
         }
         stopImportPoll();
-        const kinds = IMPORTERS.map((id) => statuses[id].activity.kind);
+        const kinds = Object.values(statuses).map(({ activity }) => activity.kind);
         if (kinds.includes("finished") || kinds.includes("importFailed")) {
           if (importJob === "running") void reload();
           importJob = "done";
@@ -224,9 +239,10 @@
       if (libraryRoot) {
         await reload();
         void allImporterStatus()
-          .then((statuses) => {
+          .then(async (statuses) => {
             const source = sourceWithJob(statuses);
             if (source) {
+              importSources = (await importAddons()).filter(({ id }) => !statuses[id]?.disabled);
               importTool = source;
               importing = true;
             }
@@ -585,6 +601,11 @@
     return entryPath.split("/").at(-1) ?? entryPath;
   }
 
+  /** The library folder's own name, from an OS path in either separator style. */
+  function folderName(root: string): string {
+    return root.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || root;
+  }
+
   function togglePicked(entryPath: string) {
     const current = picked ?? [];
     picked = current.includes(entryPath)
@@ -704,14 +725,6 @@
     {/if}
 
     {#if libraryRoot}
-      <div class="where">
-        <div class="where-text">
-          <div class="overline">{$t("library.library")}</div>
-          <div class="where-path" title={libraryRoot}>{libraryRoot}</div>
-        </div>
-        <button type="button" class="link" disabled={busy} onclick={chooseLibrary}>{$t("library.change")}</button>
-      </div>
-
       <nav class="views">
         <button
           type="button"
@@ -737,7 +750,6 @@
             <path d="m12 4 2.4 5 5.6.7-4 3.9 1 5.4-5-2.7-5 2.7 1-5.4-4-3.9 5.6-.7L12 4Z" />
           </svg>
           <span class="grow">{$t("library.favourites")}</span>
-          {#if favourites.length > 0}<span class="tally">{favourites.length}</span>{/if}
         </button>
       </nav>
     {/if}
@@ -748,17 +760,41 @@
          you would have to put the pen down for. Jumping between branches is what Favoriten and
          search are for, and moving is a drag onto a crumb or a folder tile. -->
 
-    {#if onSettings}
+    {#if onSettings || onAddons || libraryRoot}
       <div class="rail-footer">
-        <button type="button" class="settings-link" aria-haspopup="dialog"
-          aria-label={$t("library.settings")} title={$t("library.settings")} onclick={onSettings}>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M10 3h4l.5 2.5 1.7 1 2.4-.8 2 3.5-1.9 1.7v2.2l1.9 1.7-2 3.5-2.4-.8-1.7 1L14 21h-4l-.5-2.5-1.7-1-2.4.8-2-3.5 1.9-1.7v-2.2L3.4 9.2l2-3.5 2.4.8 1.7-1z" />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-          <span>{$t("library.settings")}</span>
-          <svg class="settings-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
-        </button>
+        {#if libraryRoot}
+          <!-- Where the shelf reads from: the folder's own name, with the full path on hover. Rarely
+               changed, so it sits with the other rarely used things rather than above the views. -->
+          <div class="where" title={libraryRoot}>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4l2 2.5h8A1.5 1.5 0 0 1 20.5 10v8A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18V7.5Z" />
+            </svg>
+            <span class="where-name">{folderName(libraryRoot)}</span>
+            <button
+              type="button"
+              class="link"
+              aria-label={$t("library.changeLibraryFolder")}
+              title={$t("library.changeLibraryFolder")}
+              disabled={busy}
+              onclick={chooseLibrary}
+            >{$t("library.change")}</button>
+          </div>
+        {/if}
+        {#if onAddons}
+          <button type="button" class="settings-link" onclick={onAddons}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 7 8-4 8 4v10l-8 4-8-4zM4 7l8 4 8-4m-8 4v10m-4-16 8 4" /></svg>
+            <span>{$t("addons.manager.title")}</span>
+          </button>
+        {/if}
+        {#if onSettings}
+          <button type="button" class="settings-link" aria-haspopup="dialog" onclick={onSettings}>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M10 3h4l.5 2.5 1.7 1 2.4-.8 2 3.5-1.9 1.7v2.2l1.9 1.7-2 3.5-2.4-.8-1.7 1L14 21h-4l-.5-2.5-1.7-1-2.4.8-2-3.5 1.9-1.7v-2.2L3.4 9.2l2-3.5 2.4.8 1.7-1z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            <span>{$t("library.settings")}</span>
+          </button>
+        {/if}
       </div>
     {/if}
   </aside>
@@ -900,11 +936,9 @@
         <p class="notice">{$t("library.theLibraryNeedsTheDesktopAppTo")}</p>
       {:else if !libraryRoot}
         <div class="first-run">
-          <div class="first-run-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
+          <svg class="first-run-mark" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4l2 2.5h8A1.5 1.5 0 0 1 20.5 10v8A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18V7.5Z" />
-            </svg>
-          </div>
+          </svg>
           <h1>{$t("library.whereShouldYourNotebooksLive")}</h1>
           <p>
             {$t("library.chooseTheFolderGoodtypeShowsYourNotebooks")}
@@ -932,11 +966,7 @@
         </div>
       {:else}
         {#if shelf.folders.length > 0}
-          <div class="band">
-            <span class="band-label">{$t("library.folders")}</span>
-            <span class="band-count">{shelf.folders.length}</span>
-            <span class="band-rule"></span>
-          </div>
+          <h2 class="band">{$t("library.folders")}</h2>
           <div class="grid folders">
             {#each shelf.folders as folder (folder.path)}
               <div
@@ -972,10 +1002,11 @@
                       stroke-width="1.5"
                     />
                   </svg>
-                  <span class="grow"></span>
-                  <span class="tile-name">{folder.name}</span>
-                  <span class="tile-meta">
-                    {isPointerTarget("folder", folder.path) ? $t("library.dropHere") : items(folder.childCount)}
+                  <span class="tile-text">
+                    <span class="tile-name">{#if starred.has(folder.path)}<svg class="star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l2.4 5 5.6.7-4 3.9 1 5.4-5-2.7-5 2.7 1-5.4-4-3.9 5.6-.7L12 4z" /></svg>{/if}<span class="name-text">{folder.name}</span></span>
+                    <span class="tile-meta">
+                      {isPointerTarget("folder", folder.path) ? $t("library.dropHere") : items(folder.childCount)}
+                    </span>
                   </span>
                 </button>
                 {@render tileMarks(folder)}
@@ -985,11 +1016,7 @@
         {/if}
 
         {#if shelf.notebooks.length > 0}
-          <div class="band">
-            <span class="band-label">{$t("library.notebooks")}</span>
-            <span class="band-count">{shelf.notebooks.length}</span>
-            <span class="band-rule"></span>
-          </div>
+          <h2 class="band">{$t("library.notebooks")}</h2>
           <div class="grid">
             {#each shelf.notebooks as notebook (notebook.path)}
               <div
@@ -1017,9 +1044,11 @@
                     path={notebook.path}
                     widthPx={COVER_WIDTH_PX}
                   />
-                  <span class="tile-name">{notebook.name}</span>
-                  <span class="tile-meta">
-                    {pages(notebook.pageCount)} · {whenModified(notebook.modifiedMs)}
+                  <span class="tile-text">
+                    <span class="tile-name">{#if starred.has(notebook.path)}<svg class="star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l2.4 5 5.6.7-4 3.9 1 5.4-5-2.7-5 2.7 1-5.4-4-3.9 5.6-.7L12 4z" /></svg>{/if}<span class="name-text">{notebook.name}</span></span>
+                    <span class="tile-meta">
+                      {pages(notebook.pageCount)} · {whenModified(notebook.modifiedMs)}
+                    </span>
                   </span>
                 </button>
                 {@render tileMarks(notebook)}
@@ -1055,13 +1084,6 @@
 {/if}
 
 {#snippet tileMarks(entry: LibraryEntry)}
-  {#if starred.has(entry.path)}
-    <span class="star" aria-label={$t("library.favourite")}>
-      <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 4l2.4 5 5.6.7-4 3.9 1 5.4-5-2.7-5 2.7 1-5.4-4-3.9 5.6-.7L12 4z" />
-      </svg>
-    </span>
-  {/if}
   {#if selecting}
     <span class="check" class:on={picked?.includes(entry.path)} aria-hidden="true"></span>
   {:else if !moving}
@@ -1097,6 +1119,7 @@
 {#if importing && libraryRoot}
   <ImportPanel
     bind:tool={importTool}
+    sources={importSources}
     folder={path}
     folderName={crumbs.at(-1)?.name ?? $t("library.library")}
     onClose={closeImport}
@@ -1125,187 +1148,162 @@
 {/if}
 
 <style>
+  /* The solid language (DESIGN.md section 11): the rail is a panel on the desk, the shelf is the
+     desk itself, and notebooks are the only bright things on it. */
   .library {
     position: relative;
     display: flex;
     height: 100%;
     overflow: hidden;
-    background: var(--surround, #1b1e24);
-    color: var(--text, #e9ebee);
-    font-family: var(--font-ui, "Bahnschrift", system-ui, sans-serif);
+    background: var(--surround);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: var(--text-md);
     isolation: isolate;
   }
+
+  button {
+    font: inherit;
+  }
+
+  svg {
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* Rail */
 
   .rail {
     display: flex;
     flex: none;
     flex-direction: column;
-    width: 236px;
+    gap: 2px;
+    width: 248px;
     padding: 12px;
-    border-right: 1px solid var(--edge-soft, rgb(255 255 255 / 7%));
-    background: var(--charcoal, #16181d);
+    border-right: 1px solid var(--edge-soft);
+    background: var(--panel);
   }
 
   .brand {
     display: flex;
-    gap: 9px;
+    gap: 10px;
     align-items: center;
-    min-height: var(--control, 36px);
-    padding: 0 6px 12px;
-    font-size: var(--text-lg, 15px);
+    min-height: var(--control);
+    margin-bottom: 12px;
+    padding: 0 8px;
+    font-family: var(--font-brand);
+    font-size: var(--text-lg);
     font-weight: 600;
-    letter-spacing: -0.01em;
   }
 
-  .rail-footer {
-    margin-top: auto;
-    padding-top: 12px;
-    border-top: 1px solid var(--edge-soft, rgb(255 255 255 / 7%));
-  }
-
+  .return-to-notebook,
+  .view,
   .settings-link {
     display: flex;
-    align-items: center;
     gap: 12px;
+    align-items: center;
     width: 100%;
-    min-height: var(--control-touch, 44px);
-    padding: 8px 10px;
+    min-height: var(--control);
+    padding: 0 10px;
     border: 0;
-    border-radius: var(--radius, 6px);
+    border-radius: var(--radius);
     background: transparent;
-    color: var(--muted, #aeb5be);
-    font-size: var(--text-md, 13px);
+    color: var(--muted);
     text-align: left;
     cursor: pointer;
     touch-action: manipulation;
-    transition: background 120ms ease, color 120ms ease;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
-
-  .settings-link:hover {
-    background: var(--wash, rgb(255 255 255 / 8%));
-    color: var(--text, #e9ebee);
-  }
-
-  .settings-link:active { background: rgb(255 255 255 / 12%); }
-  .settings-link:focus-visible { outline: 2px solid var(--blueprint, #4c8df0); outline-offset: 2px; }
-  .settings-link span { flex: 1; }
-  .settings-link svg {
-    flex: none;
-    width: var(--icon, 20px);
-    height: var(--icon, 20px);
-    fill: none;
-    stroke: currentColor;
-    stroke-width: var(--stroke, 1.7);
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-  .settings-link .settings-arrow { width: 14px; height: 14px; color: var(--quiet, #6a727c); }
 
   .return-to-notebook {
-    display: flex;
-    width: 100%;
-    min-height: var(--control, 36px);
-    align-items: center;
-    gap: 7px;
-    margin-bottom: 10px;
-    padding: 6px 8px;
-    border: 0;
-    border-radius: var(--radius, 6px);
-    background: transparent;
-    color: var(--text, #e9ebee);
-    font-size: var(--text-md, 13px);
-    cursor: pointer;
-    text-align: left;
-    touch-action: manipulation;
-    transition: background 120ms ease, color 120ms ease;
+    margin-bottom: 8px;
+    background: var(--wash);
+    color: var(--text);
   }
-  .return-to-notebook:hover { background: var(--wash, rgb(255 255 255 / 8%)); }
+
+  .return-to-notebook:hover { background: var(--wash-strong); }
+
+  .view:hover:not(.current),
+  .settings-link:hover {
+    background: var(--wash);
+    color: var(--text);
+  }
+
+  .settings-link:active { background: var(--wash-strong); }
+
+  .view.current {
+    background: var(--accent-fill);
+    color: var(--text);
+    font-weight: 600;
+  }
 
   .return-to-notebook svg,
-  .view svg {
-    width: var(--icon-dense, 16px);
-    height: var(--icon-dense, 16px);
-    flex: none;
-    fill: none;
-    stroke: currentColor;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    stroke-width: var(--stroke-dense, 2);
-  }
-
-  .where {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    min-height: var(--control, 36px);
-    padding: 7px 8px;
-    border: 0;
-    border-radius: var(--radius, 6px);
-    background: rgb(255 255 255 / 4%);
-  }
-
-  .where-text {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .overline {
-    color: var(--quiet, #6a727c);
-    font-size: var(--text-xs, 10px);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .where-path {
-    overflow: hidden;
-    margin-top: 2px;
-    color: var(--muted, #aeb5be);
-    direction: rtl;
-    font-size: var(--text-sm, 11px);
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .view svg,
+  .settings-link svg,
+  .where svg {
+    width: var(--icon-dense);
+    height: var(--icon-dense);
+    stroke-width: var(--stroke-dense);
   }
 
   .views {
     display: flex;
     flex-direction: column;
-    gap: 3px;
-    margin-top: 10px;
+    gap: 2px;
   }
 
-  .view {
+  .grow,
+  .settings-link span {
+    flex: 1;
+  }
+
+  .rail-footer {
     display: flex;
-    gap: 10px;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: auto;
+    padding-top: 8px;
+    border-top: 1px solid var(--edge-soft);
+  }
+
+  .where {
+    display: flex;
+    gap: 12px;
     align-items: center;
-    min-height: var(--control, 36px);
-    padding: 6px 8px;
-    border: 1px solid transparent;
-    border-radius: var(--radius, 6px);
+    min-height: var(--control);
+    padding: 0 4px 0 10px;
+    color: var(--muted);
+  }
+
+  .where-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--muted);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .link {
+    flex: none;
+    min-height: var(--control-dense);
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--radius);
     background: transparent;
-    color: var(--muted, #aeb5be);
-    font: inherit;
-    font-size: var(--text-md, 13px);
-    text-align: left;
+    color: var(--blueprint-light);
+    font-size: var(--text-sm);
     cursor: pointer;
     touch-action: manipulation;
-    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+    transition: background var(--fast) ease;
   }
 
-  .view:hover:not(.current) {
-    background: var(--wash, rgb(255 255 255 / 8%));
-  }
+  .link:hover:not(:disabled) { background: var(--wash); }
 
-  .view.current {
-    border-color: rgb(76 141 240 / 52%);
-    background: rgb(76 141 240 / 16%);
-    color: var(--text, #e9ebee);
-  }
-
-  .tally {
-    color: var(--quiet, #6a727c);
-    font-size: var(--text-sm, 11px);
-    font-variant-numeric: tabular-nums;
-  }
+  /* Shelf */
 
   .shelf {
     display: flex;
@@ -1314,15 +1312,20 @@
     min-width: 0;
   }
 
+  /* Where you are is the title; the folders before it are quieter ways back up. */
   .bar {
     display: flex;
     flex: none;
-    gap: 7px;
+    gap: 8px;
     align-items: center;
-    height: 58px;
-    padding: 0 24px;
-    border-bottom: 1px solid var(--edge-soft, rgb(255 255 255 / 7%));
-    background: var(--charcoal, #16181d);
+    min-height: 72px;
+    padding: 0 32px;
+  }
+
+  /* The crumbs carry their own 8px padding; the outdent puts the text on the content edge. */
+  .crumbs,
+  .here-label {
+    margin-left: -8px;
   }
 
   .crumbs {
@@ -1336,53 +1339,53 @@
   .crumb,
   .here-label {
     flex: none;
-    min-height: var(--control-dense, 28px);
-    padding: 4px 7px;
+    min-height: var(--control);
+    padding: 0 8px;
     border: 0;
-    border-radius: var(--radius, 6px);
+    border-radius: var(--radius);
     background: transparent;
-    color: var(--muted, #aeb5be);
-    font: inherit;
-    font-size: var(--text-md, 13px);
+    color: var(--muted);
     cursor: pointer;
-    transition:
-      color 120ms ease,
-      background 120ms ease,
-      box-shadow 140ms ease,
-      transform 140ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  .here-label {
-    color: var(--text, #e9ebee);
-    font-weight: 600;
-    cursor: default;
+    transition: color var(--fast) ease, background var(--fast) ease, box-shadow var(--fast) ease;
   }
 
   .crumb:hover:not(:disabled) {
-    background: rgb(255 255 255 / 6%);
+    background: var(--wash);
+    color: var(--text);
   }
 
-  /* The last crumb is where you are, so it is the one thing here that is not a way to leave. */
-  .crumb.here {
-    color: var(--text, #e9ebee);
+  .crumb.here,
+  .here-label {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text);
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
     font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .crumb.drop {
-    box-shadow: 0 0 0 1px var(--blueprint, #4c8df0), 0 5px 14px rgb(0 0 0 / 18%);
-    background: rgb(76 141 240 / 20%);
-    color: var(--text, #e9ebee);
-    transform: translateY(-1px);
+  .crumb.here { cursor: default; }
+  .crumb.here:hover:not(:disabled) { background: transparent; }
+  .here-label { line-height: var(--control); cursor: default; }
+
+  .crumb.drop,
+  .crumb.here.drop {
+    box-shadow: inset 0 0 0 1px var(--blueprint);
+    background: var(--accent-fill);
+    color: var(--text);
   }
 
   .crumb.moveTarget:not(.drop) {
-    box-shadow: inset 0 0 0 1px rgb(76 141 240 / 42%);
-    color: var(--text, #e9ebee);
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
+    background: var(--accent-tint);
+    color: var(--text);
   }
 
   .separator {
-    color: var(--quiet, #6a727c);
-    font-size: var(--text-sm, 11px);
+    color: var(--quiet);
   }
 
   .spacer {
@@ -1393,51 +1396,77 @@
     position: relative;
   }
 
-  .control {
+  .control,
+  .primary {
     display: inline-flex;
-    min-height: var(--control, 36px);
+    min-height: var(--control);
     align-items: center;
-    gap: 7px;
-    padding: 0 11px;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 14px;
     border: 0;
-    border-radius: var(--radius, 6px);
-    background: rgb(255 255 255 / 5%);
-    color: var(--muted, #aeb5be);
-    font: inherit;
-    font-size: var(--text-md, 13px);
+    border-radius: var(--radius);
     white-space: nowrap;
     cursor: pointer;
     touch-action: manipulation;
-    transition: background 120ms ease, color 120ms ease;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
-  .control:hover:not(:disabled) {
-    background: var(--wash, rgb(255 255 255 / 8%));
-    color: var(--text, #e9ebee);
+  .control {
+    background: var(--wash);
+    color: var(--text);
   }
 
-  .control[aria-pressed="true"] {
-    box-shadow: inset 0 0 0 1px rgb(76 141 240 / 52%);
-    background: rgb(76 141 240 / 16%);
-    color: var(--text, #e9ebee);
+  .control:hover:not(:disabled) { background: var(--wash-strong); }
+
+  /* Sort and Select sit next to the primary; a fill on each would make three buttons compete. */
+  .bar .control:not(.import-job) {
+    background: transparent;
+    color: var(--muted);
   }
 
-  .control.destructive {
-    color: var(--oxide, #e5645e);
+  .bar .control:not(.import-job):hover:not(:disabled) {
+    background: var(--wash);
+    color: var(--text);
   }
+
+  .control[aria-pressed="true"],
+  .bar .control[aria-pressed="true"] {
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
+    background: var(--accent-fill);
+    color: var(--text);
+  }
+
+  .control.destructive { color: var(--oxide-text); }
+  .control.destructive:hover:not(:disabled) { background: var(--oxide-wash); }
+
+  .primary {
+    padding: 0 16px;
+    background: var(--blueprint);
+    color: var(--on-accent);
+    font-weight: 600;
+  }
+
+  .primary:hover:not(:disabled) { background: var(--blueprint-hover); }
+
+  .menu-control > svg {
+    width: var(--icon-dense);
+    height: var(--icon-dense);
+    stroke-width: var(--stroke-dense);
+  }
+
+  .menu-control > svg:not(:first-child),
+  .menu-control > .menu-caret {
+    transition: transform var(--fast) ease-out;
+  }
+
+  .menu-control > svg.open { transform: rotate(180deg); }
 
   /* A running or finished import, while its panel is closed. */
-  .import-job {
-    color: var(--text, #e9ebee);
-  }
-
   .import-job svg {
-    width: 16px;
-    height: 16px;
-    fill: none;
-    stroke: #7fd1a3;
-    stroke-linecap: round;
-    stroke-linejoin: round;
+    width: var(--icon-dense);
+    height: var(--icon-dense);
+    stroke: var(--sage-text);
     stroke-width: 2.2;
   }
 
@@ -1445,221 +1474,109 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--blueprint, #4c8df0);
+    background: var(--blueprint);
     animation: import-pulse 1.2s ease-in-out infinite;
   }
 
   @keyframes import-pulse {
-    50% {
-      opacity: 0.35;
-      transform: scale(0.8);
-    }
+    50% { opacity: 0.35; }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .import-pulse {
-      animation: none;
-    }
-  }
-
-  .control.destructive:hover:not(:disabled) {
-    background: rgb(229 100 94 / 12%);
-  }
-
-  .primary {
-    display: inline-flex;
-    min-height: var(--control, 36px);
-    align-items: center;
-    justify-content: center;
-    gap: 7px;
-    padding: 0 13px;
-    border: 0;
-    border-radius: var(--radius, 6px);
-    background: var(--blueprint, #4c8df0);
-    color: #0e1b31;
-    font: inherit;
-    font-size: var(--text-md, 13px);
-    font-weight: 600;
-    white-space: nowrap;
-    cursor: pointer;
-    touch-action: manipulation;
-    transition: background 120ms ease, transform 120ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  .primary:hover:not(:disabled) {
-    background: var(--blueprint-light, #7fb0f7);
-  }
-
-  .primary:active:not(:disabled) {
-    transform: translateY(1px);
-  }
-
-  .menu-control > svg {
-    width: var(--icon-dense, 16px);
-    height: var(--icon-dense, 16px);
-    flex: none;
-    fill: none;
-    stroke: currentColor;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    stroke-width: var(--stroke-dense, 2);
-  }
-
-  .menu-control > svg:not(:first-child),
-  .menu-control > .menu-caret {
-    transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  .menu-control > svg.open {
-    transform: rotate(180deg);
-  }
-
-  .action-bar {
-    display: flex;
-    flex: none;
-    gap: 10px;
-    align-items: center;
-    min-height: 48px;
-    padding: 6px 24px;
-    border-bottom: 1px solid var(--edge-soft, rgb(255 255 255 / 7%));
-    background: rgb(76 141 240 / 10%);
-    font-size: var(--text-md, 13px);
-  }
-
-  .move-title {
-    color: var(--text, #e9ebee);
-    font-weight: 600;
-  }
-
-  .move-help {
-    color: var(--muted, #aeb5be);
-  }
-
+  /* Banners across the shelf: a mode (moving, selecting) or a failure. */
+  .action-bar,
   .operation-error {
     display: flex;
     flex: none;
     gap: 12px;
     align-items: center;
-    min-height: 44px;
-    padding: 8px 24px;
-    border-bottom: 1px solid rgb(229 100 94 / 32%);
-    background: rgb(229 100 94 / 10%);
-    color: #f0aaa6;
-    font-size: var(--text-md, 13px);
+    min-height: 48px;
+    margin: 0 32px 8px;
+    padding: 6px 8px 6px 16px;
+    border-radius: var(--radius);
+  }
+
+  .action-bar {
+    background: var(--accent-tint);
+    color: var(--text);
+  }
+
+  .move-title { font-weight: 600; }
+  .move-help { color: var(--muted); }
+
+  .operation-error {
+    background: var(--oxide-wash);
+    color: var(--oxide-text);
   }
 
   .error-dismiss {
     display: grid;
     flex: none;
-    width: var(--control-dense, 28px);
-    height: var(--control-dense, 28px);
+    width: var(--control-dense);
+    height: var(--control-dense);
     padding: 0;
     border: 0;
-    border-radius: var(--radius, 6px);
+    border-radius: var(--radius);
     background: transparent;
     color: currentColor;
-    font: inherit;
     cursor: pointer;
     place-items: center;
   }
 
-  .error-dismiss:hover {
-    background: var(--wash, rgb(255 255 255 / 8%));
-  }
+  .error-dismiss:hover { background: var(--wash); }
 
   .error-dismiss svg {
-    width: var(--icon-dense, 16px);
-    height: var(--icon-dense, 16px);
-    fill: none;
-    stroke: currentColor;
-    stroke-linecap: round;
-    stroke-width: var(--stroke-dense, 2);
+    width: var(--icon-dense);
+    height: var(--icon-dense);
+    stroke-width: var(--stroke-dense);
   }
 
   .contents {
     flex: 1;
-    padding: 22px 24px 32px;
+    padding: 0 32px 40px;
     overflow-y: auto;
-    scrollbar-color: var(--quiet, #6a727c) transparent;
-    scrollbar-width: thin;
-    transition: opacity 120ms ease;
   }
 
   .contents::selection,
   .contents :global(::selection) {
-    background: rgb(76 141 240 / 34%);
-    color: var(--text, #e9ebee);
-  }
-
-  .contents::-webkit-scrollbar {
-    width: 10px;
-  }
-
-  .contents::-webkit-scrollbar-thumb {
-    border: 3px solid transparent;
-    border-radius: var(--radius-pill, 999px);
-    background: var(--quiet, #6a727c);
-    background-clip: padding-box;
+    background: var(--accent-select);
+    color: var(--text);
   }
 
   .band {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    padding-bottom: 11px;
+    margin: 32px 0 12px;
+    color: var(--text);
+    font-size: var(--text-md);
+    font-weight: 600;
+    line-height: 1.25;
   }
 
-  .band ~ .band {
-    padding-top: 26px;
-  }
-
-  .band-label {
-    color: var(--quiet, #6a727c);
-    font-size: var(--text-xs, 10px);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .band-count,
-  .tile-meta {
-    color: var(--quiet, #6a727c);
-    font-size: var(--text-sm, 11px);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .band-rule {
-    flex: 1;
-    height: 1px;
-    background: var(--edge-soft, rgb(255 255 255 / 7%));
-  }
+  .band:first-child { margin-top: 8px; }
 
   .grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, 168px);
+    gap: 28px 24px;
   }
 
   .grid.folders {
-    padding-bottom: 26px;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 8px;
   }
 
   .tile {
     position: relative;
-    transition:
-      opacity 150ms ease,
-      transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+    min-width: 0;
+    transition: opacity var(--fast) ease;
   }
 
   .hit {
     display: flex;
-    flex-direction: column;
     width: 100%;
-    height: 100%;
+    min-width: 0;
     padding: 0;
     border: 0;
     background: transparent;
     color: inherit;
-    font: inherit;
     text-align: left;
     cursor: pointer;
     touch-action: manipulation;
@@ -1667,195 +1584,189 @@
     -webkit-user-drag: none;
   }
 
-  /* Folders are short, wide and opaque; notebooks are tall paper. The silhouettes differ before
-     any label is read, which is what lets the two bands be scanned rather than parsed. */
+  .tile-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .tile-name {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    min-width: 0;
+    color: var(--text);
+    line-height: 1.3;
+  }
+
+  .name-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tile-meta {
+    overflow: hidden;
+    color: var(--quiet);
+    font-size: var(--text-sm);
+    font-variant-numeric: tabular-nums;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .star {
+    width: 14px;
+    height: 14px;
+    color: var(--amber);
+    fill: currentColor;
+    stroke: none;
+  }
+
+  /* Folders are short wide panels; notebooks are tall paper. The silhouettes differ before any
+     label is read, which is what lets the two sections be scanned rather than parsed. */
   .folder {
-    width: 172px;
-    height: 98px;
-    border: 1px solid var(--edge, rgb(255 255 255 / 12%));
-    border-radius: var(--radius, 6px);
-    background: var(--panel, #23272f);
-    color: var(--muted, #aeb5be);
-    transition:
-      border-color 120ms ease,
-      background 120ms ease,
-      box-shadow 140ms ease,
-      opacity 150ms ease,
-      transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+    border-radius: var(--radius);
+    background: var(--panel);
+    transition: background var(--fast) ease, box-shadow var(--fast) ease, opacity var(--fast) ease;
   }
 
   .folder .hit {
-    padding: 11px 13px;
+    gap: 12px;
+    align-items: center;
+    min-height: 60px;
+    padding: 0 48px 0 14px;
+    border-radius: inherit;
+    color: var(--muted);
   }
 
-  .folder:hover:not(.draggingSource):not(.drop) {
-    background: rgb(255 255 255 / 6%);
-    border-color: rgb(255 255 255 / 18%);
+  .folder .hit > svg {
+    width: var(--icon);
+    height: var(--icon);
   }
+
+  .folder:hover:not(.draggingSource):not(.drop) { background: var(--wash); }
 
   .folder.drop {
-    border-color: var(--blueprint, #4c8df0);
-    outline: 1px solid var(--blueprint, #4c8df0);
-    background: rgb(76 141 240 / 18%);
-    box-shadow:
-      0 10px 25px rgb(0 0 0 / 24%),
-      0 0 0 5px rgb(76 141 240 / 12%);
-    color: var(--text, #e9ebee);
-    transform: translateY(-3px) scale(1.02);
+    box-shadow: inset 0 0 0 1px var(--blueprint);
+    background: var(--accent-fill);
   }
 
   .folder.moveTarget:not(.drop) {
-    border-color: rgb(76 141 240 / 52%);
-    background: rgb(76 141 240 / 8%);
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
+    background: var(--accent-tint);
   }
 
-  .notebook {
-    width: 152px;
+  .notebook .hit {
+    flex-direction: column;
+    gap: 10px;
   }
 
-  @media (hover: hover) and (pointer: fine) {
-    .tile:hover:not(.draggingSource) {
-      transform: translateY(-1px);
-    }
+  /* The name row leaves room for the actions button, which sits beside it, not on the paper. */
+  .notebook .tile-text { padding-right: 36px; }
 
-    .folder.drop {
-      transform: translateY(-3px) scale(1.02);
-    }
+  .notebook .hit :global(.cover) {
+    transition: box-shadow var(--fast) ease;
   }
 
-  .tile.draggingSource {
-    opacity: 0.32;
-    transform: scale(0.985);
+  .notebook:hover:not(.draggingSource) .hit :global(.cover) {
+    box-shadow: 0 0 0 2px var(--edge-strong);
   }
+
+  .tile.draggingSource { opacity: var(--disabled); }
 
   .library.dragging,
   .library.dragging .hit {
     cursor: grabbing;
   }
 
-  .notebook .hit {
-    gap: 8px;
-  }
-
   .tile.chosen::after {
     position: absolute;
-    border-radius: var(--radius-lg, 10px);
+    border-radius: var(--radius-lg);
     content: "";
-    inset: -4px;
-    outline: 2px solid var(--blueprint-light, #7fb0f7);
+    inset: -6px;
+    box-shadow: 0 0 0 2px var(--blueprint-light);
     pointer-events: none;
-  }
-
-  .grow {
-    flex: 1;
-  }
-
-  .tile-name {
-    overflow: hidden;
-    color: var(--text, #e9ebee);
-    font-size: var(--text-md, 13px);
-    font-weight: 500;
-    line-height: 1.3;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .tile-meta {
-    margin-top: 3px;
-  }
-
-  .star {
-    position: absolute;
-    top: 7px;
-    right: 7px;
-    display: grid;
-    width: 22px;
-    height: 22px;
-    border-radius: 3px;
-    background: rgb(22 24 29 / 82%);
-    color: var(--amber, #e0912b);
-    place-items: center;
-    pointer-events: none;
-  }
-
-  .notebook .star {
-    top: 7px;
-    left: 7px;
-    right: auto;
-  }
-
-  .star path {
-    fill: currentColor;
   }
 
   .check {
     position: absolute;
-    top: 7px;
-    left: 7px;
-    width: 18px;
-    height: 18px;
-    border: 1.5px solid rgb(255 255 255 / 55%);
+    top: 8px;
+    left: 8px;
+    width: 20px;
+    height: 20px;
+    border: 1.5px solid var(--edge-strong);
     border-radius: 50%;
-    background: rgb(22 24 29 / 82%);
+    background: var(--panel);
     pointer-events: none;
-    transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+    transition: border-color var(--fast) ease, background var(--fast) ease;
+  }
+
+  .folder .check {
+    top: 50%;
+    right: 14px;
+    left: auto;
+    margin-top: -10px;
   }
 
   .check.on {
-    border-color: var(--blueprint, #4c8df0);
-    background: var(--blueprint, #4c8df0);
+    border-color: var(--blueprint);
+    background: var(--blueprint);
   }
 
   .check.on::after {
     position: absolute;
     top: 3px;
-    left: 5px;
+    left: 6px;
     width: 4px;
-    height: 8px;
-    border-right: 1.7px solid #10141a;
-    border-bottom: 1.7px solid #10141a;
+    height: 9px;
+    border-right: 2px solid var(--on-accent);
+    border-bottom: 2px solid var(--on-accent);
     content: "";
     transform: rotate(45deg);
   }
 
   .tile-menu {
     position: absolute;
-    right: 4px;
-    bottom: 4px;
+    top: 50%;
+    right: 8px;
+    margin-top: calc(var(--control-dense) / -2);
   }
 
   .notebook .tile-menu {
-    top: 7px;
-    right: 7px;
-    bottom: auto;
+    top: auto;
+    right: -8px;
+    bottom: 0;
+    margin-top: 0;
   }
 
   .chevron {
     display: grid;
-    width: var(--control-dense, 28px);
-    height: var(--control-dense, 28px);
+    width: var(--control-dense);
+    height: var(--control-dense);
     padding: 0;
     border: 0;
-    border-radius: var(--radius, 6px);
-    background: rgb(22 24 29 / 76%);
-    color: var(--muted, #aeb5be);
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--muted);
     cursor: pointer;
     place-items: center;
     touch-action: manipulation;
-    transition: background 120ms ease, color 120ms ease;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
-  .tile:hover .chevron,
-  .chevron[aria-expanded="true"],
-  .chevron:focus-visible {
-    background: var(--wash, rgb(255 255 255 / 8%));
-    color: var(--text, #e9ebee);
+  .chevron:hover,
+  .chevron[aria-expanded="true"] {
+    background: var(--wash-strong);
+    color: var(--text);
   }
 
   .chevron svg {
-    width: var(--icon-dense, 16px);
-    height: var(--icon-dense, 16px);
+    width: var(--icon-dense);
+    height: var(--icon-dense);
     fill: currentColor;
+    stroke: none;
   }
 
   .hit:focus-visible,
@@ -1864,122 +1775,96 @@
   .primary:focus-visible,
   .view:focus-visible,
   .link:focus-visible,
-  .chevron:focus-visible {
-    outline: 2px solid var(--blueprint-light, #7fb0f7);
-    outline-offset: 1px;
-  }
-
+  .chevron:focus-visible,
+  .settings-link:focus-visible,
+  .return-to-notebook:focus-visible,
   .error-dismiss:focus-visible {
-    outline: 2px solid var(--blueprint-light, #7fb0f7);
-    outline-offset: 1px;
+    outline: 2px solid var(--blueprint-light);
+    outline-offset: 2px;
   }
 
-  .link {
-    flex: none;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--blueprint, #4c8df0);
-    font: inherit;
-    min-height: var(--control-dense, 28px);
-    padding: 0 3px;
-    border-radius: var(--radius, 6px);
-    font-size: var(--text-sm, 11px);
-    cursor: pointer;
-    touch-action: manipulation;
+  .notebook .hit:focus-visible {
+    outline: none;
   }
 
-  .link:hover:not(:disabled) {
-    background: var(--wash, rgb(255 255 255 / 8%));
+  .notebook .hit:focus-visible :global(.cover) {
+    box-shadow: 0 0 0 2px var(--surround), 0 0 0 4px var(--blueprint-light);
   }
+
+  /* Empty, first-run and failure states */
 
   .first-run {
     max-width: 460px;
-    margin: 12vh auto 0;
+    margin: 14vh auto 0;
     text-align: center;
   }
 
   .first-run-mark {
-    display: grid;
-    width: 46px;
-    height: 46px;
+    display: block;
+    width: 32px;
+    height: 32px;
     margin: 0 auto 16px;
-    border: 1px solid var(--edge, rgb(255 255 255 / 12%));
-    border-radius: var(--radius-lg, 10px);
-    background: var(--panel, #23272f);
-    color: var(--blueprint-light, #7fb0f7);
-    place-items: center;
-  }
-
-  .first-run-mark svg {
-    width: 24px;
-    height: 24px;
-    fill: none;
-    stroke: currentColor;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    stroke-width: var(--stroke, 1.7);
+    color: var(--muted);
+    stroke-width: var(--stroke);
   }
 
   .first-run h1 {
-    margin: 0 0 12px;
-    font-size: 22px;
+    margin: 0 0 8px;
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
     font-weight: 600;
-    letter-spacing: -0.02em;
+    line-height: 1.25;
     text-wrap: balance;
   }
 
   .first-run p {
-    margin: 0 0 22px;
-    color: var(--muted, #aeb5be);
-    font-size: var(--text-md, 13px);
-    line-height: 1.55;
+    margin: 0 0 24px;
+    color: var(--muted);
+    line-height: 1.5;
   }
 
   .empty {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
     align-items: center;
     margin-top: 14vh;
-    color: var(--muted, #aeb5be);
+    color: var(--muted);
   }
 
   .empty p,
   .notice {
     margin: 0;
-    font-size: var(--text-md, 13px);
   }
 
   .notice {
     margin-top: 14vh;
-    color: var(--muted, #aeb5be);
+    color: var(--muted);
     text-align: center;
   }
 
-  .notice.failure {
-    color: var(--oxide, #e5645e);
-  }
+  .notice.failure { color: var(--oxide-text); }
 
+  /* Follows the pointer outside the shelf, so it is a floating surface. */
   .drag-preview {
     position: fixed;
     z-index: 1000;
     top: 0;
     left: 0;
     display: flex;
-    gap: 9px;
+    gap: 10px;
     align-items: center;
     width: max-content;
-    max-width: 220px;
+    max-width: 240px;
     height: 40px;
-    padding: 0 11px;
-    border: 1px solid var(--edge, rgb(255 255 255 / 12%));
-    border-radius: var(--radius-lg, 10px);
-    background: rgb(35 39 47 / 96%);
-    box-shadow: 0 18px 44px rgb(0 0 0 / 55%);
-    color: var(--text, #e9ebee);
-    font-family: var(--font-ui, "Bahnschrift", system-ui, sans-serif);
-    font-size: var(--text-md, 13px);
+    padding: 0 12px;
+    border: 1px solid var(--edge);
+    border-radius: var(--radius-lg);
+    background: var(--panel);
+    box-shadow: var(--shadow-menu);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: var(--text-md);
     font-weight: 600;
     pointer-events: none;
   }
@@ -1995,141 +1880,101 @@
     flex: none;
     min-width: 20px;
     height: 20px;
-    padding: 0 5px;
-    border-radius: var(--radius-pill, 999px);
-    background: var(--blueprint, #4c8df0);
-    color: #0e1b31;
-    font-size: var(--text-xs, 10px);
+    padding: 0 6px;
+    border-radius: var(--radius-pill);
+    background: var(--blueprint);
+    color: var(--on-accent);
+    font-size: var(--text-sm);
     place-items: center;
   }
 
   button:disabled {
     cursor: default;
-    opacity: 0.45;
+    opacity: var(--disabled);
   }
 
   @media (max-width: 760px) {
-    .library {
-      flex-direction: column;
-    }
+    .library { flex-direction: column; }
 
     .rail {
       width: 100%;
       flex-direction: row;
       flex-wrap: wrap;
       align-items: center;
-      gap: 7px;
+      gap: 4px;
       padding: 8px 12px;
       border-right: 0;
-      border-bottom: 1px solid var(--edge-soft, rgb(255 255 255 / 7%));
+      border-bottom: 1px solid var(--edge-soft);
     }
 
-    .brand {
-      min-height: var(--control, 36px);
-      padding: 0 6px 0 0;
-    }
+    .brand { margin: 0; padding: 0 8px 0 0; }
+    .return-to-notebook { width: auto; margin: 0; }
+    .views { flex-direction: row; }
+    .view { width: auto; }
 
     .rail-footer {
-      flex: none;
-      margin: 0 0 0 auto;
-      padding: 0 0 0 12px;
-      border-top: 0;
-      border-left: 1px solid var(--edge-soft, rgb(255 255 255 / 7%));
-    }
-    .settings-link { width: auto; }
-    .settings-link .settings-arrow { display: none; }
-
-    .return-to-notebook {
-      width: auto;
-      margin: 0;
-    }
-
-    .where {
-      min-width: 180px;
-      flex: 1;
-    }
-
-    .views {
-      flex: none;
       flex-direction: row;
-      margin: 0;
+      margin: 0 0 0 auto;
+      padding: 0 0 0 8px;
+      border-top: 0;
+      border-left: 1px solid var(--edge-soft);
     }
 
-    .bar {
-      padding: 0 14px;
-      overflow-x: auto;
-    }
-
-    .contents {
-      padding: 18px 16px 28px;
-    }
+    .where { padding: 0; }
+    .where svg,
+    .where-name { display: none; }
+    .settings-link { width: auto; }
+    .bar { padding: 0 16px; overflow-x: auto; }
+    .contents { padding: 0 16px 28px; }
+    .action-bar, .operation-error { margin: 0 16px 8px; }
   }
 
   @media (max-width: 520px) {
-    .settings-link span { display: none; }
-    .settings-link { width: var(--control-touch, 44px); padding: 8px; justify-content: center; }
-    .rail-footer { padding-left: 8px; }
     .brand span,
-    .where-text {
-      display: none;
-    }
-
-    .where {
-      min-width: auto;
-      flex: none;
-      background: transparent;
-    }
-
-    .link {
-      padding: 0 8px;
-    }
-
-    .crumbs {
-      overflow-x: auto;
-    }
-
-    .bar {
-      gap: 5px;
-    }
+    .settings-link span { display: none; }
+    .settings-link { width: var(--control); padding: 0; justify-content: center; }
+    .crumbs { overflow-x: auto; }
+    .bar { gap: 4px; }
   }
 
   @media (pointer: coarse) {
     .return-to-notebook,
-    .where,
     .view,
+    .settings-link,
+    .where,
     .control,
-    .primary {
-      min-height: var(--control-touch, 44px);
+    .primary,
+    .crumb {
+      min-height: var(--control-touch);
     }
 
     .link,
     .error-dismiss,
     .chevron {
-      min-width: var(--control-touch, 44px);
-      min-height: var(--control-touch, 44px);
+      min-width: var(--control-touch);
+      min-height: var(--control-touch);
     }
 
-    .bar {
-      height: 64px;
-    }
+    .bar { min-height: 76px; }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .settings-link { transition: none; }
+    .return-to-notebook,
+    .view,
+    .settings-link,
+    .link,
     .tile,
     .folder,
     .crumb,
+    .control,
     .primary,
+    .chevron,
     .menu-control > svg,
-    .check {
+    .check,
+    .notebook .hit :global(.cover) {
       transition: none;
     }
 
-    .tile:hover:not(.draggingSource),
-    .folder.drop,
-    .crumb.drop,
-    .tile.draggingSource {
-      transform: none;
-    }
+    .import-pulse { animation: none; }
   }
 </style>

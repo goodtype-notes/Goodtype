@@ -3,33 +3,51 @@ import { test } from 'node:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildVersion, checkCandidate, promotion, sha256 } from './release.mjs';
+import { generateKeyPairSync, verify } from 'node:crypto';
+import { checkCandidate, nextDevVersion, promotion, sha256, signReleaseManifest } from './release.mjs';
 
-test('each dev run and retry has a distinct version while stable preserves the base', () => {
-  assert.equal(buildVersion('0.1.0', 'dev', '12', '1'), '0.1.0-dev.12.1');
-  assert.notEqual(buildVersion('0.1.0', 'dev', '12', '2'), buildVersion('0.1.0', 'dev', '12', '1'));
-  assert.notEqual(buildVersion('0.1.0', 'dev', '13', '1'), buildVersion('0.1.0', 'dev', '12', '1'));
-  assert.equal(buildVersion('0.1.0', 'stable'), '0.1.0');
-  assert.equal(buildVersion('0.1.0', 'local', null, null, '20261027143000'), '0.1.0-local.20261027143000');
+test('release signatures bind exact manifest bytes to the app public key', () => {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const pinned = Buffer.from(publicKey.export({ format: 'jwk' }).x, 'base64url');
+  const bytes = Buffer.from('{"version":"0.3.20"}\n');
+  const sig = signReleaseManifest(bytes, privateKey, pinned);
+  assert.ok(verify(null, bytes, publicKey, sig));
+  assert.equal(verify(null, bytes.subarray(0, -1), publicKey, sig), false);
+  assert.throws(() => signReleaseManifest(bytes, generateKeyPairSync('ed25519').privateKey, pinned));
 });
 
-test('versions cannot introduce paths, invalid SemVer or missing CI identity', () => {
+const tag = (name, sha = 'previous') => ({ name, commit: { sha } });
+
+test('dev versions use the base floor and advance the highest plain tag on the same line', () => {
+  const tags = [tag('v0.1.0'), tag('v0.3.1-dev.55.1', 'current'), tag('v1.3.100'), tag('v0.3.99-local.20261027143000')];
+  assert.equal(nextDevVersion('0.3.1', tags, 'current'), '0.3.1');
+  tags.push(tag('v0.3.1'), tag('v0.3.10'), tag('v0.3.2'));
+  assert.equal(nextDevVersion('0.3.1', tags, 'current'), '0.3.11');
+  assert.equal(nextDevVersion('0.3.20', tags, 'current'), '0.3.20');
+  assert.equal(nextDevVersion('0.4.0', tags, 'current'), '0.4.0');
+});
+
+test('a retry reuses the tag for its commit even after a newer candidate', () => {
+  const tags = [tag('v0.3.2'), tag('v0.3.1', 'current')];
+  assert.equal(nextDevVersion('0.3.1', tags, 'current'), '0.3.1');
+  assert.throws(() => nextDevVersion('0.3.1', [...tags, tag('v0.3.3', 'current')], 'current'), /Multiple release tags/);
+});
+
+test('base versions reject paths and invalid SemVer', () => {
   for (const base of ['../0.1.0', '01.1.0', '0.1', '0.1.0-beta', '0.1.0\n']) {
-    assert.throws(() => buildVersion(base, 'stable'));
+    assert.throws(() => nextDevVersion(base, [], 'current'));
   }
-  for (const run of [undefined, '0', '../1', '01', '1\n']) {
-    assert.throws(() => buildVersion('0.1.0', 'dev', run, '1'));
-  }
-  assert.throws(() => buildVersion('0.1.0', 'other'));
 });
 
 test('promotion requires the correct versioned candidate and recorded test evidence', () => {
-  const body = 'Tested dev build: v0.1.0-dev.12.1\nTest evidence: ZIP hashes and relocated decoder passed; Windows walkthrough recorded.';
-  assert.equal(promotion(body, '0.1.0'), 'v0.1.0-dev.12.1');
-  for (const invalid of ['', body.replace('0.1.0', '0.2.0'), body.split('\n')[0], body.replace('v0.1.0-dev.12.1', 'v0.1.0')]) {
-    assert.throws(() => promotion(invalid, '0.1.0'));
+  const body = 'Tested dev build: v0.3.12\r\nTest evidence: ZIP hashes and relocated decoder passed.';
+  assert.equal(promotion(body), 'v0.3.12');
+  assert.equal(promotion(`<!-- Tested dev build: v0.x.y -->\n${body}`), 'v0.3.12');
+  for (const invalid of ['', body.replace('v0.3.12', 'v0.3.12-dev.55.1'), body.replace('v0.3.12', 'v0.3.012'),
+    body.replace('build: ', 'build:'), body.split('\r\n')[0], `${body}\nTested dev build: v0.3.13`, `<!-- ${body} -->`,
+    'Tested dev build: v0.3.12\nTest evidence: \n\nUnrelated text']) {
+    assert.throws(() => promotion(invalid));
   }
-  assert.throws(() => promotion(`<!-- ${body} -->`, '0.1.0'));
 });
 
 test('checksums identify content changes in release assets', async () => {
@@ -47,10 +65,9 @@ test('checksums identify content changes in release assets', async () => {
 
 test('changing dev after testing invalidates promotion; drafts and stable tags are not candidates', () => {
   const release = { isDraft: false, isPrerelease: true };
-  const ref = { object: { type: 'commit', sha: 'a'.repeat(40) } };
-  checkCandidate(release, ref, 'a'.repeat(40));
-  assert.throws(() => checkCandidate(release, ref, 'b'.repeat(40)), /exact dev head/);
-  assert.throws(() => checkCandidate({ ...release, isDraft: true }, ref, ref.object.sha));
-  assert.throws(() => checkCandidate({ ...release, isPrerelease: false }, ref, ref.object.sha));
-  assert.throws(() => checkCandidate(release, { object: { ...ref.object, type: 'tag' } }, ref.object.sha));
+  const commit = 'a'.repeat(40);
+  checkCandidate(release, commit, commit);
+  assert.throws(() => checkCandidate(release, commit, 'b'.repeat(40)), /exact dev head/);
+  assert.throws(() => checkCandidate({ ...release, isDraft: true }, commit, commit), /published/);
+  assert.throws(() => checkCandidate({ ...release, isPrerelease: false }, commit, commit), /pre-release/);
 });

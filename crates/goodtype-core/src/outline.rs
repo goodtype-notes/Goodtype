@@ -295,6 +295,36 @@ pub fn rounded_outline_points(
     polygons
 }
 
+/// Page-point extent of the transformed sample centers of these strokes.
+pub fn stroke_bounds<'a>(strokes: impl IntoIterator<Item = &'a crate::Stroke>) -> Option<[f64; 4]> {
+    let mut bounds = [
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    ];
+    for stroke in strokes {
+        let transform = &stroke.transform;
+        let (sin, cos) = transform.rotation.to_radians().sin_cos();
+        for point in &stroke.points {
+            let x = point.x * transform.scale_x;
+            let y = point.y * transform.scale_y;
+            let px = x * cos - y * sin + transform.translate_x;
+            let py = x * sin + y * cos + transform.translate_y;
+            bounds = [
+                bounds[0].min(px),
+                bounds[1].min(py),
+                bounds[2].max(px),
+                bounds[3].max(py),
+            ];
+        }
+    }
+    bounds
+        .iter()
+        .all(|value| value.is_finite())
+        .then_some(bounds)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

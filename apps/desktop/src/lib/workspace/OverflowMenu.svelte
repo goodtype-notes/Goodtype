@@ -1,6 +1,6 @@
 <script lang="ts">
   import { dismissable } from "./dismiss";
-  import type { MenuAction, MenuEntry, MenuSection } from "./menu";
+  import type { MenuAction, MenuSection } from "./menu";
 
   /**
    * The overflow menu. Renders whatever `sections` describe, so a new page-level feature costs
@@ -13,13 +13,18 @@
     subtitle,
     sections,
     onClose,
+    trigger,
+    compact = false,
   }: {
     /** The subject the menu acts on, e.g. "Page 3 of 12". */
     title: string;
-    /** Optional second line — a path, a state. */
+    /** Optional second line — the notebook name, a state. */
     subtitle?: string;
     sections: MenuSection[];
     onClose: () => void;
+    trigger?: HTMLElement;
+    /** In-surface menu: the trigger already names the subject, and rows take the dense size. */
+    compact?: boolean;
   } = $props();
 
   let menu = $state<HTMLElement>();
@@ -34,9 +39,7 @@
   /// the only way through eleven entries was eleven presses of Tab.
   function moveWithin(event: KeyboardEvent) {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const items = menu
-      ? [...menu.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)")]
-      : [];
+    const items = menu ? [...menu.querySelectorAll<HTMLElement>("button:not(:disabled)")] : [];
     const current = items.indexOf(document.activeElement as HTMLElement);
     if (current < 0 || !items.length) return;
     event.preventDefault();
@@ -48,77 +51,53 @@
           : (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
     items[next]?.focus();
   }
-
-  function commitNumber(entry: MenuEntry, raw: string) {
-    if (entry.kind !== "number") return;
-    const parsed = Number.parseInt(raw, 10);
-    if (Number.isNaN(parsed)) return;
-    entry.onCommit(Math.min(entry.max, Math.max(entry.min, parsed)));
-    onClose();
-  }
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<aside
+<div
   bind:this={menu}
-  use:dismissable={onClose}
+  use:dismissable={{ onClose, trigger }}
   class="overflow-menu"
+  class:compact
+ 
+  role="menu"
+  tabindex="-1"
   aria-label={title}
   onkeydown={moveWithin}
 >
-  <div class="menu-subject">
-    <strong>{title}</strong>
-    {#if subtitle}<span title={subtitle}>{subtitle}</span>{/if}
-  </div>
+  {#if !compact}
+    <div class="menu-subject">
+      <strong>{title}</strong>
+      {#if subtitle}<span title={subtitle}>{subtitle}</span>{/if}
+    </div>
+  {/if}
 
   {#each sections as section, index (section.title ?? index)}
-    {#if index > 0}<div class="menu-divider"></div>{/if}
-    {#if section.title}<div class="menu-heading">{section.title}</div>{/if}
+    {#if index > 0}<div class="menu-divider" role="separator"></div>{/if}
+    {#if section.title}<div class="menu-heading" role="presentation">{section.title}</div>{/if}
 
     {#each section.entries as entry (entry.id)}
-      {#if entry.kind === "number"}
-        <div class="menu-row" class:disabled={entry.disabled}>
+      <button
+        type="button"
+        role="menuitem"
+        class:destructive={entry.destructive}
+        disabled={entry.disabled}
+        onclick={() => run(entry)}
+      >
+        {#if !compact || entry.icon}
           <span class="menu-icon" aria-hidden="true">
             {#if entry.icon}
               <svg viewBox="0 0 24 24"><path d={entry.icon} /></svg>
             {/if}
           </span>
-          <label for={`menu-${entry.id}`}>{entry.label}</label>
-          <input
-            id={`menu-${entry.id}`}
-            type="number"
-            min={entry.min}
-            max={entry.max}
-            value={entry.value}
-            disabled={entry.disabled}
-            onkeydown={(event) => {
-              if (event.key === "Enter") commitNumber(entry, event.currentTarget.value);
-            }}
-            onblur={(event) => commitNumber(entry, event.currentTarget.value)}
-          />
-          {#if entry.hint}<span class="menu-hint">{entry.hint}</span>{/if}
-        </div>
-      {:else}
-        <button
-          type="button"
-          class:destructive={entry.destructive}
-          disabled={entry.disabled}
-          onclick={() => run(entry)}
-        >
-          <span class="menu-icon" aria-hidden="true">
-            {#if entry.icon}
-              <svg viewBox="0 0 24 24"><path d={entry.icon} /></svg>
-            {/if}
-          </span>
-          <span class="menu-label">{entry.label}</span>
-          {#if entry.hint}
-            <span class="menu-hint">{entry.hint}</span>
-          {/if}
-        </button>
-      {/if}
+        {/if}
+        <span class="menu-label">{entry.label}</span>
+        {#if entry.hint}
+          <span class="menu-hint">{entry.hint}</span>
+        {/if}
+      </button>
     {/each}
   {/each}
-</aside>
+</div>
 
 <style>
   .overflow-menu {
@@ -130,23 +109,24 @@
     top: 52px;
     right: 14px;
     width: min(304px, calc(100vw - 28px));
-    padding: 6px;
+    padding: 4px;
     border: 1px solid var(--edge);
     border-radius: var(--radius-lg);
     background: var(--panel);
-    box-shadow: 0 18px 44px rgb(0 0 0 / 55%);
-    animation: menu-in 130ms cubic-bezier(0.2, 0.7, 0.3, 1);
-    transform-origin: top right;
+    box-shadow: var(--shadow-menu);
+    animation: menu-in var(--enter) ease-out;
   }
 
+  .overflow-menu:focus { outline: none; }
+
   @keyframes menu-in {
-    from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+    from { opacity: 0; transform: translateY(-4px); }
   }
 
   .menu-subject {
-    padding: 8px 10px 10px;
+    padding: 8px 12px 10px;
     border-bottom: 1px solid var(--edge-soft);
-    margin-bottom: 6px;
+    margin-bottom: 4px;
   }
 
   .menu-subject strong {
@@ -159,47 +139,42 @@
   .menu-subject span {
     display: block;
     overflow: hidden;
-    margin-top: 3px;
+    margin-top: 2px;
     color: var(--quiet);
     font-size: var(--text-sm);
-    /* A path is read from its end — the folder it is in matters more than the drive it is on. */
-    direction: rtl;
-    text-align: left;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .menu-heading {
-    padding: 9px 10px 5px;
-    color: var(--quiet);
-    font-size: var(--text-xs);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    padding: 8px 12px 4px;
+    color: var(--muted);
+    font-size: var(--text-sm);
+    font-weight: 600;
   }
 
-  /* One row shape for actions and for the number entry, so a leading icon never shifts the
-     column of labels next to it. */
-  button,
-  .menu-row {
+  button {
     display: flex;
     width: 100%;
     min-height: var(--control);
     align-items: center;
-    padding: 0 10px;
+    padding: 0 12px;
     border: 0;
     border-radius: var(--radius);
     background: transparent;
     color: var(--text);
+    cursor: pointer;
     font: inherit;
     font-size: var(--text-md);
     text-align: left;
-    gap: 10px;
+    gap: 12px;
+    transition: background var(--fast) ease;
   }
 
-  button { cursor: pointer; transition: background 110ms ease; }
   button:hover:not(:disabled) { background: var(--wash); }
+  button:active:not(:disabled) { background: var(--wash-strong); }
   button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: -2px; }
-  button:disabled, .menu-row.disabled { color: var(--quiet); cursor: default; }
+  button:disabled { cursor: default; opacity: var(--disabled); }
 
   .menu-icon {
     display: grid;
@@ -220,44 +195,39 @@
   }
 
   button:hover:not(:disabled) .menu-icon svg { stroke: var(--text); }
-  .menu-label { overflow: hidden; flex: 1; text-overflow: ellipsis; white-space: nowrap; }
+  .menu-label { overflow: hidden; min-width: 0; flex: 1; text-overflow: ellipsis; white-space: nowrap; }
 
+  /* Shortcuts keep their full width: the label gives way, the hint never does. */
   .menu-hint {
     flex: none;
     color: var(--quiet);
     font-size: var(--text-sm);
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  /* --quiet is below 4.5:1 on a --wash fill. */
+  button:hover:not(:disabled) .menu-hint { color: var(--muted); }
+
+  /* Red is spent only on entries that destroy work the writer cannot retype. */
+  .destructive { color: var(--oxide-text); }
+  .destructive .menu-icon svg,
+  .destructive:hover:not(:disabled) .menu-icon svg { stroke: var(--oxide-text); }
+  .destructive:hover:not(:disabled) { background: var(--oxide-wash); }
+
+  /* Sized to its labels, with dense rows: it sits on the work, not in the window chrome. */
+  .overflow-menu.compact {
+    width: max-content;
+    min-width: 168px;
+    max-width: min(280px, calc(100vw - 28px));
   }
 
-  /* Red is spent only on entries that destroy work the writer cannot retype, so it still means
-     something when it appears. */
-  .destructive { color: var(--oxide); }
-  .destructive .menu-icon svg { stroke: var(--oxide); }
-  .destructive:hover:not(:disabled) { background: rgb(229 100 94 / 12%); }
-  .destructive:hover:not(:disabled) .menu-icon svg { stroke: var(--oxide); }
-
-  .menu-row label { flex: 1; color: inherit; }
-
-  .menu-row input {
-    box-sizing: border-box;
-    width: 62px;
-    height: var(--control-dense);
-    padding: 0 8px;
-    border: 1px solid var(--edge);
-    border-radius: var(--radius);
-    background: var(--surround);
-    color: var(--text);
-    font: inherit;
-    font-size: var(--text-sm);
-    font-variant-numeric: tabular-nums;
-    text-align: center;
-  }
-
-  .menu-row input:focus-visible { border-color: var(--blueprint); outline: none; }
+  .compact button { min-height: var(--control-dense); padding: 0 8px; }
+  .compact .menu-heading { padding: 6px 8px 3px; }
+  .compact .menu-divider { margin: 4px 6px; }
 
   .menu-divider {
     height: 1px;
-    margin: 6px 8px;
+    margin: 4px 8px;
     background: var(--edge-soft);
   }
 

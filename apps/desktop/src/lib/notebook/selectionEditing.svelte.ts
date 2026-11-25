@@ -1,3 +1,4 @@
+import { materialItems } from "../helper/crop";
 import type { createNavigation } from "./viewportNavigation.svelte";
 
 import { translate, notice, type UiText } from "../i18n";
@@ -24,19 +25,21 @@ import { type ManagedMixedGroup } from "./snapshot";
 
 import { moveReadingObject, moveVisualItems, type VisualMove } from "./objectOrder";
 
-import { clipboardMarker, isEmptyBundle, pasteOffset, pastedShapes, pastedStrokes, shiftTo, type ClipboardBundle } from "./clipboard";
+import { clipboardMarker, completeSelectedGroups, isEmptyBundle, pasteOffset, pastedAddonData, pastedShapes, pastedStrokes, shiftTo, type ClipboardBundle } from "./clipboard";
 
 import { type AppSettings } from "../settings";
 
 export type SelectionEnvironment = {
   activeInkLayerId: string;
   activeInkLayerPath: string;
+  readonly regionBounds?: import("../ink/selection").Bounds | null;
   readonly activePageId: string;
   activeSnapshot: NotebookSnapshot | null;
   readonly changeStrokes: (next: Stroke[], label: UiText, replaced?: ReadonlyMap<string, string[]>) => void;
   readonly closeToolCard: () => void;
   readonly editContext: () => { root: string; pageId: string; current: () => boolean };
   images: ImageView[];
+  addCopiedGroups?: (groups: NonNullable<ClipboardBundle["groups"]>) => void;
   readonly message: (error: unknown) => string;
   readonly navigation: Pick<ReturnType<typeof createNavigation>, "fingerDraws" | "pagePointAt">;
   readonly nextReadingOrder: () => number;
@@ -58,6 +61,7 @@ export type SelectionEnvironment = {
   typstBlocks: TypstBlockState[];
   workspace: HTMLElement | undefined;
   readonly zoom: number;
+  readonly zooming?: boolean;
 };
 
 /** Instance-owned selection state and operations. Callers supply live values at the boundary. */
@@ -83,6 +87,7 @@ export function createSelection(env: SelectionEnvironment) {
 
   function lassoItems(): LassoItem[] {
     return [
+      ...materialItems(env.activeSnapshot?.page.objects ?? []),
       ...env.shapes.map(shapeLassoItem),
       ...env.images.map(image => ({ id: image.id, kind: "images" as const, closed: true,
         outline: boxOutline(image.x, image.y, image.widthPt * image.scale, image.heightPt * image.scale, image.rotation) })),
@@ -241,7 +246,7 @@ export function createSelection(env: SelectionEnvironment) {
 
   function routeObjectPointer(event: PointerEvent) {
     // Explicit handles own contact, even with a brush or the Shape tool in hand.
-    if (event.target instanceof Element && event.target.closest(".shape-controls .control-hit, .mixed-selection, .typst-block .handle")) {
+    if (event.target instanceof Element && event.target.closest(".shape-controls .control-hit, .helper-crop, .helper-workspace, .mixed-selection, .typst-block .handle")) {
       directObjectInput = true;
       const role = pointerRole(event, env.tool, env.pointerMapping);
       if (event.type === "pointerdown" && (role === "erase" || role === "lasso" || role === "ignore" && event.pointerType === "pen")) {
@@ -264,7 +269,7 @@ export function createSelection(env: SelectionEnvironment) {
     // the press to the page and deselect the very shape about to be restyled.
     if (
       event.target instanceof Element &&
-      event.target.closest(".selection-actions, .instrument-palette, .palette-editor, .editor-dock")
+      event.target.closest(".selection-actions, .instrument-palette, .palette-editor, .editor-dock, .shape-panel")
     ) {
       return;
     }
@@ -322,7 +327,7 @@ export function createSelection(env: SelectionEnvironment) {
       ((event.pointerType === "pen" || env.navigation.fingerDraws(event)) && !keepsSelection(env.tool)) ||
       (event.target instanceof Element &&
         event.target.closest(
-          ".mixed-selection, .typst-block, .image-object, .shape-object, .selection-actions, .overflow-menu, .instrument-palette, .palette-editor, [data-preserve-selection]",
+          ".helper-crop, .helper-workspace, .mixed-selection, .typst-block, .image-object, .shape-object, .selection-actions, .overflow-menu, .instrument-palette, .palette-editor, [data-preserve-selection]",
         ))
     ) {
       return;
@@ -470,14 +475,16 @@ export function createSelection(env: SelectionEnvironment) {
     const ids = new Set(selection.strokes);
     const objectIds = new Set(selection.objects);
     const selectedImages = env.images.filter(image => objectIds.has(image.id));
+    const canonicalObjects = env.activeSnapshot?.page.objects ?? [];
     // Capture every value before fetching bytes; selection and page state may change meanwhile.
     const bundle: ClipboardBundle = {
       token: crypto.randomUUID(),
       pageId: context.pageId,
+      root: context.root,
       strokes: env.strokes.filter(stroke => ids.has(stroke.id)),
       shapes: env.shapes.filter(shape => objectIds.has(shape.id)),
       blocks: env.typstBlocks.filter(block => objectIds.has(block.id)).map(block => ({
-        source: block.source, ...block.transform,
+        id: block.id, addonData: block.addonData, source: block.source, ...block.transform,
         heightPt: env.workspace?.querySelector<HTMLElement>(`.active-page [data-object-id="${CSS.escape(block.id)}"]`)?.offsetHeight ?? 0,
       })),
       images: [],
@@ -489,9 +496,12 @@ export function createSelection(env: SelectionEnvironment) {
       return null;
     }
     bundle.images = selectedImages.map((image, index) => ({
-      ...imageData[index]!, alt: image.alt, x: image.x, y: image.y,
+      ...imageData[index]!, id: image.id, addonData: image.addonData, alt: image.alt, x: image.x, y: image.y,
       widthPt: image.widthPt, heightPt: image.heightPt, scale: image.scale, rotation: image.rotation,
     }));
+    const copied = new Set([...bundle.shapes, ...bundle.blocks, ...bundle.images]
+      .flatMap(({ id }) => id ? [id] : []));
+    bundle.groups = completeSelectedGroups(canonicalObjects, copied);
     return isEmptyBundle(bundle) ? null : bundle;
   }
 
@@ -532,16 +542,21 @@ export function createSelection(env: SelectionEnvironment) {
     await pasteBundle(bundle, at);
   }
 
-  function freshObjectId(prefix: string): string {
-    const taken = new Set([
+  function takenObjectIds(): Set<string> {
+    return new Set([
       ...env.typstBlocks.map((entry) => entry.id),
       ...env.images.map((entry) => entry.id),
       ...env.shapes.map((entry) => entry.id),
       ...(env.activeSnapshot?.page.objects.map((object) => object.id) ?? []),
     ]);
+  }
+
+  function freshObjectId(prefix: string, taken: Set<string>): string {
     let number = 1;
     while (taken.has(`${prefix}-${String(number).padStart(3, "0")}`)) number += 1;
-    return `${prefix}-${String(number).padStart(3, "0")}`;
+    const id = `${prefix}-${String(number).padStart(3, "0")}`;
+    taken.add(id);
+    return id;
   }
 
   /// `at` is a page point to centre the paste on (from the context menu); without it a paste
@@ -571,6 +586,25 @@ export function createSelection(env: SelectionEnvironment) {
     const newStrokes = pastedStrokes(bundle.strokes, shift, zIndex, () => crypto.randomUUID());
     zIndex += newStrokes.length;
     const newShapes = pastedShapes(bundle.shapes, shift, zIndex, readingOrder, () => crypto.randomUUID());
+    const taken = takenObjectIds();
+    const destination = bundle.root === context.root && bundle.pageId === context.pageId
+      ? new Set(taken) : new Set<string>();
+    const blockIds = bundle.blocks.map(() => freshObjectId("typst", taken));
+    const imageIds = bundle.images.map(() => freshObjectId("image", taken));
+    const copies = new Map<string, string>();
+    function recordCopies(originals: { id?: string }[], newIds: string[]) {
+      originals.forEach(({ id }, index) => { if (id) copies.set(id, newIds[index]); });
+    }
+    recordCopies(bundle.shapes, newShapes.map(({ id }) => id));
+    recordCopies(bundle.blocks, blockIds);
+    recordCopies(bundle.images, imageIds);
+    const groups = bundle.groups ?? [];
+    recordCopies(groups, groups.map(() => crypto.randomUUID()));
+    const parents = new Map(groups.flatMap((group) => group.childIds.map((id) => [id, copies.get(group.id)!] as const)));
+    for (const [index, shape] of newShapes.entries()) {
+      shape.groupId = parents.get(bundle.shapes[index].id) ?? null;
+      if (shape.addonData) shape.addonData = pastedAddonData(shape.addonData, copies, destination);
+    }
     zIndex += newShapes.length;
     readingOrder += newShapes.length;
 
@@ -578,14 +612,16 @@ export function createSelection(env: SelectionEnvironment) {
       newShapes.length > 0 ? { kind: "shape", id: newShapes.at(-1)!.id } : null;
     if (newShapes.length > 0) env.shapes = [...env.shapes, ...newShapes];
 
-    for (const block of bundle.blocks) {
-      const id = freshObjectId("typst");
+    for (const [index, block] of bundle.blocks.entries()) {
+      const id = blockIds[index];
       env.typstBlocks = [
         ...env.typstBlocks,
         {
           id,
           path: `blocks/${env.activePageId}-${id}.typ`,
           source: block.source,
+          addonData: pastedAddonData(block.addonData, copies, destination),
+          groupId: block.id ? parents.get(block.id) : undefined,
           transform: {
             x: block.x + shift.dx,
             y: block.y + shift.dy,
@@ -603,13 +639,15 @@ export function createSelection(env: SelectionEnvironment) {
 
     for (const [index, image] of bundle.images.entries()) {
       const path = paths[index];
-      const id = freshObjectId("image");
+      const id = imageIds[index];
       env.images = [
         ...env.images,
         {
           id,
           path,
           url: URL.createObjectURL(new Blob([image.bytes.slice()], { type: image.mime })),
+          addonData: pastedAddonData(image.addonData, copies, destination),
+          groupId: image.id ? parents.get(image.id) : undefined,
           alt: image.alt,
           x: image.x + shift.dx,
           y: image.y + shift.dy,
@@ -623,6 +661,14 @@ export function createSelection(env: SelectionEnvironment) {
       ];
       lastObject = { kind: "image", id };
     }
+
+    const now = new Date().toISOString();
+    if (groups.length) env.addCopiedGroups?.(groups.map((group) => ({
+      ...group, id: copies.get(group.id)!, childIds: group.childIds.map((id) => copies.get(id)!),
+      x: group.x + shift.dx, y: group.y + shift.dy, zIndex: zIndex++, readingOrder: readingOrder++,
+      groupId: parents.get(group.id) ?? null, createdAt: now, modifiedAt: now,
+      addonData: pastedAddonData(group.addonData, copies, destination),
+    })));
 
     if (newStrokes.length > 0) env.changeStrokes([...env.strokes, ...newStrokes], notice("workspace.pastedInk"));
     if (lastObject) env.queueCommit(notice("workspace.pasted"));
@@ -818,10 +864,12 @@ export function createSelection(env: SelectionEnvironment) {
 
   function scheduleSelectionToolbar(attempt = 0) {
     if (selectionToolbarFrame) cancelAnimationFrame(selectionToolbarFrame);
+    if (env.zooming) return;
     selectionToolbarFrame = requestAnimationFrame(() => {
       selectionToolbarFrame = undefined;
       // A block just created or pasted is selected before it is on the page: its element appears
       // a few frames later. Keep looking briefly instead of leaving the toolbar hidden for good.
+      if (env.zooming) return;
       if (!positionSelectionToolbar() && attempt < 30) scheduleSelectionToolbar(attempt + 1);
     });
   }
@@ -836,7 +884,7 @@ export function createSelection(env: SelectionEnvironment) {
         .querySelector<HTMLElement>(`.active-page [data-object-id="${CSS.escape(objectId)}"]`)
         ?.getBoundingClientRect() ?? null;
     } else {
-      const bounds = mixedSelectionBounds ?? selectionBounds(env.strokes, inkActionIds());
+      const bounds = env.regionBounds ?? mixedSelectionBounds ?? selectionBounds(env.strokes, inkActionIds());
       const frame = env.pageFrame?.getBoundingClientRect();
       if (bounds && frame) {
         const view = { pageOriginX: 0, pageOriginY: 0, zoom: env.zoom };
@@ -859,10 +907,16 @@ export function createSelection(env: SelectionEnvironment) {
       selectionToolbarPosition = { left: 0, top: 0, ready: false };
       return true;
     }
+    // The palette and the undo card float over the page too; the bar must not land on them.
+    const chrome = [...env.workspace.querySelectorAll<HTMLElement>(".instrument-palette, .history-pill")]
+      .map((element) => element.getBoundingClientRect());
     const placed = placeFloatingToolbar(
       anchor,
       selectionToolbarElement.getBoundingClientRect(),
       boundary,
+      10,
+      12,
+      chrome,
     );
     selectionToolbarPosition = { left: placed.left, top: placed.top, ready: true };
     return true;

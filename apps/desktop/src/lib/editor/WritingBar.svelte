@@ -51,7 +51,7 @@
          platform's own arrow. -->
     <label class="menu-select heading">
       <span class="sr-only">{$t("editor.headingLevel")}</span>
-      <span class="face" aria-hidden="true">H<span class="caret">▾</span></span>
+      <span class="face" aria-hidden="true">H<svg class="caret" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg></span>
       <select aria-label={$t("editor.headingLevel")} title={$t("editor.headingsCtrlAlt")} onchange={choose}>
         <option value="">{$t("editor.headingLevel")}</option>
         <option value="heading-1">{$t("editor.heading")}</option>
@@ -98,15 +98,16 @@
 <style>
   .writing-bar {
     display: flex;
-    min-height: 42px;
+    min-height: 48px;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
-    padding: 7px 12px;
-    /* No background of its own: the strip above is the lighter chrome, this row sits on the panel
-       body, and the rule below separates it from the darker editor. */
+    gap: 8px;
+    padding: 8px 12px;
+    /* No background of its own: it sits on the panel, and the rule below separates it from the
+       recessed editor. */
     border-bottom: 1px solid var(--edge-soft);
-    color: var(--text, #e9ebee);
+    color: var(--text);
+    font-family: var(--font-ui);
   }
 
   .tools {
@@ -125,8 +126,8 @@
     border: 0;
     border-radius: var(--radius);
     background: transparent;
-    color: var(--muted, #aeb5be);
-    font: var(--text-md)/1 var(--font-ui, Bahnschrift, system-ui, sans-serif);
+    color: var(--muted);
+    font: var(--text-md)/1 var(--font-ui);
   }
 
   .tools button {
@@ -135,11 +136,16 @@
     padding: 0;
     cursor: pointer;
     place-items: center;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
   .tools button:hover {
     background: var(--wash);
-    color: var(--text, #e9ebee);
+    color: var(--text);
+  }
+
+  .tools button:active {
+    background: var(--wash-strong);
   }
 
   .tools button svg {
@@ -148,6 +154,7 @@
     fill: none;
     stroke: currentColor;
     stroke-linecap: round;
+    stroke-linejoin: round;
     stroke-width: var(--stroke-dense);
   }
 
@@ -160,8 +167,8 @@
 
   .tools button:focus-visible,
   .menu-select:has(select:focus-visible) .face {
-    outline: 2px solid var(--blueprint, #4c8df0);
-    outline-offset: 1px;
+    outline: 2px solid var(--blueprint-light);
+    outline-offset: 2px;
   }
 
   /* The select carries the behaviour and the face carries the look, so the select sits invisibly
@@ -187,45 +194,52 @@
     align-items: center;
     padding: 0 8px;
     border-radius: var(--radius);
-    color: var(--muted, #aeb5be);
-    font: var(--text-md)/1 var(--font-ui, Bahnschrift, system-ui, sans-serif);
+    color: var(--muted);
+    font: var(--text-md)/1 var(--font-ui);
     gap: 4px;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
   .menu-select:hover .face {
     background: var(--wash);
-    color: var(--text, #e9ebee);
+    color: var(--text);
   }
 
+  .menu-select:active .face {
+    background: var(--wash-strong);
+  }
+
+  /* Insert is the one labelled action in the bar: a secondary button. */
   .insert .face {
-    border: 1px solid var(--edge);
-    background: var(--surround, #1b1e24);
-    color: var(--text, #e9ebee);
-    font-size: var(--text-md);
-    gap: 6px;
-  }
-
-  .insert:hover .face {
     background: var(--wash);
+    color: var(--text);
+    gap: 8px;
+    padding: 0 12px;
   }
 
-  .insert svg {
+  .insert:hover .face,
+  .insert:active .face {
+    background: var(--wash-strong);
+  }
+
+  .face svg {
     width: var(--icon-dense);
     height: var(--icon-dense);
+    flex: none;
     fill: none;
     stroke: currentColor;
     stroke-linecap: round;
+    stroke-linejoin: round;
     stroke-width: var(--stroke-dense);
   }
 
   .caret {
-    color: var(--quiet, #6a727c);
-    font-size: var(--text-xs);
+    color: var(--quiet);
   }
 
   option {
-    background: var(--panel, #23272f);
-    color: var(--text, #e9ebee);
+    background: var(--panel);
+    color: var(--text);
   }
 
   .math {
@@ -235,7 +249,7 @@
 
   .rule {
     width: 1px;
-    height: 18px;
+    height: 16px;
     flex: none;
     background: var(--edge);
   }
@@ -253,5 +267,9 @@
     .spacer {
       flex-basis: 100%;
     }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tools button, .menu-select .face { transition: none; }
   }
 </style>

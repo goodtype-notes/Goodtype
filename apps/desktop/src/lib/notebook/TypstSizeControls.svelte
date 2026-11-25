@@ -60,17 +60,20 @@
 </div>
 
 <style>
-  .typst-sizing { display: flex; flex-wrap: wrap; gap: 6px 12px; padding: 4px; }
-  .dimension { display: flex; flex: 1; align-items: center; justify-content: space-between; gap: 6px; color: var(--muted); font-size: var(--text-sm); white-space: nowrap; }
-  .value { display: flex; align-items: center; gap: 3px; border-radius: var(--radius); background: var(--wash); }
-  input { box-sizing: border-box; width: 46px; height: var(--control-dense); padding: 0 3px; border: 0; border-radius: var(--radius); background: transparent; color: var(--text); font: inherit; font-size: var(--text-md); font-variant-numeric: tabular-nums; text-align: right; appearance: textfield; }
+  .typst-sizing { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 8px 12px; }
+  .dimension { display: flex; flex: 1; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: var(--text-sm); font-weight: 600; white-space: nowrap; }
+  .value { display: flex; align-items: center; gap: 4px; padding-right: 2px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); color: var(--muted); font-weight: 400; transition: border-color var(--fast) ease; }
+  .value:hover { border-color: var(--edge-strong); }
+  .value:focus-within { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
+  input { box-sizing: border-box; width: 52px; height: calc(var(--control) - 2px); padding: 0 4px 0 8px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: var(--text-md); font-variant-numeric: tabular-nums; text-align: right; appearance: textfield; }
   input::-webkit-inner-spin-button, input::-webkit-outer-spin-button { margin: 0; appearance: none; }
-  input:focus { outline: 2px solid var(--blueprint); outline-offset: -2px; background: var(--panel); }
+  input:focus { outline: none; }
   .arrows { display: flex; flex-direction: column; }
   button { display: grid; width: var(--control-dense); height: calc(var(--control-dense) / 2); padding: 0; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; place-items: center; }
   button:hover:not(:disabled) { background: var(--wash); color: var(--text); }
-  button:disabled { opacity: 0.35; cursor: default; }
-  button:focus-visible { outline: 2px solid var(--blueprint); outline-offset: -1px; }
+  button:active:not(:disabled) { background: var(--wash-strong); }
+  button:disabled { opacity: var(--disabled); cursor: default; }
+  button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: -2px; }
   svg { width: var(--icon-dense); height: var(--icon-dense); fill: none; stroke: currentColor; stroke-width: var(--stroke-dense); stroke-linecap: round; stroke-linejoin: round; }
   @media (pointer: coarse) { input { min-height: var(--control-touch); } button { width: var(--control-touch); height: calc(var(--control-touch) / 2); } }
 </style>

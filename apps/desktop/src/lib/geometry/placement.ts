@@ -58,9 +58,19 @@ function clampAxis(value: number, extent: number, pageExtent: number, minimum: n
   return Math.min(Math.max(value, lowest), highest);
 }
 
+type Box = Pick<ViewRect, "left" | "top" | "right" | "bottom">;
+
+function overlaps(a: Box, b: Box): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
 /**
  * Place a floating control above its selected object, or below when the top edge is too close.
  * Coordinates are relative to `boundary`, ready for an absolutely positioned child.
+ *
+ * `avoid` lists other floating chrome in window coordinates (the tool palette, the undo card).
+ * When the preferred side would land on one of them and the other side would not, the control
+ * takes the other side, so two floating surfaces never stack on each other.
  */
 export function placeFloatingToolbar(
   anchor: ViewRect,
@@ -68,21 +78,35 @@ export function placeFloatingToolbar(
   boundary: ViewRect,
   gap = 10,
   margin = 12,
+  avoid: Box[] = [],
 ): { left: number; top: number; side: "above" | "below" } {
-  const above = anchor.top - toolbar.height - gap;
-  const side = above >= boundary.top + margin ? "above" : "below";
-  const wantedTop = side === "above" ? above : anchor.bottom + gap;
   const left = Math.min(
     Math.max(anchor.left + (anchor.width - toolbar.width) / 2, boundary.left + margin),
     boundary.right - toolbar.width - margin,
   );
-  const top = Math.min(
-    Math.max(wantedTop, boundary.top + margin),
+  const topFor = (side: "above" | "below") => Math.min(
+    Math.max(side === "above" ? anchor.top - toolbar.height - gap : anchor.bottom + gap, boundary.top + margin),
     boundary.bottom - toolbar.height - margin,
   );
+  const hit = (top: number) =>
+    avoid.find(box => overlaps({ left, top, right: left + toolbar.width, bottom: top + toolbar.height }, box));
+  const inside = (top: number) => top >= boundary.top + margin && top + toolbar.height <= boundary.bottom - margin;
+  let side: "above" | "below" = anchor.top - toolbar.height - gap >= boundary.top + margin ? "above" : "below";
+  const other = side === "above" ? "below" : "above";
+  if (hit(topFor(side)) && !hit(topFor(other))) side = other;
+  let top = topFor(side);
+  // Blocked on both sides (a selection tucked under the palette): step past what is in the way,
+  // downward first, then upward, as long as the bar stays inside the boundary.
+  for (const direction of ["down", "up"] as const) {
+    let candidate = top;
+    for (let box = hit(candidate), steps = 0; box && steps < avoid.length; box = hit(candidate), steps++) {
+      candidate = direction === "down" ? box.bottom + gap : box.top - gap - toolbar.height;
+    }
+    if (!hit(candidate) && inside(candidate)) { top = candidate; break; }
+  }
   return {
     left: left - boundary.left,
     top: top - boundary.top,
-    side,
+    side: top >= anchor.top ? "below" : "above",
   };
 }

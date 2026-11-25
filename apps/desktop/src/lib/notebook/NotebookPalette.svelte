@@ -8,11 +8,11 @@
   type PaletteDrag = { pointerId: number; size: number };
   let { workspace, settings, changeSettings, onStatus, closeToolCard, onUndo, onRedo,
     undoDisabled, redoDisabled, paletteDock = $bindable("bottom"), paletteElement = $bindable(),
-    paletteDragging = $bindable(false), cards, tools, children }:
+    paletteDragging = $bindable(false), baseRailWidth = $bindable(0), railAvailableWidth = $bindable(0), cards, tools, children }:
     { workspace: HTMLElement | undefined; settings: AppSettings; changeSettings: (next: AppSettings) => void;
       onStatus: (text: UiText) => void; closeToolCard: () => void; onUndo: () => void; onRedo: () => void;
       undoDisabled: boolean; redoDisabled: boolean; paletteDock?: PaletteDock; paletteElement?: HTMLElement;
-      paletteDragging?: boolean; cards: Snippet; tools: Snippet; children: Snippet } = $props();
+      paletteDragging?: boolean; baseRailWidth?: number; railAvailableWidth?: number; cards: Snippet; tools: Snippet; children: Snippet } = $props();
   let workspaceChrome = $state<HTMLElement>();
   let historyElement = $state<HTMLElement>();
   // The instrument bar snaps magnetically to the nearest workspace edge: horizontal along the
@@ -170,6 +170,10 @@
         (Number.parseFloat(style.paddingLeft) || 0) -
         (Number.parseFloat(style.paddingRight) || 0);
       const gap = Number.parseFloat(style.columnGap) || 0;
+      const segments = rail.querySelector<HTMLElement>(".addon-segments:not(.measuring)");
+      const primaryGap = Number.parseFloat(getComputedStyle(rail.querySelector(".palette-primary") ?? rail).columnGap) || 0;
+      baseRailWidth = rail.offsetWidth - (segments ? segments.offsetWidth + 3 + primaryGap : 0);
+      railAvailableWidth = available;
       chromeCrowded = rail.scrollWidth + pill.scrollWidth + gap * 2 > available;
     };
     measure();
@@ -342,7 +346,7 @@
 <style>
   button { border: 0; }
   button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
-  button:disabled { cursor: not-allowed; opacity: .32; }
+  button:disabled { cursor: default; opacity: var(--disabled); }
   .workspace-chrome {
     position: absolute;
     z-index: 15;
@@ -367,14 +371,14 @@
     border: 1px solid var(--edge);
     border-radius: var(--radius-lg);
     background: var(--panel);
-    box-shadow: 0 12px 30px rgb(0 0 0 / 45%);
+    box-shadow: var(--shadow-menu);
     gap: 0;
     cursor: grab;
     touch-action: none;
-    transition: border-color 120ms ease, box-shadow 120ms ease;
+    transition: border-color var(--fast) ease, box-shadow var(--fast) ease;
   }
   .history-pill:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
-  .history-pill.dragging { border-color: rgb(76 141 240 / 72%); cursor: grabbing; }
+  .history-pill.dragging { border-color: var(--blueprint); cursor: grabbing; }
   /* The gap between the buttons is the handle, so it has to be wide enough to be one. The dots
      only appear on approach, so the control reads as two buttons until it needs to read as more. */
   /* The pill travels the way the rail does: it becomes one touch-sized puck under the pointer,
@@ -388,9 +392,8 @@
     width: var(--control-touch);
     height: var(--control-touch);
     padding: 0;
-    border-color: rgb(76 141 240 / 72%);
-    box-shadow: 0 14px 34px rgb(0 0 0 / 62%);
-    animation: palette-pickup 120ms cubic-bezier(0.16, 1, 0.3, 1);
+    border-color: var(--blueprint);
+    box-shadow: var(--shadow-menu);
     will-change: left, top;
   }
   .history-pill.dragging button,
@@ -436,25 +439,23 @@
   }
 
   .history-pill.reduced-motion { transition: none; }
-  .history-pill.reduced-motion.dragging { animation: none; }
 
   .history-pill .grip {
     width: 14px;
     height: var(--control);
     flex: none;
-    background-image: radial-gradient(circle, var(--muted) 1.1px, transparent 1.2px);
+    background-image: radial-gradient(circle, var(--quiet) 1.1px, transparent 1.2px);
     background-position: center;
     background-size: 4px 6px;
     background-repeat: repeat-y;
     opacity: 0;
-    transition: opacity 120ms ease;
+    transition: opacity var(--fast) ease;
   }
   .history-pill:hover .grip,
   .history-pill:focus-visible .grip,
-  .history-pill.dragging .grip { opacity: 0.8; }
+  .history-pill.dragging .grip { opacity: 1; }
   @media (prefers-reduced-motion: reduce) {
     .history-pill, .history-pill .grip { transition: none; }
-    .history-pill.dragging { animation: none; }
   }
   .history-pill button {
     display: grid;
@@ -462,11 +463,13 @@
     height: var(--control);
     border-radius: var(--radius);
     background: transparent;
-    color: var(--text);
+    color: var(--muted);
     cursor: pointer;
     place-items: center;
   }
-  .history-pill button:hover:not(:disabled) { background: var(--wash); }
+  .history-pill button:hover:not(:disabled) { background: var(--wash); color: var(--text); }
+  .history-pill button:active:not(:disabled) { background: var(--wash-strong); }
+  .history-pill button:disabled { cursor: default; }
   .history-pill svg {
     width: var(--icon);
     height: var(--icon);
@@ -492,9 +495,9 @@
     border: 1px solid var(--edge);
     border-radius: var(--radius-lg);
     background: var(--panel);
-    box-shadow: 0 20px 50px rgb(0 0 0 / 52%);
+    box-shadow: var(--shadow-panel);
     touch-action: none;
-    transition: border-color 120ms ease, box-shadow 120ms ease;
+    transition: border-color var(--fast) ease, box-shadow var(--fast) ease;
   }
 
   /* Placement comes from `chromeLayout`, which is the only thing that sees every piece of chrome
@@ -521,7 +524,7 @@
     grid-row: 2;
     gap: 3px;
     opacity: 1;
-    transition: opacity 120ms ease;
+    transition: opacity var(--fast) ease;
   }
 
   .palette-grip {
@@ -556,11 +559,9 @@
     width: var(--control-touch);
     height: var(--control-touch);
     padding: 0;
-    border-color: rgb(76 141 240 / 72%);
+    border-color: var(--blueprint);
     grid-template: 1fr / 1fr;
     gap: 0;
-    box-shadow: 0 14px 34px rgb(0 0 0 / 62%);
-    animation: palette-pickup 120ms cubic-bezier(0.16, 1, 0.3, 1);
     will-change: left, top;
   }
 
@@ -613,8 +614,9 @@
     cursor: grab;
   }
 
-  .palette-grip:hover { background: var(--wash); }
-  .palette-grip:focus-visible { outline: 2px solid var(--blueprint); outline-offset: 1px; }
+  .palette-grip:hover { background: var(--wash); color: var(--text); }
+  .palette-grip:active { background: var(--wash-strong); }
+  .palette-grip:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 
   .palette-grip-dots {
     display: grid;
@@ -627,7 +629,7 @@
     width: 3.5px;
     height: 3.5px;
     border-radius: 50%;
-    background: rgb(255 255 255 / 28%);
+    background: currentColor;
   }
 
   .palette-transport-icon {
@@ -659,30 +661,15 @@
   .dragging .palette-grip-dots { display: none; }
   .dragging .palette-transport-icon { display: block; }
 
-  @keyframes palette-pickup {
-    from {
-      opacity: 0.82;
-      transform: scale(0.9);
-    }
-  }
-
   .instrument-palette.reduced-motion,
   .instrument-palette.reduced-motion .palette-primary {
     transition: none;
-  }
-
-  .instrument-palette.reduced-motion.dragging {
-    animation: none;
   }
 
   @media (prefers-reduced-motion: reduce) {
     .instrument-palette,
     .palette-primary {
       transition: none;
-    }
-
-    .instrument-palette.dragging {
-      animation: none;
     }
   }
 

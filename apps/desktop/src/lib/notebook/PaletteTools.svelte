@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from "../i18n";
+  import { t, locale } from "../i18n";
   import { centredDash } from "./dash";
   import type { StrokePattern } from "../model";
   import type { AppSettings, PenPreset } from "../settings";
@@ -11,7 +11,13 @@
   } from "./instruments";
   import { visiblePaletteTools, type PaletteCommand } from "./palette";
 
+  import { contributionText, type AddonContribution, type AddonTool } from "../ipc/addons";
+
   type Props = {
+    addonTools?: { addon: AddonContribution; tool: AddonTool }[];
+    addonCardOpen?: boolean;
+    activeAddonTool?: { addonId: string; toolId: string } | null;
+    onAddonTool?: (addon: AddonContribution, tool: AddonTool, tile: HTMLElement) => void;
     settings: AppSettings;
     activeCommands: readonly PaletteCommand[];
     expandedCommand: PaletteCommand | null;
@@ -20,7 +26,7 @@
     onActivate: (command: PaletteCommand, tile: HTMLElement) => void;
   };
 
-  let { settings, activeCommands, expandedCommand, horizontal, onActivate }: Props = $props();
+  let { settings, activeCommands, expandedCommand, horizontal, onActivate, addonTools = [], activeAddonTool, addonCardOpen, onAddonTool }: Props = $props();
 
   // The mark under each instrument is the line it will actually lay down: the pen's colour,
   // thickness and pattern, the highlighter's translucent band. That, more than the silhouette,
@@ -44,7 +50,7 @@
   {#if dividerBefore}
     <span class:horizontal class="palette-divider"></span>
   {/if}
-  {@const active = activeCommands.includes(definition.id)}
+  {@const active = !activeAddonTool && activeCommands.includes(definition.id)}
   <button
     class:active
     class="tool-tile"
@@ -95,6 +101,21 @@
   </button>
 {/each}
 
+{#if addonTools.length}<span class:horizontal class="palette-divider"></span>{/if}
+{#each addonTools as { addon, tool } (`${addon.addonId}/${tool.id}`)}
+  {@const label = contributionText(addon, tool.label, $locale)}
+  {@const selected = activeAddonTool?.addonId === addon.addonId && activeAddonTool.toolId === tool.id}
+  <button class="tool-tile" class:active={selected} type="button"
+    aria-label={label} aria-pressed={selected} aria-expanded={selected && (tool.stroke || tool.settings.length) ? !!addonCardOpen : undefined} title={label}
+    onclick={(event) => onAddonTool?.(addon, tool, event.currentTarget)}>
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      {#each tool.icon.paths as path}
+        <path d={path} />
+      {/each}
+    </svg>
+  </button>
+{/each}
+
 <style>
   .tool-tile {
     position: relative;
@@ -104,15 +125,17 @@
     flex: none;
     padding: 0;
     border: 0;
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius);
     background: transparent;
-    color: #c4cad2;
+    color: var(--muted);
     cursor: pointer;
     place-items: center;
   }
-  .tool-tile:hover { background: var(--wash); }
-  .tool-tile.active { background: var(--blueprint); color: #fff; }
-  .tool-tile:focus-visible { outline: 2px solid var(--blueprint); outline-offset: 1px; }
+  .tool-tile:hover { background: var(--wash); color: var(--text); }
+  .tool-tile:active:not(.active) { background: var(--wash-strong); }
+  .tool-tile.active { background: var(--blueprint); color: var(--on-accent); }
+  .tool-tile.active:hover { background: var(--blueprint-hover); }
+  .tool-tile:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
   .tool-tile svg {
     /* A touch larger than chrome icons: the tip is the detail that names the instrument. */
     width: calc(var(--icon) + 4px);
@@ -125,10 +148,10 @@
   }
   .tool-tile svg circle { fill: currentColor; stroke: none; }
   /* Ink sits on a pale halo so graphite stays visible on the dark rail and on the blue tile. */
-  .tool-tile svg .ink-halo { stroke: rgb(255 255 255 / 62%); }
+  .tool-tile svg .ink-halo { stroke: var(--paper); stroke-opacity: 0.62; }
   .tool-tile svg .band { stroke: none; }
   .tool-tile svg circle.eraser-size { fill: none; stroke: currentColor; stroke-width: 1.2; }
   .tool-tile svg path.eraser-cut { fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
-  .palette-divider { width: 26px; height: 1px; margin: 1px 0; background: var(--edge); }
+  .palette-divider { width: 26px; height: 1px; margin: 1px 0; background: var(--edge-soft); }
   .palette-divider.horizontal { width: 1px; height: 26px; margin: 0 3px; }
 </style>

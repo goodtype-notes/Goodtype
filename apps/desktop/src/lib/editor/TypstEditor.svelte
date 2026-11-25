@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { extractFocus } from "../helper/editorEntry";
   import { t, notice, renderMessage, type UiText } from "../i18n";
   import { acceptCompletion, autocompletion } from "@codemirror/autocomplete";
   import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
@@ -23,6 +24,7 @@
     onChange,
     onExit,
     onLineWrapToggle,
+    onAskAI,
   }: {
     value: string;
     /** Notebook root, needed to ask Rust for compiler-derived completions. */
@@ -35,9 +37,11 @@
     onChange: (value: string) => void;
     onExit: () => void;
     onLineWrapToggle?: () => void;
+    onAskAI?: () => void;
   } = $props();
 
   let host: HTMLDivElement;
+
   let view: EditorView | undefined;
   let applyingExternalValue = false;
   let highlightTimer: ReturnType<typeof setTimeout> | undefined;
@@ -78,6 +82,7 @@
         // so Tab falls through to snippet-field navigation and then to indentation.
         Prec.highest(
           keymap.of([
+            { key: "Mod-Shift-Space", run: () => { if (!onAskAI) return false; onAskAI(); return true; } },
             { key: "Tab", run: acceptCompletion },
             { key: "Space", run: spaceInsideMath },
             { key: "Enter", run: newlineInsidePair },
@@ -148,6 +153,8 @@
 
   /// Lets the side view take the caret back after a pen stroke, so drawing on the canvas never
   /// costs the writer their place in the source.
+  export function getFocus() { return view ? extractFocus(view.state) : null; }
+
   export function focus() {
     view?.focus();
   }
@@ -303,7 +310,7 @@
     min-width: 18rem;
     max-width: 42rem;
     border-radius: var(--radius-lg);
-    box-shadow: 0 14px 36px rgb(0 0 0 / 50%);
+    box-shadow: var(--shadow-panel);
     text-align: left;
     /* It floats over the page now rather than sitting flush under the block, so it carries its
        own opaque surface instead of borrowing the block's. */
@@ -336,15 +343,15 @@
     /* Capped at `maxLines`; longer sources belong in the side view. 1.65 is the line-height
        set below, and the addend covers the editor's own vertical padding. */
     max-height: calc(var(--max-lines) * 1.65 * 12px + 10px);
-    border: 1px solid rgb(255 255 255 / 10%);
-    background: #16181d;
-    color: #e9ebee;
-    font: 12px/1.65 "Cascadia Mono", Consolas, monospace;
+    border: 1px solid var(--edge);
+    background: var(--inset);
+    color: var(--text);
+    font: 12px/1.65 var(--font-code);
   }
 
   .editor :global(.cm-editor.cm-focused) {
-    outline: 1.5px solid #4c8df0;
-    outline-offset: 0;
+    outline: 2px solid var(--blueprint-light);
+    outline-offset: -2px;
   }
 
   .editor :global(.cm-scroller) {
@@ -353,119 +360,125 @@
 
   .overflow-hint {
     margin: 0;
-    padding: 5px 9px;
-    border: 1px solid rgb(255 255 255 / 10%);
+    padding: 8px 12px;
+    border: 1px solid var(--edge);
     border-top: 0;
-    background: #1b1e24;
-    color: #aeb5be;
-    font: 10px/1.4 Bahnschrift, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    background: var(--surround);
+    color: var(--muted);
+    font: var(--text-sm)/1.4 var(--font-ui);
   }
 
   .help {
-    padding: 7px 9px;
-    border: 1px solid rgb(255 255 255 / 10%);
+    padding: 8px 12px;
+    border: 1px solid var(--edge);
     border-top: 0;
-    background: #1b1e24;
-    color: #aeb5be;
-    font: 11px/1.45 Bahnschrift, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    background: var(--surround);
+    color: var(--muted);
+    font: var(--text-sm)/1.4 var(--font-ui);
   }
 
   .help.code {
-    font-family: "Cascadia Mono", Consolas, monospace;
+    font-family: var(--font-code);
   }
 
   .editor :global(.cm-gutters) {
-    border-right-color: rgb(255 255 255 / 8%);
-    background: #16181d;
-    color: #4a525c;
+    border-right: 1px solid var(--edge-soft);
+    background: var(--inset);
+    color: var(--quiet);
   }
 
   .editor :global(.cm-activeLine),
   .editor :global(.cm-activeLineGutter) {
-    background: rgb(255 255 255 / 4%);
+    background: var(--fill-soft);
+  }
+
+  .editor :global(.cm-activeLineGutter) {
+    color: var(--muted);
   }
 
   .editor :global(.cm-cursor) {
-    border-left-color: #4c8df0;
+    border-left-color: var(--blueprint-light);
   }
 
+  .editor :global(.cm-selectionBackground) {
+    background: var(--accent-select);
+  }
+
+  /* Syntax colours are content, not interface. */
   .editor :global(.cm-typst-comment) { color: #737d89; font-style: italic; }
   .editor :global(.cm-typst-string) { color: #a8d1a0; }
   .editor :global(.cm-typst-keyword) { color: #c6a0f6; }
   .editor :global(.cm-typst-number),
   .editor :global(.cm-typst-bool) { color: #f4b76e; }
-  .editor :global(.cm-typst-function) { color: #7fb0f7; }
+  .editor :global(.cm-typst-function) { color: var(--blueprint-light); }
   .editor :global(.cm-typst-type),
   .editor :global(.cm-typst-namespace) { color: #e3a6e8; }
   .editor :global(.cm-typst-label),
   .editor :global(.cm-typst-ref),
   .editor :global(.cm-typst-link),
   .editor :global(.cm-typst-decorator) { color: #75d2c6; }
-  .editor :global(.cm-typst-heading) { color: #f1d17a; font-weight: 650; }
+  .editor :global(.cm-typst-heading) { color: #f1d17a; font-weight: 600; }
   .editor :global(.cm-typst-raw) { color: #d6a872; }
   .editor :global(.cm-typst-escape) { color: #f08c82; }
   .editor :global(.cm-typst-error) {
-    text-decoration: underline wavy #e5645e;
+    text-decoration: underline wavy var(--oxide);
     text-underline-offset: 2px;
   }
   .editor :global(.cm-typst-math) { color: #8fc8ff; }
   .editor :global(.cm-lintRange-error) {
     background-image: none;
-    background: rgb(229 100 94 / 12%);
-    text-decoration: underline wavy #ff6b66;
+    background: var(--oxide-wash);
+    text-decoration: underline wavy var(--oxide);
     text-decoration-thickness: 1.5px;
     text-underline-offset: 3px;
   }
   .editor :global(.cm-lintRange-warning) {
     background-image: none;
-    text-decoration: underline wavy #f1c76d;
+    text-decoration: underline wavy var(--amber);
     text-underline-offset: 3px;
   }
 
-  /* Tooltips render into the document body (see `tooltips()` above) so they are no longer
-     descendants of `.editor`; these rules are therefore global. The popup needs a fully opaque
-     surface of its own — CodeMirror's default is light and semi-transparent, which is
-     unreadable against white paper. */
+  /* Tooltips render into the document body, so they are not descendants of `.editor` and these
+     rules are global. The popup needs a fully
+     opaque surface of its own. `!important` on the two properties CodeMirror's base theme sets
+     itself: its `&dark .cm-tooltip` rule is more specific than anything written from outside. */
   :global(.cm-tooltip) {
     /* Above the page, the ink layer, the palette, and the rest of the workspace chrome. */
     z-index: 2000;
-    /* Mirrors the workspace's floating panels (--panel/--text and the overflow menu's edge and
-       shadow). The values are literal because the popup renders into the body, outside the
-       `.workspace-app` subtree where those custom properties are defined.
-       `!important` on the two properties CodeMirror's base theme sets itself: its `&dark
-       .cm-tooltip` rule is more specific than anything we can write from outside, so this is
-       the override point rather than a specificity war. */
-    border: 1px solid rgb(255 255 255 / 12%) !important;
+    border: 1px solid var(--edge) !important;
     border-radius: var(--radius-lg);
-    background: #23272f !important;
-    box-shadow: 0 18px 44px rgb(0 0 0 / 55%);
-    color: #e9ebee;
+    background: var(--panel) !important;
+    box-shadow: var(--shadow-menu);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: var(--text-md);
   }
 
   :global(.cm-tooltip-autocomplete > ul) {
     max-height: 16rem;
     margin: 0;
-    padding: 7px;
+    padding: 4px;
     /* Monospace, because every candidate is inserted as code. */
-    font: 12px/1.6 "Cascadia Mono", Consolas, monospace;
+    font: 12px/1.4 var(--font-code);
   }
 
   :global(.cm-tooltip-autocomplete > ul > li) {
     display: flex;
     align-items: baseline;
-    gap: 10px;
-    padding: 5px 9px;
+    gap: 12px;
+    padding: 4px 8px;
     border-radius: var(--radius);
-    color: #e9ebee;
+    color: var(--text);
   }
 
   :global(.cm-tooltip-autocomplete > ul > li:hover:not([aria-selected])) {
-    background: rgb(255 255 255 / 6%);
+    background: var(--wash);
   }
 
   :global(.cm-tooltip-autocomplete > ul > li[aria-selected]) {
-    background: #4c8df0;
-    color: #ffffff;
+    background: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
+    color: var(--text);
   }
 
   :global(.cm-completionLabel) {
@@ -474,33 +487,24 @@
 
   /* The matched characters, so it is obvious why a candidate is in the list. */
   :global(.cm-completionMatchedText) {
-    color: #7fb0f7;
+    color: var(--blueprint-light);
     text-decoration: none;
     font-weight: 600;
   }
 
-  :global(.cm-tooltip-autocomplete > ul > li[aria-selected] .cm-completionMatchedText) {
-    color: #ffffff;
-  }
-
   /* Carries the glyph for a math symbol (`∑`), so it must stay legible when not selected. */
   :global(.cm-completionDetail) {
-    color: #aeb5be;
+    color: var(--muted);
     font-style: normal;
-  }
-
-  :global(.cm-tooltip-autocomplete > ul > li[aria-selected] .cm-completionDetail) {
-    color: rgb(255 255 255 / 78%);
   }
 
   :global(.cm-completionIcon) {
     width: 1.1em;
     padding-right: 0;
-    opacity: 0.7;
   }
 
   :global(.cm-tooltip.cm-completionInfo) {
     margin-left: 4px;
-    padding: 6px 8px;
+    padding: 8px;
   }
 </style>

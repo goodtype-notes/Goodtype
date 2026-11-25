@@ -1,0 +1,98 @@
+{
+  "addons": [
+    {
+      "id": "goodnotes",
+      "publicKey": "428cc68f6d0b38eae74dcb211e4877c6eb51548daabf24de64a185885c825b3c",
+      "repository": "/goodtype-notes/Goodtype-Goodnotes-Importer",
+      "versions": [
+        {
+          "api": "goodtype-api 0.1",
+          "sha256": "4da82ec75d763973c7096aad4f275eff9befc981735cf2bb75131bcc5a99fe7a",
+          "size": 14881198,
+          "target": "x86_64-pc-windows-msvc",
+          "url": "https://github.com/goodtype-notes/Goodtype-Goodnotes-Importer/releases/download/v0.1.3/goodtype-goodnotes-importer-0.1.3-windows-x64.zip",
+          "version": "0.1.3"
+        }
+      ]
+    },
+    {
+      "id": "onenote",
+      "publicKey": "73bce698801a59fe2d423fd9c6dba8687fe3b92f60bb9f27499e7242c2336c3b",
+      "repository": "/goodtype-notes/Goodtype-OneNote-Importer",
+      "versions": [
+        {
+          "api": "goodtype-api 0.1",
+          "sha256": "b15177638acfccff43b18cc677f0c17b2e44dcd737d7c5a69d71c5f2a7d2be96",
+          "size": 1928459,
+          "target": "x86_64-pc-windows-msvc",
+          "url": "https://github.com/goodtype-notes/Goodtype-OneNote-Importer/releases/download/v0.1.2/goodtype-onenote-importer-0.1.2-windows-x64.zip",
+          "version": "0.1.2"
+        }
+      ]
+    },
+    {
+      "id": "math",
+      "publicKey": "c9beeeed664e245b76771380ed37b66c9405d445e2880af9356d13a384955581",
+      "repository": "/goodtype-notes/Goodtype-Math-Recognition",
+      "versions": [
+        {
+          "api": "goodtype-api 0.1",
+          "sha256": "4179a954ac159aa19aa0065710a12866e5e80299057d62e80dc0c8311af1b7ec",
+          "size": 337200375,
+          "target": "x86_64-pc-windows-msvc",
+          "url": "https://github.com/goodtype-notes/Goodtype-Math-Recognition/releases/download/v0.1.1/goodtype-math-recognizer-0.1.1-windows-x64.zip",
+          "version": "0.1.1"
+        }
+      ]
+    },
+    {
+      "id": "connectors",
+      "publicKey": "210597a7b6ad9c6d9ceb5144d8efdff2a1b387352ae2f70791924a437fdfb4b7",
+      "repository": "/goodtype-notes/Goodtype-Connectors",
+      "versions": [
+        {
+          "api": "goodtype-api 0.1",
+          "sha256": "b86078763692cde412fec45839783e234f736f918ce4a52f3ebde39f32587455",
+          "size": 279694,
+          "target": "x86_64-pc-windows-msvc",
+          "url": "https://github.com/goodtype-notes/Goodtype-Connectors/releases/download/v0.1.0/goodtype-connectors-0.1.0-windows-x64.zip",
+          "version": "0.1.0"
+        }
+      ]
+    },
+    {
+      "id": "engineering-shapes",
+      "publicKey": "3cfbfe38cee6bbc1da2c63caff5b8ef1f0f76db6df0c1c0f1763728781b782d9",
+      "repository": "/goodtype-notes/Goodtype-Engineering-Shapes",
+      "versions": [
+        {
+          "api": "goodtype-api 0.1",
+          "sha256": "89e7bf9599d704fc0f716e2b19ffa6a1be8020d47e4b9c55b7565ae2c96b6b27",
+          "size": 162348,
+          "target": "x86_64-pc-windows-msvc",
+          "url": "https://github.com/goodtype-notes/Goodtype-Engineering-Shapes/releases/download/v0.1.0/goodtype-engineering-shapes-0.1.0-windows-x64.zip",
+          "version": "0.1.0"
+        }
+      ]
+    },
+    {
+      "id": "study-templates",
+      "publicKey": "3c7b9d349406055325ee05156505328d763e3c684cdbc36d1c361a59c92a7acd",
+      "repository": "/goodtype-notes/Goodtype-Study-Templates",
+      "versions": [
+        {
+          "api": "goodtype-api 0.1",
+          "sha256": "d29a6d1ab750d658022c888730d1f14269ca49a3695ed519cfd5a1d500866217",
+          "size": 8948,
+          "target": "x86_64-pc-windows-msvc",
+          "url": "https://github.com/goodtype-notes/Goodtype-Study-Templates/releases/download/v0.1.0/goodtype-study-templates-0.1.0-windows-x64.zip",
+          "version": "0.1.0"
+        }
+      ]
+    }
+  ],
+  "expires": "2027-03-24T09:51:50Z",
+  "format": 1,
+  "issued": "2026-11-24T09:51:50Z",
+  "sequence": 4
+}

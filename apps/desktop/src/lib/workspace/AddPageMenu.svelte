@@ -1,7 +1,9 @@
 <script lang="ts">
+  import type { Snippet } from "svelte";
   import { t, formatNumber, displayLocale } from "../i18n";
   import { dismissable } from "./dismiss";
-  import { resolvePosition, type AddPageGroup, type AddPageSource, type AddPageWhere } from "./addPage";
+  import { sourceBehavior, resolvePosition, type AddPageGroup, type AddPageSource, type AddPageWhere } from "./addPage";
+  import { isPageListSyntax } from "./exportTarget";
 
   /**
    * The add-page panel: three columns instead of one long scroll.
@@ -19,6 +21,7 @@
    * Position and paper are remembered by the caller rather than reset each time it opens.
    */
   let {
+    generators,
     where,
     groups,
     tones,
@@ -38,6 +41,7 @@
     onOrientationChange,
     onClose,
   }: {
+    generators?: Snippet<[import("../model").PagePosition]>;
     where: AddPageWhere;
     groups: AddPageGroup[];
     /** Paper colours. Every template below is shown in whichever one is selected. */
@@ -84,6 +88,8 @@
   let count = $state(1);
   let added = $state(0);
   let panel = $state<HTMLElement>();
+  /** Which PDF pages to bring in. Only the syntax is checked here; the file is not chosen yet. */
+  let pdfPages = $state("");
 
   /** Paper shelves. The import shelf is pinned above the library rather than scrolling with it. */
   const paperGroups = $derived(groups.filter((group) => (group.lane ?? "blank") === "blank"));
@@ -104,13 +110,18 @@
       everySource.find((source) => source.id === "next") ??
       everySource[0],
   );
-  const importing = $derived(Boolean(selected && importSources.some((source) => source.id === selected.id)));
+  const behavior = $derived(sourceBehavior(selected));
+  const importing = $derived(behavior.importFile);
+  const effectiveCount = $derived(behavior.single ? 1 : count);
+  const pdfPagesValid = $derived(!behavior.pdf || isPageListSyntax(pdfPages));
+  const blocked = $derived(!selected || selected.disabled || !pdfPagesValid);
 
   const shelves = $derived(
     category === "all" ? paperGroups : paperGroups.filter((group) => group.id === category),
   );
 
   const readout = $derived.by(() => {
+    if (behavior.calculation) return $t("calculation.geometry");
     const inches = sizes.find((size) => size.id === sizeId)?.detail.includes("in");
     const width = geometry.widthPt * MM_PER_PT;
     const height = geometry.heightPt * MM_PER_PT;
@@ -132,23 +143,31 @@
   );
 
   const addLabel = $derived(
-    importing ? $t("workspace.importPDF") : count > 1 ? $t("workspace.addPages", { "count": count }) : $t("workspace.addPage"),
+    behavior.pdf ? $t("workspace.importPDF")
+      : behavior.kind === "calculation-import" ? $t("calculation.import")
+      : behavior.calculation ? (selected?.id === "calculation-part" ? $t("calculation.continuePage") : $t("calculation.addPage"))
+      : count > 1 ? $t("workspace.addPages", { count }) : $t("workspace.addPage"),
   );
 
   const summary = $derived([
     {
       key: "size",
-      value: `${sizes.find((size) => size.id === sizeId)?.name ?? ""} ${orientation} · ${readout}`,
+      label: $t("workspace.size"),
+      value: behavior.calculation ? $t("calculation.geometry") : behavior.pdf ? $t("calculation.fromPDF") : `${sizes.find((size) => size.id === sizeId)?.name ?? ""} ${orientation === "portrait" ? $t("library.portrait") : $t("library.landscape")} · ${readout}`,
     },
-    { key: "paper", value: tones.find((tone) => tone.id === toneId)?.name ?? "" },
-    { key: "ruling", value: importing ? "from the PDF" : (selected?.label ?? "") },
-    { key: "where", value: canPlaceRelative ? where : "last" },
+    { key: "paper", label: $t("workspace.paper"), value: behavior.paper ? tones.find((tone) => tone.id === toneId)?.name ?? "" : behavior.calculation ? $t("calculation.cellContent") : $t("calculation.fromPDF") },
+    { key: "ruling", label: $t("calculation.source"), value: behavior.pdf ? $t("calculation.fromPDF") : (selected?.label ?? "") },
+    { key: "where", label: $t("workspace.where"), value: CHOICES.find(choice => choice.value === (canPlaceRelative ? where : "last"))?.label ?? "" },
   ]);
 
   function commit(keepOpen: boolean) {
-    if (!selected || selected.disabled) return;
-    selected.onSelect(resolvePosition(canPlaceRelative ? where : "last", currentPageId), count);
-    if (keepOpen) added += importing ? 1 : count;
+    if (!selected || blocked) return;
+    selected.onSelect(
+      resolvePosition(canPlaceRelative ? where : "last", currentPageId),
+      effectiveCount,
+      behavior.pdf ? { pdfPages: pdfPages.trim() } : undefined,
+    );
+    if (keepOpen) added += effectiveCount;
     else onClose();
   }
 
@@ -190,7 +209,7 @@
   /// Enter commits from wherever the writer is, and Tab stays inside the panel so a keyboard
   /// writer cannot land behind it on the page it is covering.
   function keydown(event: KeyboardEvent) {
-    if (event.key === "Enter" && !(event.target as HTMLElement).closest(".add")) {
+    if (event.key === "Enter" && !(event.target as HTMLElement).closest(".add, .generators")) {
       event.preventDefault();
       commit(event.shiftKey);
       return;
@@ -220,6 +239,7 @@
 
 <div
   bind:this={panel}
+ 
   use:dismissable={onClose}
   class="add-page-panel"
   role="dialog"
@@ -230,16 +250,14 @@
   <header>
     <div class="subject">
       <strong>{$t("workspace.addPage")}</strong>
-      <!-- Re-keyed so the line fades when it changes: it is the one thing here that answers
-           "what will this do", and a silent swap is easy to miss. -->
-      {#key destination}<span class="destination">{destination}</span>{/key}
+      <span class="destination">{destination}</span>
     </div>
 
     <div class="run" role="group" aria-label={$t("workspace.howManyPages")}>
       <span class="run-label">{$t("workspace.pages")}</span>
-      <button type="button" aria-label={$t("workspace.oneFewerPage")} disabled={count <= 1} onclick={() => step(-1)}>−</button>
-      <output aria-live="polite">{count}</output>
-      <button type="button" aria-label={$t("workspace.oneMorePage")} disabled={count >= MAX_RUN} onclick={() => step(1)}>+</button>
+      <button type="button" aria-label={$t("workspace.oneFewerPage")} disabled={behavior.single || count <= 1} onclick={() => step(-1)}>−</button>
+      <output aria-live="polite">{effectiveCount}</output>
+      <button type="button" aria-label={$t("workspace.oneMorePage")} disabled={behavior.single || count >= MAX_RUN} onclick={() => step(1)}>+</button>
     </div>
 
     <button type="button" class="close" aria-label={$t("library.close")} onclick={onClose}>
@@ -270,7 +288,7 @@
         </div>
       </section>
 
-      <section>
+      <section inert={!behavior.paper} class:muted={!behavior.paper}>
         <div class="eyebrow spread">
           <span>{$t("workspace.size")}</span>
           <span class="readout">{readout}</span>
@@ -292,7 +310,7 @@
         </div>
       </section>
 
-      <div class="row" role="radiogroup" aria-label={$t("library.orientation")}>
+      <div class="row" inert={!behavior.paper} class:muted={!behavior.paper} role="radiogroup" aria-label={$t("library.orientation")}>
         {#each ORIENTATIONS as choice (choice.value)}
           <button
             type="button"
@@ -311,7 +329,7 @@
         {/each}
       </div>
 
-      <section>
+      <section inert={!behavior.paper} class:muted={!behavior.paper}>
         <div class="eyebrow">{$t("workspace.paper")}</div>
         <div class="row" role="radiogroup" aria-label={$t("library.paperColour")}>
           {#each tones as tone (tone.id)}
@@ -331,11 +349,35 @@
           {/each}
         </div>
       </section>
+
+      {#if behavior.pdf}
+        <!-- The one setting a PDF does read: which of its pages to bring in. -->
+        <section class="pdf-pages">
+          <label class="eyebrow" for="add-page-pdf-pages">{$t("workspace.pdfPageList")}</label>
+          <input
+            id="add-page-pdf-pages"
+            type="text"
+            inputmode="numeric"
+            spellcheck="false"
+            autocomplete="off"
+            bind:value={pdfPages}
+            placeholder={$t("workspace.pdfPageListPlaceholder")}
+            aria-invalid={!pdfPagesValid}
+            aria-describedby="add-page-pdf-pages-help"
+          />
+          <span id="add-page-pdf-pages-help" class="help" class:invalid={!pdfPagesValid}>
+            {pdfPagesValid ? $t("workspace.pdfPageListHelp") : $t("workspace.pdfPageListInvalid")}
+          </span>
+        </section>
+      {/if}
     </div>
 
     <!-- Column B. Filters and the import sit in a fixed band; only the papers scroll. -->
     <div class="library">
       <div class="band">
+        {#if generators}
+          <div class="generators">{@render generators(resolvePosition(canPlaceRelative ? where : "last", currentPageId))}</div>
+        {/if}
         <div class="filters" role="group" aria-label={$t("workspace.paperKind")}>
           <button
             type="button"
@@ -343,7 +385,7 @@
             class:on={category === "all"}
             aria-pressed={category === "all"}
             onclick={() => (category = "all")}
-          >{$t("workspace.all")}<span class="tally">{paperGroups.reduce((total, group) => total + group.sources.length, 0)}</span></button>
+          >{$t("workspace.all")}</button>
           {#each paperGroups as group (group.id)}
             <button
               type="button"
@@ -351,7 +393,7 @@
               class:on={category === group.id}
               aria-pressed={category === group.id}
               onclick={() => (category = group.id)}
-            >{group.title}<span class="tally">{group.sources.length}</span></button>
+            >{group.title}</button>
           {/each}
         </div>
 
@@ -365,12 +407,15 @@
             class:on={selected?.id === source.id}
             disabled={source.disabled}
             aria-pressed={selected?.id === source.id}
+            title={source.detail ? `${source.label} · ${source.detail}` : source.label}
             onkeydown={(event) => moveWithin(event)}
             onclick={() => (selectedId = source.id)}
           >
             <span class="sheet" aria-hidden="true">
-              {#if importSources.some((entry) => entry.id === source.id)}
+              {#if sourceBehavior(source).pdf}
                 <span class="badge">PDF</span>
+              {:else if sourceBehavior(source).calculation}
+                <svg viewBox="0 0 48 56" fill="none" aria-hidden="true"><path d="M7 4h34v48H7z" stroke="#7a91a0"/><rect x="12" y="12" width="24" height="12" rx="2" stroke="#4e8297"/><path d="m19 15-3 3 3 3m10-6 3 3-3 3M13 32h22M13 38h17" stroke="#4e8297" stroke-width="2"/></svg>
               {:else if source.preview}
                 {@html source.preview}
               {/if}
@@ -386,7 +431,7 @@
 
       <!-- Dimmed while the PDF is selected: the file brings its own pages, so none of this
            applies to what the button is about to do. -->
-      <div class="papers" class:muted={importing}>
+      <div class="papers" class:muted={!behavior.paper}>
         {#each shelves as group (group.id)}
           <div class="shelf">
             <div class="eyebrow">{group.title}</div>
@@ -420,9 +465,11 @@
     <div class="preview">
       <div class="eyebrow">{$t("workspace.preview")}</div>
       <div class="stage">
-        <div class="sheet-preview" class:pdf={importing} style:aspect-ratio={previewAspect} style:--ratio={previewAspect}>
-          {#if importing}
+        <div class="sheet-preview" class:pdf={behavior.pdf} style:aspect-ratio={behavior.calculation ? 1.45 : previewAspect} style:--ratio={behavior.calculation ? 1.45 : previewAspect}>
+          {#if behavior.pdf}
             <span class="badge big">PDF</span>
+          {:else if behavior.calculation}
+            <div class="calculation-preview" aria-hidden="true"><span class="code-line"></span><span class="code-line short"></span><svg viewBox="0 0 100 45"><path d="M5 4v35h90" stroke="#aebac2" fill="none"/><path d="M8 28C24 2 35 1 47 23s28 24 45-10" stroke="#4e8297" stroke-width="2" fill="none"/></svg></div>
           {:else if selected?.preview}
             {@html selected.preview}
           {/if}
@@ -432,7 +479,7 @@
       <dl class="summary">
         {#each summary as row (row.key)}
           <div>
-            <dt>{row.key}</dt>
+            <dt>{row.label}</dt>
             <dd>{row.value}</dd>
           </div>
         {/each}
@@ -442,7 +489,7 @@
         <button
           type="button"
           class="add"
-          disabled={!selected || selected.disabled}
+          disabled={blocked}
           onclick={(event) => commit(event.shiftKey)}
         >{addLabel}</button>
         <span class="note">
@@ -459,10 +506,18 @@
 </div>
 
 <style>
-  /* Centred on the window, not hung off the button that opened it. `right: 0` against a 36px
-     button sitting ~150px in from the window edge made `100vw` a lie about the space to its left,
-     so the panel walked off-screen by that offset — invisible while maximised, obvious the moment
-     it was not. A panel this size belongs to the window. */
+  .muted { opacity: var(--disabled); }
+  .generators { display: flex; flex-wrap: wrap; gap: 8px; margin-block-end: 8px; }
+  .generators :global(.generator-group) { display: grid; gap: 4px; color: var(--muted); font-size: var(--text-sm); }
+  .generators :global(button) { min-height: var(--control); padding-inline: 12px; border: 0; background: var(--wash); color: var(--text); border-radius: var(--radius); font: inherit; font-size: var(--text-md); cursor: pointer; }
+  .generators :global(button:hover:enabled) { background: var(--wash-strong); }
+  .calculation-preview { box-sizing: border-box; padding: 18%; width: 100%; }
+  .code-line { display: block; width: 85%; height: 4px; background: #8d9da8; margin-bottom: 7px; }
+  .code-line.short { width: 55%; }
+  .calculation-preview svg { display: block; width: 100%; margin-top: 16px; }
+
+  /* Centred on the window, not hung off the button that opened it: a panel this size belongs to
+     the window. Entry is opacity plus 4px of travel, no scale. */
   .add-page-panel {
     position: fixed;
     z-index: 50;
@@ -473,18 +528,16 @@
     flex-direction: column;
     border: 1px solid var(--edge);
     border-radius: var(--radius-lg);
-    background: var(--surround);
-    box-shadow: 0 30px 70px rgb(0 0 0 / 55%);
+    background: var(--panel);
+    box-shadow: var(--shadow-modal);
+    color: var(--text);
     overflow: hidden;
-    /* The centring translate lives in the keyframes too, or the animation would drop it and the
-       panel would fly in from the corner it is no longer anchored to. */
     transform: translate(-50%, -50%);
-    animation: panel-in 150ms cubic-bezier(0.2, 0.7, 0.3, 1);
+    animation: panel-in var(--enter) ease-out;
   }
 
   @keyframes panel-in {
-    from { opacity: 0; transform: translate(-50%, -50%) scale(0.985); }
-    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    from { opacity: 0; transform: translate(-50%, calc(-50% + 4px)); }
   }
 
   header {
@@ -493,62 +546,55 @@
     align-items: center;
     padding: 12px 12px 12px 20px;
     border-bottom: 1px solid var(--edge-soft);
-    background: var(--panel);
     gap: 16px;
   }
 
   .subject { min-width: 0; flex: 1; }
-  .subject strong { display: block; font-size: var(--text-lg); font-weight: 600; }
+  .subject strong { display: block; font-size: var(--text-lg); font-weight: 600; line-height: 1.25; }
 
   .destination {
     display: block;
-    margin-top: 3px;
+    margin-top: 4px;
     color: var(--muted);
     font-size: var(--text-sm);
-    animation: said 180ms ease-out;
-  }
-
-  @keyframes said {
-    from { opacity: 0; transform: translateY(-2px); }
+    line-height: 1.4;
   }
 
   .run {
     display: flex;
     flex: none;
     align-items: center;
-    padding: 4px 5px;
-    border: 1px solid var(--edge);
+    padding: 2px;
     border-radius: var(--radius);
-    background: var(--surround);
+    background: var(--inset);
     gap: 4px;
   }
 
   .run-label {
-    padding: 0 4px;
-    color: var(--quiet);
-    font-size: var(--text-xs);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    padding: 0 8px;
+    color: var(--muted);
+    font-size: var(--text-sm);
+    font-weight: 600;
   }
 
   .run button {
-    width: 26px;
-    height: 24px;
+    width: var(--control-dense);
+    height: var(--control-dense);
     border: 0;
     border-radius: var(--radius);
-    background: rgb(255 255 255 / 7%);
+    background: var(--wash);
     color: var(--text);
     font: inherit;
     font-size: var(--text-md);
     cursor: pointer;
-    transition: background 120ms ease;
+    transition: background var(--fast) ease;
   }
 
-  .run button:hover:enabled { background: var(--wash); }
-  .run button:disabled { opacity: 0.35; cursor: default; }
+  .run button:hover:enabled { background: var(--wash-strong); }
+  .run button:disabled { opacity: var(--disabled); cursor: default; }
 
   .run output {
-    min-width: 20px;
+    min-width: 24px;
     color: var(--text);
     font-size: var(--text-md);
     font-variant-numeric: tabular-nums;
@@ -567,6 +613,7 @@
     color: var(--muted);
     cursor: pointer;
     place-items: center;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
   .close:hover { background: var(--wash); color: var(--text); }
@@ -586,11 +633,11 @@
     align-items: stretch;
   }
 
-  /* Column A. Fixed width and no scroll of its own: the shape of a page is four small decisions,
-     and making them scroll is what pushed the library out of sight in the first place. */
+  /* Column A. Fixed width: the shape of a page is four small decisions, and making them scroll is
+     what pushed the library out of sight. */
   .settings {
     display: flex;
-    width: 250px;
+    width: 264px;
     flex: none;
     flex-direction: column;
     padding: 16px;
@@ -601,49 +648,77 @@
 
   section { display: flex; flex-direction: column; gap: 8px; }
 
+  .pdf-pages input {
+    box-sizing: border-box;
+    width: 100%;
+    height: var(--control);
+    padding: 0 12px;
+    border: 1px solid var(--edge);
+    border-radius: var(--radius);
+    background: var(--inset);
+    caret-color: var(--blueprint-light);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--text-md);
+    font-variant-numeric: tabular-nums;
+    transition: border-color var(--fast) ease;
+  }
+
+  .pdf-pages input::placeholder { color: var(--quiet); }
+  .pdf-pages input::selection { background: var(--accent-select); }
+  .pdf-pages input:hover { border-color: var(--edge-strong); }
+  .pdf-pages input:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
+  .pdf-pages input[aria-invalid="true"] { border-color: var(--oxide); }
+  .pdf-pages .help { color: var(--quiet); font-size: var(--text-sm); }
+  .pdf-pages .help.invalid { color: var(--oxide-text); }
+
   .eyebrow {
-    color: var(--quiet);
-    font-size: var(--text-xs);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+    color: var(--muted);
+    font-size: var(--text-sm);
+    font-weight: 600;
   }
 
   .eyebrow.spread { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 
   .readout {
     font-variant-numeric: tabular-nums;
-    letter-spacing: 0;
-    text-transform: none;
+    font-weight: 400;
   }
 
-  .row { display: flex; gap: 6px; }
-  .pairs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  /* Rows wrap rather than squeeze: a label is never cut to fit a chip. */
+  .row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pairs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
+  /* Controls have no border; the selected chip gets the accent ring. */
   .chip {
     display: flex;
-    height: var(--control);
-    flex: 1;
+    min-height: var(--control);
+    flex: 1 1 auto;
     align-items: center;
     justify-content: center;
-    padding: 0 8px;
-    border: 1px solid var(--edge);
+    padding: 4px 12px;
+    border: 0;
     border-radius: var(--radius);
-    background: transparent;
+    background: var(--wash);
     color: var(--muted);
     font: inherit;
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
+    line-height: 1.25;
+    text-align: center;
     cursor: pointer;
-    gap: 7px;
-    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+    gap: 8px;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
-  .chip:hover:enabled { background: var(--wash); color: var(--text); }
-  .chip:disabled { opacity: 0.4; cursor: default; }
+  .chip:hover:enabled { background: var(--wash-strong); color: var(--text); }
+  .chip:disabled { opacity: var(--disabled); cursor: default; }
 
-  .chip.on {
-    border-color: rgb(76 141 240 / 60%);
-    background: rgb(76 141 240 / 16%);
+  .chip.on,
+  .chip.on:hover:enabled {
+    background: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
     color: var(--text);
+    font-weight: 600;
   }
 
   .page-mark {
@@ -652,8 +727,7 @@
     flex: none;
     border: 1px solid currentColor;
     border-radius: 1px;
-    opacity: 0.8;
-    transition: width 140ms ease, height 140ms ease;
+    transition: width var(--fast) ease, height var(--fast) ease;
   }
 
   .page-mark.landscape { width: 12px; height: 9px; }
@@ -662,8 +736,8 @@
     width: 16px;
     height: 16px;
     flex: none;
-    border-radius: 3px;
-    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 22%);
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 1px var(--edge-strong);
   }
 
   /* Column B. */
@@ -679,65 +753,64 @@
     display: flex;
     flex: none;
     flex-direction: column;
-    padding: 14px 16px 12px;
+    padding: 16px;
     border-bottom: 1px solid var(--edge-soft);
-    gap: 11px;
+    gap: 12px;
   }
 
-  .filters { display: flex; flex-wrap: wrap; gap: 7px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; }
 
   .pill {
     display: flex;
-    height: var(--control-dense);
+    min-height: var(--control-dense);
     align-items: center;
-    padding: 0 11px;
-    border: 1px solid var(--edge);
-    border-radius: var(--radius-pill);
-    background: transparent;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--radius);
+    background: var(--wash);
     color: var(--muted);
     font: inherit;
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
     cursor: pointer;
-    gap: 6px;
-    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
-  .pill:hover { background: var(--wash); color: var(--text); }
+  .pill:hover { background: var(--wash-strong); color: var(--text); }
 
-  .pill.on {
-    border-color: rgb(76 141 240 / 60%);
-    background: rgb(76 141 240 / 16%);
+  .pill.on,
+  .pill.on:hover {
+    background: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
     color: var(--text);
+    font-weight: 600;
   }
-
-  .tally { color: var(--quiet); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
 
   /* Side by side, not stacked: two short tiles leave the paper library a row higher. */
-  .pins { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; }
+  .pins { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
 
   .import {
     display: flex;
     min-width: 0;
     align-items: center;
-    padding: 7px 10px;
-    border: 1px dashed rgb(255 255 255 / 18%);
+    padding: 8px 12px;
+    border: 0;
     border-radius: var(--radius);
-    background: rgb(255 255 255 / 2%);
+    background: var(--wash);
     color: var(--text);
     font: inherit;
     text-align: left;
     cursor: pointer;
-    gap: 10px;
-    transition: background 120ms ease, border-color 120ms ease;
+    gap: 12px;
+    transition: background var(--fast) ease;
   }
 
-  .import:hover:enabled { border-color: rgb(255 255 255 / 32%); }
-  .import:disabled { opacity: 0.45; cursor: default; }
+  .import:hover:enabled { background: var(--wash-strong); }
+  .import:disabled { opacity: var(--disabled); cursor: default; }
 
-  .import.on {
-    border-color: var(--blueprint);
-    border-style: solid;
-    background: rgb(76 141 240 / 9%);
+  .import.on,
+  .import.on:hover:enabled {
+    background: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
   }
 
   .sheet {
@@ -751,7 +824,6 @@
     padding-bottom: 4px;
     border-radius: 3px;
     background: var(--paper);
-    box-shadow: 0 1px 3px rgb(0 0 0 / 40%);
   }
 
   .sheet :global(svg) { display: block; width: 100%; height: 100%; }
@@ -759,63 +831,60 @@
   .badge {
     padding: 1px 3px;
     border-radius: 2px;
-    background: var(--oxide);
-    color: #fff;
-    font-size: 8.5px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
+    background: var(--charcoal);
+    color: var(--text);
+    font-size: var(--text-xs);
+    font-weight: 600;
   }
 
-  .badge.big { padding: 3px 7px; font-size: var(--text-sm); }
+  .badge.big { padding: 4px 8px; font-size: var(--text-sm); }
 
+  /* Names wrap so a real name reads in full. */
   .words { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
-  .words .title { font-size: var(--text-md); font-weight: 600; }
-  .words .title,
-  .words .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .words .sub { color: var(--muted); font-size: var(--text-sm); }
+  .words .title { font-size: var(--text-md); font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+  .words .sub { color: var(--muted); font-size: var(--text-sm); line-height: 1.4; overflow-wrap: anywhere; }
 
   .papers {
     min-width: 0;
     flex: 1;
-    padding: 14px 16px 18px;
+    padding: 16px;
     overflow-y: auto;
-    transition: opacity 160ms ease;
+    transition: opacity var(--fast) ease;
   }
 
-  .papers.muted { opacity: 0.4; }
-  .shelf + .shelf { margin-top: 18px; }
-  .shelf .eyebrow { margin-bottom: 9px; }
+  .shelf + .shelf { margin-top: 24px; }
+  .shelf .eyebrow { margin-bottom: 12px; }
 
   /* `minmax(0, …)` rather than `1fr`: a track's automatic minimum is its content's min-content
-     width, and a preview is an SVG that reports an intrinsic 300px. One bare `1fr` would let a
-     thumbnail push the whole panel wider than it is allowed to be. */
+     width, and a preview is an SVG that reports an intrinsic 300px. */
   .cards {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 11px;
+    gap: 8px;
   }
 
   .card {
     display: flex;
     flex-direction: column;
-    padding: 7px;
-    border: 1px solid var(--edge);
+    padding: 8px;
+    border: 0;
     border-radius: var(--radius);
     background: transparent;
     color: var(--muted);
     font: inherit;
     text-align: left;
     cursor: pointer;
-    gap: 7px;
-    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+    gap: 8px;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
-  .card:hover:enabled { border-color: rgb(255 255 255 / 30%); color: var(--text); }
-  .card:disabled { opacity: 0.45; cursor: default; }
+  .card:hover:enabled { background: var(--wash); color: var(--text); }
+  .card:disabled { opacity: var(--disabled); cursor: default; }
 
-  .card.on {
-    border-color: var(--blueprint);
-    background: rgb(76 141 240 / 14%);
+  .card.on,
+  .card.on:hover:enabled {
+    background: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
     color: var(--text);
   }
 
@@ -824,22 +893,19 @@
     width: 100%;
     border-radius: 3px;
     background: var(--paper);
-    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 30%);
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 40%);
     overflow: hidden;
-    transition: transform 120ms ease;
   }
 
-  .card:hover:enabled .thumb { transform: scale(1.03); }
   .thumb :global(svg) { display: block; width: 100%; height: 100%; }
 
   .name {
-    overflow: hidden;
     font-size: var(--text-sm);
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
   }
 
-  /* Column C. */
+  /* Column C. The page on the desk. */
   .preview {
     --stage-w: 230px;
     --stage-h: 300px;
@@ -847,8 +913,8 @@
     width: 262px;
     flex: none;
     flex-direction: column;
-    padding: 14px 16px 16px;
-    background: var(--charcoal);
+    padding: 16px;
+    background: var(--surround);
     gap: 12px;
   }
 
@@ -860,15 +926,13 @@
     justify-content: center;
   }
 
-  /* Sized from the stage rather than from its contents. `aspect-ratio` on a box with no children
-     and no definite side resolves to zero, which is why a plain page previewed as nothing at all.
-     Driving the height off whichever limit binds first keeps every page shape inside the column
-     whether it is portrait or landscape. */
+  /* Sized from the stage rather than from its contents: `aspect-ratio` on a box with no children
+     and no definite side resolves to zero. */
   .sheet-preview {
     width: auto;
     height: min(var(--stage-h), calc(var(--stage-w) / var(--ratio)));
     background: var(--paper);
-    box-shadow: 0 2px 6px rgb(0 0 0 / 35%), 0 22px 46px rgb(0 0 0 / 45%);
+    box-shadow: var(--shadow-page);
   }
 
   .sheet-preview :global(svg) { display: block; width: 100%; height: 100%; }
@@ -879,108 +943,106 @@
     flex: none;
     flex-direction: column;
     margin: 0;
-    gap: 7px;
+    gap: 8px;
   }
 
   .summary div {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: 10px;
+    gap: 12px;
   }
 
   .summary dt {
     flex: none;
-    color: var(--quiet);
-    font-size: var(--text-xs);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    color: var(--muted);
+    font-size: var(--text-sm);
   }
 
   .summary dd {
-    overflow: hidden;
+    min-width: 0;
     margin: 0;
     color: var(--text);
     font-size: var(--text-sm);
+    overflow-wrap: anywhere;
     text-align: right;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .commit { display: flex; flex: none; flex-direction: column; gap: 8px; }
 
   .add {
-    height: 42px;
+    height: var(--control);
     border: 0;
     border-radius: var(--radius);
     background: var(--blueprint);
-    color: #12151a;
+    color: var(--on-accent);
     font: inherit;
     font-size: var(--text-md);
-    font-weight: 700;
+    font-weight: 600;
     cursor: pointer;
-    box-shadow: 0 6px 18px rgb(0 0 0 / 40%);
-    transition: filter 120ms ease;
+    transition: background var(--fast) ease;
   }
 
-  .add:hover:enabled { filter: brightness(1.08); }
-  .add:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
+  .add:hover:enabled { background: var(--blueprint-hover); }
+  .add:disabled { opacity: var(--disabled); cursor: default; }
 
-  .note { color: var(--quiet); font-size: var(--text-xs); text-align: center; }
+  .note { color: var(--quiet); font-size: var(--text-sm); line-height: 1.4; text-align: center; }
 
   footer {
     display: flex;
-    height: 34px;
+    min-height: 36px;
     flex: none;
     align-items: center;
     justify-content: space-between;
-    padding: 0 18px;
+    padding: 8px 20px;
     border-top: 1px solid var(--edge-soft);
-    background: var(--charcoal);
+    background: var(--surround);
     color: var(--quiet);
     font-size: var(--text-sm);
+    line-height: 1.4;
     gap: 16px;
-  }
-
-  footer span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   button:focus-visible {
     outline: 2px solid var(--blueprint-light);
-    outline-offset: 1px;
+    outline-offset: 2px;
   }
 
+  .card:focus-visible,
+  .chip:focus-visible,
+  .import:focus-visible { outline-offset: -2px; }
+
   /* A narrower window tightens the two fixed columns and drops the library to three across
-     before it gives up the preview — the preview is the point of the panel, so it is the last
-     thing to go, not the first. */
+     before it gives up the preview. */
   @media (max-width: 1120px) {
-    .settings { width: 214px; padding: 14px; }
-    .preview { --stage-w: 192px; --stage-h: 250px; width: 218px; padding: 12px 13px 14px; }
+    .settings { width: 232px; padding: 12px; }
+    .preview { --stage-w: 192px; --stage-h: 250px; width: 224px; padding: 12px; }
     .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .body { height: min(480px, calc(100vh - 200px)); }
   }
 
-  /* Below this there is no honest way to show a page and a library side by side. The summary in
-     the footer still says what the button will make. */
+  /* Below this there is no honest way to show a page and a library side by side. */
   @media (max-width: 880px) {
     .preview { display: none; }
     .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
 
+  @media (pointer: coarse) {
+    .chip, .add, .pdf-pages input, .pill { min-height: var(--control-touch, 44px); }
+    .run button { width: var(--control-touch, 44px); height: var(--control-touch, 44px); }
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .add-page-panel,
-    .destination { animation: none; }
+    .add-page-panel { animation: none; }
 
     .chip,
     .pill,
     .card,
-    .thumb,
+    .import,
     .page-mark,
     .papers,
     .add,
+    .close,
     .run button { transition: none; }
   }
 </style>
