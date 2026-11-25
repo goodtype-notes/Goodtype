@@ -124,6 +124,7 @@
 
 <div
   class="export-panel"
+ 
   role="dialog"
   tabindex="-1"
   aria-labelledby="export-title"
@@ -134,7 +135,7 @@
   <header>
     <div class="subject">
       <strong id="export-title">{formatLabel ?? $t("workspace.exportPDF")}</strong>
-      {#key headline}<span id="export-headline" class="headline" class:invalid={!target}>{headline}</span>{/key}
+      <span id="export-headline" class="headline" class:invalid={!target}>{headline}</span>
     </div>
     <button type="button" class="close" aria-label={$t("library.close")} title={$t("library.close")} onclick={onClose}>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
@@ -312,29 +313,45 @@
 </div>
 
 <style>
-  .format { display: grid; gap: 6px; }
-  .format select { min-height: var(--control); color: var(--text); background: var(--charcoal); border: 1px solid var(--edge-soft); border-radius: var(--radius); }
-  /* Centred on the window like the Add page panel, which it is paired with. */
+  /* Field with its label above: 12px/600 muted, 14px text inside. */
+  .format { display: grid; gap: 8px; color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
+
+  .format select {
+    min-height: var(--control);
+    padding: 0 12px;
+    border: 1px solid var(--edge);
+    border-radius: var(--radius);
+    background: var(--inset);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--text-md);
+    font-weight: 400;
+  }
+
+  .format select:hover { border-color: var(--edge-strong); }
+
+  /* Centred on the window like the Add page panel, which it is paired with. Entry is opacity plus
+     4px of travel, no scale. */
   .export-panel {
     position: fixed;
     z-index: 50;
     top: 50%;
     left: 50%;
     display: flex;
-    width: min(620px, calc(100vw - 32px));
+    width: min(660px, calc(100vw - 32px));
     flex-direction: column;
     border: 1px solid var(--edge);
     border-radius: var(--radius-lg);
-    background: var(--surround);
+    background: var(--panel);
     box-shadow: var(--shadow-modal);
+    color: var(--text);
     overflow: hidden;
     transform: translate(-50%, -50%);
-    animation: panel-in var(--enter) cubic-bezier(0.2, 0.7, 0.3, 1);
+    animation: panel-in var(--enter) ease-out;
   }
 
   @keyframes panel-in {
-    from { opacity: 0; transform: translate(-50%, -50%) scale(0.985); }
-    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    from { opacity: 0; transform: translate(-50%, calc(-50% + 4px)); }
   }
 
   header {
@@ -343,29 +360,22 @@
     align-items: center;
     padding: 12px 12px 12px 20px;
     border-bottom: 1px solid var(--edge-soft);
-    background: var(--panel);
     gap: 16px;
   }
 
   .subject { min-width: 0; flex: 1; }
-  .subject strong { display: block; color: var(--text); font-size: var(--text-lg); font-weight: 600; }
+  .subject strong { display: block; color: var(--text); font-size: var(--text-lg); font-weight: 600; line-height: 1.25; }
 
   .headline {
     display: block;
-    overflow: hidden;
-    margin-top: 3px;
+    margin-top: 4px;
     color: var(--muted);
     font-size: var(--text-sm);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    animation: said var(--enter) ease-out;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
   }
 
   .headline.invalid { color: var(--oxide-text); }
-
-  @keyframes said {
-    from { opacity: 0; transform: translateY(-2px); }
-  }
 
   .close {
     display: grid;
@@ -378,6 +388,7 @@
     color: var(--muted);
     cursor: pointer;
     place-items: center;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
   .close:hover { background: var(--wash); color: var(--text); }
@@ -400,7 +411,7 @@
     flex-direction: column;
     padding: 16px;
     border-right: 1px solid var(--edge-soft);
-    gap: 18px;
+    gap: 16px;
   }
 
   section { display: flex; flex-direction: column; gap: 8px; }
@@ -411,38 +422,42 @@
     font-weight: 600;
   }
 
-  .row { display: flex; gap: 6px; }
-  .pairs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pairs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
+  /* Controls have no border; the selected chip gets the accent ring. */
   .chip {
     display: flex;
     min-width: 0;
-    height: var(--control);
-    flex: 1;
+    min-height: var(--control);
+    flex: 1 1 auto;
     align-items: center;
     justify-content: center;
-    padding: 0 8px;
-    border: 1px solid var(--edge);
+    padding: 4px 12px;
+    border: 0;
     border-radius: var(--radius);
-    background: transparent;
+    background: var(--wash);
     color: var(--muted);
     font: inherit;
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
+    line-height: 1.25;
+    text-align: center;
     cursor: pointer;
-    gap: 7px;
-    transition: background var(--fast) ease, border-color var(--fast) ease, color var(--fast) ease;
+    gap: 8px;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
-  .chip:hover:enabled { background: var(--wash); color: var(--text); }
+  .chip:hover:enabled { background: var(--wash-strong); color: var(--text); }
 
-  .chip.on {
-    border-color: var(--accent-edge);
+  .chip.on,
+  .chip.on:hover:enabled {
     background: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
     color: var(--text);
+    font-weight: 600;
   }
 
-  .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .chip.toggle { justify-content: flex-start; padding: 0 10px; }
+  .chip.toggle { justify-content: flex-start; text-align: left; }
   .chip.wide { grid-column: 1 / -1; }
 
   .chip svg {
@@ -453,7 +468,7 @@
     stroke: currentColor;
     stroke-linecap: round;
     stroke-linejoin: round;
-    stroke-width: 1.6;
+    stroke-width: var(--stroke-dense);
   }
 
   .pages { display: flex; align-items: center; gap: 8px; }
@@ -463,10 +478,10 @@
     min-width: 0;
     height: var(--control);
     flex: 1;
-    padding: 0 10px;
+    padding: 0 12px;
     border: 1px solid var(--edge);
     border-radius: var(--radius);
-    background: var(--charcoal);
+    background: var(--inset);
     caret-color: var(--blueprint-light);
     color: var(--text);
     font: inherit;
@@ -478,17 +493,17 @@
   .pages input::placeholder { color: var(--quiet); }
   .pages input::selection { background: var(--accent-select); }
   .pages input:hover { border-color: var(--edge-strong); }
-  .pages input:focus-visible { border-color: var(--blueprint); outline: none; }
+  .pages input:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
   .pages input[aria-invalid="true"] { border-color: var(--oxide); }
   .of { flex: none; color: var(--quiet); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 
   .preview {
     display: flex;
-    width: 236px;
+    width: 244px;
     flex: none;
     flex-direction: column;
-    padding: 14px 16px 16px;
-    background: var(--charcoal);
+    padding: 16px;
+    background: var(--surround);
     gap: 12px;
   }
 
@@ -513,8 +528,8 @@
     content: "";
   }
 
-  .stack.many::before { transform: translate(8px, -8px); opacity: 0.45; }
-  .stack.many::after { transform: translate(4px, -4px); opacity: 0.7; }
+  .stack.many::before { transform: translate(8px, -8px); }
+  .stack.many::after { transform: translate(4px, -4px); }
 
   .sheet {
     position: relative;
@@ -525,19 +540,18 @@
     box-shadow: var(--shadow-page);
   }
 
-  .summary { display: flex; flex: none; flex-direction: column; margin: 0; gap: 7px; }
-  .summary div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .summary { display: flex; flex: none; flex-direction: column; margin: 0; gap: 8px; }
+  .summary div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
   .summary dt { flex: none; color: var(--muted); font-size: var(--text-sm); }
 
   .summary dd {
-    overflow: hidden;
+    min-width: 0;
     margin: 0;
     color: var(--text);
     font-size: var(--text-sm);
     font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
     text-align: right;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .commit { display: flex; flex: none; flex-direction: column; gap: 8px; }
@@ -557,29 +571,30 @@
   }
 
   .export:hover:enabled { background: var(--blueprint-hover); }
-  .export:disabled { opacity: var(--disabled); cursor: not-allowed; }
-  .note { color: var(--quiet); font-size: var(--text-xs); text-align: center; }
+  .export:disabled { opacity: var(--disabled); cursor: default; }
+  .note { color: var(--quiet); font-size: var(--text-sm); line-height: 1.4; text-align: center; }
 
   footer {
     display: flex;
-    height: 34px;
+    min-height: 36px;
     flex: none;
     align-items: center;
     justify-content: space-between;
-    padding: 0 18px;
+    padding: 8px 20px;
     border-top: 1px solid var(--edge-soft);
-    background: var(--charcoal);
+    background: var(--surround);
     color: var(--quiet);
     font-size: var(--text-sm);
+    line-height: 1.4;
     gap: 16px;
   }
-
-  footer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   button:focus-visible {
     outline: 2px solid var(--blueprint-light);
     outline-offset: 2px;
   }
+
+  .chip:focus-visible { outline-offset: -2px; }
 
   /* Too narrow for the page beside the settings: the header line still says what will happen. */
   @media (max-width: 640px) {
@@ -592,7 +607,7 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .export-panel, .headline { animation: none; }
-    .chip, .export, .pages input { transition: none; }
+    .export-panel { animation: none; }
+    .chip, .export, .pages input, .close { transition: none; }
   }
 </style>

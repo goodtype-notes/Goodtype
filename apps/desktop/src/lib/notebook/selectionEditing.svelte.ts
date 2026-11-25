@@ -907,10 +907,16 @@ export function createSelection(env: SelectionEnvironment) {
       selectionToolbarPosition = { left: 0, top: 0, ready: false };
       return true;
     }
+    // The palette and the undo card float over the page too; the bar must not land on them.
+    const chrome = [...env.workspace.querySelectorAll<HTMLElement>(".instrument-palette, .history-pill")]
+      .map((element) => element.getBoundingClientRect());
     const placed = placeFloatingToolbar(
       anchor,
       selectionToolbarElement.getBoundingClientRect(),
       boundary,
+      10,
+      12,
+      chrome,
     );
     selectionToolbarPosition = { left: placed.left, top: placed.top, ready: true };
     return true;

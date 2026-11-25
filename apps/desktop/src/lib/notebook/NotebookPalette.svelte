@@ -346,7 +346,7 @@
 <style>
   button { border: 0; }
   button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
-  button:disabled { cursor: not-allowed; opacity: var(--disabled); }
+  button:disabled { cursor: default; opacity: var(--disabled); }
   .workspace-chrome {
     position: absolute;
     z-index: 15;
@@ -393,8 +393,7 @@
     height: var(--control-touch);
     padding: 0;
     border-color: var(--blueprint);
-    box-shadow: var(--shadow-modal);
-    animation: palette-pickup 120ms cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: var(--shadow-menu);
     will-change: left, top;
   }
   .history-pill.dragging button,
@@ -440,13 +439,12 @@
   }
 
   .history-pill.reduced-motion { transition: none; }
-  .history-pill.reduced-motion.dragging { animation: none; }
 
   .history-pill .grip {
     width: 14px;
     height: var(--control);
     flex: none;
-    background-image: radial-gradient(circle, var(--muted) 1.1px, transparent 1.2px);
+    background-image: radial-gradient(circle, var(--quiet) 1.1px, transparent 1.2px);
     background-position: center;
     background-size: 4px 6px;
     background-repeat: repeat-y;
@@ -455,10 +453,9 @@
   }
   .history-pill:hover .grip,
   .history-pill:focus-visible .grip,
-  .history-pill.dragging .grip { opacity: 0.8; }
+  .history-pill.dragging .grip { opacity: 1; }
   @media (prefers-reduced-motion: reduce) {
     .history-pill, .history-pill .grip { transition: none; }
-    .history-pill.dragging { animation: none; }
   }
   .history-pill button {
     display: grid;
@@ -466,11 +463,13 @@
     height: var(--control);
     border-radius: var(--radius);
     background: transparent;
-    color: var(--text);
+    color: var(--muted);
     cursor: pointer;
     place-items: center;
   }
-  .history-pill button:hover:not(:disabled) { background: var(--wash); }
+  .history-pill button:hover:not(:disabled) { background: var(--wash); color: var(--text); }
+  .history-pill button:active:not(:disabled) { background: var(--wash-strong); }
+  .history-pill button:disabled { cursor: default; }
   .history-pill svg {
     width: var(--icon);
     height: var(--icon);
@@ -563,8 +562,6 @@
     border-color: var(--blueprint);
     grid-template: 1fr / 1fr;
     gap: 0;
-    box-shadow: var(--shadow-modal);
-    animation: palette-pickup 120ms cubic-bezier(0.16, 1, 0.3, 1);
     will-change: left, top;
   }
 
@@ -617,7 +614,8 @@
     cursor: grab;
   }
 
-  .palette-grip:hover { background: var(--wash); }
+  .palette-grip:hover { background: var(--wash); color: var(--text); }
+  .palette-grip:active { background: var(--wash-strong); }
   .palette-grip:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 
   .palette-grip-dots {
@@ -631,7 +629,7 @@
     width: 3.5px;
     height: 3.5px;
     border-radius: 50%;
-    background: rgb(255 255 255 / 28%);
+    background: currentColor;
   }
 
   .palette-transport-icon {
@@ -663,30 +661,15 @@
   .dragging .palette-grip-dots { display: none; }
   .dragging .palette-transport-icon { display: block; }
 
-  @keyframes palette-pickup {
-    from {
-      opacity: 0.82;
-      transform: scale(0.9);
-    }
-  }
-
   .instrument-palette.reduced-motion,
   .instrument-palette.reduced-motion .palette-primary {
     transition: none;
-  }
-
-  .instrument-palette.reduced-motion.dragging {
-    animation: none;
   }
 
   @media (prefers-reduced-motion: reduce) {
     .instrument-palette,
     .palette-primary {
       transition: none;
-    }
-
-    .instrument-palette.dragging {
-      animation: none;
     }
   }
 

@@ -1,6 +1,29 @@
 import type { Catalog } from "./en";
 
+import nativeUpdate from "./nativeUpdate.json";
+
 export const de = {
+  appUpdates: {
+    installed: "Installierte Version {{version}}",
+    betaChannel: "Beta",
+    stableChannel: "Stabil",
+    ...nativeUpdate.de,
+    auto: "Einmal täglich automatisch suchen",
+    download: "Geprüftes Update herunterladen",
+    staging: "Das Paket wird heruntergeladen und geprüft …",
+    restart: "Für das Update neu starten",
+    notice: "Goodtype {{version}} ist unter Einstellungen → App-Updates verfügbar.",
+    stageFailed: "Das Update konnte nicht vorbereitet werden. Prüfe die Verbindung, den freien Speicherplatz und die ursprünglichen Paketdateien.",
+    title: "App-Updates",
+    privacy: "Bei der Suche fragt Goodtype öffentliche Versionen auf GitHub ab.",
+    beta: "Betaversionen einbeziehen",
+    check: "Nach Updates suchen",
+    checking: "GitHub wird abgefragt …",
+    current: "Diese Version ist für den gewählten Kanal aktuell.",
+    local: "Die Updatesuche ist in offiziellen Windows-x64-Versionen verfügbar.",
+    failed: "Die Version konnte nicht geprüft werden. Versuche es später erneut.",
+    available: "Goodtype {{version}} ({{channel}}) ist verfügbar ({{size}} MiB).",
+  },
   contentPacks: {
     shapes: "Formen",
     closeShapes: "Formen schließen",
@@ -368,6 +391,7 @@ export const de = {
     "ai": "KI",
     "title": "Codex",
     "panelTitle": "KI-Assistent",
+    "panelWaiting": "KI-Assistent, ein Gespräch oder Vorschlag wartet",
     "pythonPage": "Python-Zellen und gespeicherte Ausgaben",
     "suggestions": "Vorschläge",
     "suggestSummary": "Lernzettel erstellen",
@@ -377,7 +401,6 @@ export const de = {
     "suggestCheck": "Rechenweg prüfen",
     "suggestCheckPrompt": "Prüfe den angehängten Rechenweg auf Fehler und schlage Korrekturen vor.",
     "hidePanel": "KI-Seitenleiste ausblenden",
-    "openPanel": "KI-Seitenleiste öffnen",
     "conversation": "Unterhaltung",
     "endConversation": "Unterhaltung beenden",
     "selectHint": "Wähle etwas auf der Seite aus und starte mit KI eine Anfrage.",
@@ -822,6 +845,8 @@ export const de = {
     "openNotebook": "Notizbuch öffnen",
     "library": "Bibliothek",
     "change": "Ändern",
+    "libraryFolder": "Bibliotheksordner",
+    "changeLibraryFolder": "Bibliotheksordner ändern",
     "favourites": "Favoriten",
     "path": "Pfad",
     "importRunning3": "Import läuft…",
@@ -1244,6 +1269,8 @@ export const de = {
     "paletteFromAddons": "Aus Add-ons",
     "linePattern": "Linienmuster",
     "patternSpacing": "Musterabstand",
+    "shapeGroupWhat": "Was gezeichnet wird",
+    "shapeGroupBehaviour": "Zeichenverhalten",
     "keepProportions": "Proportionen beibehalten",
     "snapEnds": "Enden einrasten",
     "snapEndsHint": "Linienenden rasten an nahen Enden und Ecken ein. Alt gedrückt halten, um frei zu platzieren.",

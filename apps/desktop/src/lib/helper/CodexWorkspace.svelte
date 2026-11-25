@@ -295,46 +295,46 @@
 
 <style>
   .suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
-  .suggestions button { min-height: var(--control-dense); padding: 0 10px; border: 1px solid var(--edge); background: transparent; color: var(--text); font-size: var(--text-sm); font-weight: 400; }
-  .suggestions button:hover { background: var(--wash); }
+  .suggestions button { min-height: var(--control-dense); padding: 0 12px; border: 1px solid var(--edge); background: transparent; color: var(--text); font-size: var(--text-md); font-weight: 400; }
+  .suggestions button:hover:not(:disabled) { background: var(--wash); border-color: var(--edge-strong); }
   fieldset { display: contents; border: 0; padding: 0; margin: 0; min-width: 0; }
   .cells-above:hover:not(:disabled) { background: var(--wash); color: var(--text); }
-  .cells-above { background: transparent; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; font-weight: 400; justify-self: start; padding: 4px 8px; min-height: var(--control-dense); font-size: var(--text-sm); }
+  .cells-above { background: transparent; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; font-weight: 400; justify-self: start; padding: 0 8px; min-height: var(--control-dense); font-size: var(--text-md); }
   .cell-chips svg { width: var(--icon-dense); height: var(--icon-dense); fill: none; stroke: currentColor; stroke-width: var(--stroke-dense); stroke-linecap: round; }
-  .cell-chips button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--edge); min-height: var(--control-dense); padding: 0 6px; font-size: var(--text-sm); background: transparent; color: var(--muted); }
+  .cell-chips button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--edge); min-height: var(--control-dense); padding: 0 8px; font-size: var(--text-sm); background: transparent; color: var(--muted); }
   .cell-chips button:hover:not(:disabled) { background: var(--wash); color: var(--text); }
   .cells-above svg { width: var(--icon-dense); height: var(--icon-dense); fill: none; stroke: currentColor; stroke-width: var(--stroke-dense); }
   .cell-chips { display: contents; }
-  button { min-height: var(--control); padding: 8px 12px; color: var(--text); background: var(--wash); border: 0; border-radius: var(--radius); cursor: pointer; }
+  button { min-height: var(--control); padding: 0 12px; color: var(--text); background: var(--wash); border: 0; border-radius: var(--radius); font: inherit; font-size: var(--text-md); font-weight: 400; cursor: pointer; }
   button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
   button:hover:not(:disabled) { background: var(--wash-strong); }
   .codex-workspace { overflow: hidden; display: flex; min-height: 0; flex: 1; flex-direction: column; }
-  .body { position: relative; min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 16px; }
+  .body { position: relative; min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 16px; font-size: var(--text-md); line-height: 1.5; }
   .body.empty { flex: 0 1 auto; overflow: auto; padding-bottom: 0; }
-  .composer { flex: none; padding: 12px 16px; border-top: 1px solid var(--edge); background: var(--surround); }
+  .composer { flex: none; padding: 12px 16px; border-top: 1px solid var(--edge-soft); background: var(--panel); }
   .codex-workspace:not(.started) .composer { border-top: 0; background: transparent; padding-top: 4px; }
-  h3 { margin: 0; font-size: var(--text-md); font-weight: 600; }
-  .intro { margin: 0 0 12px; color: var(--muted); font-size: var(--text-sm); line-height: 1.6; }
-  .request { margin: 0 0 12px; padding: 8px 10px; border-radius: var(--radius); background: var(--wash); overflow-wrap: anywhere; font-weight: 400; }
-  .answer { margin-bottom: 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 400; line-height: 1.65; user-select: text; }
-  .shared-chip { display: inline-flex; align-items: center; gap: 4px; min-height: var(--control-dense); padding: 0 6px; border: 1px solid var(--edge); background: transparent; color: var(--text); font-size: var(--text-sm); }
+  h3 { margin: 0; font-size: var(--text-md); font-weight: 600; line-height: 1.25; }
+  .intro { margin: 0 0 12px; color: var(--muted); font-size: var(--text-md); line-height: 1.5; }
+  .request { margin: 0 0 12px; padding: 8px 12px; border-radius: var(--radius); background: var(--wash); overflow-wrap: anywhere; font-weight: 400; }
+  .answer { margin-bottom: 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 400; line-height: 1.6; user-select: text; }
+  .shared-chip { display: inline-flex; align-items: center; gap: 4px; min-height: var(--control-dense); padding: 0 8px; border: 1px solid var(--edge); background: transparent; color: var(--text); font-size: var(--text-sm); }
   .shared-chip svg { width: var(--icon-dense); height: var(--icon-dense); fill: none; stroke: currentColor; stroke-width: var(--stroke-dense); stroke-linecap: round; }
-  .shared-chip:hover:not(:disabled) { background: var(--wash); }
+  .shared-chip:hover:not(:disabled) { background: var(--wash); border-color: var(--edge-strong); }
   .presets-consent { width: 100%; display: flex; align-items: center; gap: 8px; min-height: var(--control-dense); color: var(--muted); font-size: var(--text-sm); cursor: pointer; }
   .presets-consent input { accent-color: var(--blueprint); }
   .presets-consent input:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
   @media (pointer: coarse) { .presets-consent { min-height: var(--control-touch); } }
   .context-note { margin: 6px 0; color: var(--muted); font-size: var(--text-sm); line-height: 1.5; }
   .intro-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 6px; }
-  .error { display: flex; align-items: flex-start; gap: 6px; margin-bottom: 8px; padding: 8px; border: 1px solid var(--edge); border-radius: var(--radius); color: var(--muted); font-size: var(--text-sm); line-height: 1.5; overflow-wrap: anywhere; }
+  .error { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; padding: 8px 12px; border-radius: var(--radius); background: var(--oxide-wash); color: var(--oxide-text); font-size: var(--text-sm); line-height: 1.5; overflow-wrap: anywhere; }
   .error p { margin: 0; flex: 1; }
-  .error svg { width: var(--icon-dense); height: var(--icon-dense); flex: none; fill: none; stroke: var(--oxide); stroke-width: var(--stroke-dense); stroke-linecap: round; }
+  .error svg { width: var(--icon-dense); height: var(--icon-dense); flex: none; margin-top: 2px; fill: none; stroke: currentColor; stroke-width: var(--stroke-dense); stroke-linecap: round; }
   .error .dismiss { display: grid; place-items: center; min-height: var(--control-dense); min-width: var(--control-dense); margin: -4px; padding: 4px; background: transparent; }
-  .dismiss svg { stroke: var(--muted); }
-  .image-notice { padding: 6px 8px; border: 1px solid var(--edge); border-radius: var(--radius); }
+  .dismiss svg { margin: 0; stroke: var(--muted); }
+  .image-notice { padding: 8px 12px; border: 1px solid var(--edge); border-radius: var(--radius); }
   .image-notice .context-note { margin: 0; }
-  .image-notice button { min-height: var(--control-dense); padding: 0; color: var(--blueprint-light); background: transparent; font-size: var(--text-sm); text-align: left; }
-  .image-notice button:hover { background: transparent; text-decoration: underline; }
+  .image-notice button { min-height: var(--control-dense); padding: 0 8px; margin-left: -8px; color: var(--blueprint-light); background: transparent; font-size: var(--text-sm); text-align: left; }
+  .image-notice button:hover:not(:disabled) { background: var(--wash); }
   .dismiss:hover { background: var(--wash); }
   button:disabled { cursor: not-allowed; opacity: var(--disabled); }
   @media (max-height: 500px) { .composer { padding: 8px 16px; } }

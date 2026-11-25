@@ -41,13 +41,14 @@
 <style>
   .eraser-settings { padding: 4px 12px 8px; }
   .screen-reader-note { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .setting { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 40px; font-size: var(--text-md); cursor: pointer; }
+  .setting { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--control); font-size: var(--text-md); line-height: 1.4; cursor: pointer; }
   input { position: absolute; right: 0; width: 40px; height: 40px; opacity: 0; margin: 0; cursor: pointer; }
   .toggle { flex: none; width: 34px; height: 20px; padding: 3px; border-radius: var(--radius-pill); background: var(--track); pointer-events: none; transition: background var(--fast) ease; }
   .toggle::after { content: ""; display: block; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: transform var(--fast) ease, background var(--fast) ease; }
+  .setting:hover input:not(:checked) + .toggle { background: var(--edge-strong); }
   input:checked + .toggle { background: var(--blueprint); }
   input:checked + .toggle::after { background: var(--text); transform: translateX(14px); }
   input:focus-visible + .toggle { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
-  @media (pointer: coarse) { .setting { min-height: 44px; } input { width: 44px; height: 44px; } }
+  @media (pointer: coarse) { .setting { min-height: var(--control-touch); } input { width: 44px; height: 44px; } }
   @media (prefers-reduced-motion: reduce) { .toggle, .toggle::after { transition: none; } }
 </style>

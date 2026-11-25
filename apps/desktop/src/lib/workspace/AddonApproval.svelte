@@ -32,3 +32,9 @@
 <button type="button" class="primary" disabled={pending} onclick={() => void decide(true)}>{$t("addons.manager.approve")}</button>
 <button type="button" class="control" disabled={pending} onclick={() => void decide(false)}>{$t("library.cancel")}</button>
 {#if failed}<p role="alert" class="problem">{$t("addons.manager.actionFailed")}</p>{/if}
+
+<style>
+  /* No box of its own: the parent decides the layout. */
+  p { margin: 0; line-height: 1.4; }
+  .problem { color: var(--oxide-text); }
+</style>

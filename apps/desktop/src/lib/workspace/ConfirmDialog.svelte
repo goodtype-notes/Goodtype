@@ -37,3 +37,6 @@
     <button type="button" class="danger" onclick={onConfirm}>{confirmLabel}</button>
   {/snippet}
 </Dialog>
+
+<style>
+</style>

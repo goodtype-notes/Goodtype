@@ -182,6 +182,7 @@
   bind:this={panel}
   class:embedded
   class="color-panel"
+ 
   style:transform={embedded ? null : `translate(${shift.x}px, ${shift.y}px)`}
   role={embedded ? "group" : "dialog"}
   tabindex="-1"
@@ -315,14 +316,15 @@
 <style>
   .color-panel {
     display: flex;
-    width: 216px;
+    width: 232px;
     flex-direction: column;
-    gap: 6px;
-    padding: 11px;
+    gap: 8px;
+    padding: 12px;
     border: 1px solid var(--edge);
     border-radius: var(--radius-lg);
     background: var(--panel);
     box-shadow: var(--shadow-panel);
+    color: var(--text);
   }
 
   .color-panel.embedded {
@@ -333,6 +335,7 @@
     box-shadow: none;
   }
 
+  /* The saturation field, hue strip and thumbs are content: they keep their own colours. */
   .field {
     position: relative;
     height: 104px;
@@ -373,26 +376,23 @@
 
   .hue .thumb { width: 18px; height: 18px; }
 
-  .apply.wide {
-    width: 100%;
-    font-family: "Cascadia Mono", Consolas, monospace;
-  }
-
   .row-label {
+    margin-top: 4px;
     color: var(--muted);
     font-size: var(--text-sm);
+    font-weight: 600;
   }
 
   .palette-swatches {
     display: grid;
-    gap: 5px;
+    gap: 8px;
     max-height: min(140px, 22dvh);
     overflow: auto;
   }
 
   .grid {
     display: grid;
-    gap: 5px;
+    gap: 6px;
     grid-template-columns: repeat(8, 1fr);
   }
 
@@ -400,15 +400,76 @@
     width: 100%;
     height: 20px;
     padding: 0;
-    border: 1px solid var(--edge);
+    border: 1px solid var(--edge-strong);
     border-radius: var(--radius);
     cursor: pointer;
   }
 
   .chip.current {
-    outline: 1.5px solid var(--blueprint);
-    outline-offset: 1.5px;
+    outline: 2px solid var(--blueprint-light);
+    outline-offset: 1px;
   }
+
+  .hex-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .preview {
+    width: 24px;
+    height: 24px;
+    flex: none;
+    border: 1px solid var(--edge-strong);
+    border-radius: var(--radius);
+  }
+
+  input {
+    width: 100%;
+    min-width: 0;
+    height: var(--control);
+    padding: 0 12px;
+    border: 1px solid var(--edge);
+    border-radius: var(--radius);
+    background: var(--inset);
+    color: var(--text);
+    font: var(--text-md)/1 var(--font-code);
+    transition: border-color var(--fast) ease;
+  }
+
+  input:hover { border-color: var(--edge-strong); }
+
+  .apply,
+  .remove {
+    height: var(--control);
+    padding: 0 16px;
+    border: 0;
+    border-radius: var(--radius);
+    font: inherit;
+    font-size: var(--text-md);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background var(--fast) ease, color var(--fast) ease;
+  }
+
+  /* Secondary: the hex field's own Apply. */
+  .apply { background: var(--wash); color: var(--text); }
+  .apply:hover { background: var(--wash-strong); }
+
+  /* The one primary: use the colour the wheel is on. */
+  .apply.wide {
+    width: 100%;
+    background: var(--blueprint);
+    color: var(--on-accent);
+    font-family: var(--font-code);
+    font-weight: 600;
+  }
+  .apply.wide:hover { background: var(--blueprint-hover); }
+
+  /* Destructive and quiet: oxide text, no fill. */
+  .remove { align-self: flex-start; height: var(--control-dense); margin-top: 4px; padding: 0 8px; background: transparent; color: var(--oxide-text); }
+  .remove:hover { background: var(--wash); }
+  .apply:active:not(.wide) { background: var(--wash-strong); }
 
   .chip:focus-visible,
   .apply:focus-visible,
@@ -418,49 +479,13 @@
     outline-offset: 2px;
   }
 
-  .hex-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+  @media (pointer: coarse) {
+    .apply, input { min-height: var(--control-touch); }
+    .remove { min-height: var(--control-touch); }
+    .chip { height: 28px; }
   }
 
-  .preview {
-    width: 22px;
-    height: 22px;
-    flex: none;
-    border: 1px solid var(--edge);
-    border-radius: var(--radius);
-  }
-
-  input {
-    width: 100%;
-    min-width: 0;
-    padding: 4px 6px;
-    border: 1px solid var(--edge);
-    border-radius: var(--radius);
-    background: var(--charcoal);
-    color: var(--text);
-    font: 11px/1.4 "Cascadia Mono", Consolas, monospace;
-  }
-
-  .apply,
-  .remove {
-    padding: 4px 8px;
-    border: 1px solid var(--edge);
-    border-radius: var(--radius);
-    background: var(--surround);
-    color: var(--text);
-    font-size: var(--text-sm);
-    cursor: pointer;
-  }
-
-  .apply:hover,
-  .remove:hover {
-    background: var(--wash);
-  }
-
-  .remove {
-    margin-top: 2px;
-    color: var(--oxide);
+  @media (prefers-reduced-motion: reduce) {
+    .apply, .remove, input { transition: none; }
   }
 </style>

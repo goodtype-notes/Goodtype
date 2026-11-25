@@ -39,6 +39,6 @@
 
 <style>
   section { padding-block: 12px; border-bottom: 1px solid var(--edge-soft); }
-  h3 { margin: 0 0 4px; font-size: var(--text-md); }
-  p { color: var(--muted); }
+  h3 { margin: 0 0 8px; font-size: var(--text-md); font-weight: 600; line-height: 1.4; }
+  p { margin: 8px 0 0; color: var(--oxide-text); font-size: var(--text-sm); line-height: 1.4; }
 </style>

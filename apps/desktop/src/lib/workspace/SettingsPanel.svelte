@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AppUpdates from "./AppUpdates.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import AddonSettings from "./addons/AddonSettings.svelte";
   import { matchesField } from "./addons/formModel";
@@ -318,7 +319,6 @@
           >
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={entry.icon} /></svg>
             {entry.title}
-            <span class="tally">{entry.items.length}</span>
           </button>
         {/each}
       </div>
@@ -354,6 +354,7 @@
               {/if}
               {@render setting(item)}
             {/each}
+            {#if group.id === "updates"}{#key settings.includeBetaReleases}<AppUpdates restart={actions.restartForUpdate} beta={settings.includeBetaReleases} />{/key}{/if}
             {#if group.id === "aiHelper" && settings.aiHelper.enabled}<CodexSettings {settings} {onChange} /><HelperSetup />{/if}
           </div>
         {/if}
@@ -370,15 +371,15 @@
 
 <style>
   .select-shell { position: relative; display: inline-flex; width: min(360px, 100%); }
-  .setting-select { width: 100%; height: var(--control); padding: 0 32px 0 10px; border: 0; border-radius: var(--radius); background: var(--wash); color: var(--text); color-scheme: dark; font: inherit; font-size: var(--text-md); appearance: none; }
-  .setting-select:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
-  .select-shell svg { position: absolute; top: 50%; right: 8px; width: var(--icon-dense); height: var(--icon-dense); transform: translateY(-50%); fill: none; stroke: var(--muted); stroke-width: var(--stroke-dense); stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+  .setting-select { box-sizing: border-box; width: 100%; height: var(--control); padding: 0 32px 0 12px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); color: var(--text); color-scheme: dark; font: inherit; font-size: var(--text-md); appearance: none; transition: border-color var(--fast) ease; }
+  .setting-select:hover { border-color: var(--edge-strong); }
+  .select-shell svg { position: absolute; top: 50%; right: 10px; width: var(--icon-dense); height: var(--icon-dense); transform: translateY(-50%); fill: none; stroke: var(--muted); stroke-width: var(--stroke-dense); stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
   .panel-scrim {
     position: fixed;
     z-index: 80;
     inset: 0;
     display: grid;
-    background: rgb(10 12 15 / 55%);
+    background: rgb(8 10 12 / 60%);
     place-items: center;
     animation: scrim-in var(--enter) ease-out;
   }
@@ -390,38 +391,40 @@
   .panel {
     display: flex;
     width: min(760px, calc(100vw - 32px));
-    height: min(520px, calc(100vh - 80px));
+    height: min(560px, calc(100vh - 80px));
     flex-direction: column;
     border: 1px solid var(--edge);
     border-radius: var(--radius-lg);
-    background: var(--surround);
+    background: var(--panel);
     box-shadow: var(--shadow-modal);
     color: var(--text);
+    font: var(--text-md) var(--font-ui);
     overflow: hidden;
-    animation: panel-in var(--enter) cubic-bezier(0.2, 0.7, 0.3, 1);
+    animation: panel-in var(--enter) ease-out;
   }
 
+  .panel:focus { outline: none; }
+
   @keyframes panel-in {
-    from { opacity: 0; transform: translateY(-8px) scale(0.985); }
+    from { opacity: 0; transform: translateY(4px); }
   }
 
   header {
     display: flex;
     flex: none;
     align-items: center;
-    padding: 12px 12px 12px 20px;
+    padding: 16px 16px 16px 24px;
     border-bottom: 1px solid var(--edge-soft);
-    background: var(--panel);
-    gap: 14px;
+    gap: 16px;
   }
 
-  .subject { display: flex; min-width: 0; flex-direction: column; }
-  .subject strong { font-size: var(--text-lg); font-weight: 600; }
+  .subject { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+  .subject strong { font-family: var(--font-display); font-size: var(--text-xl); font-weight: 600; line-height: 1.25; }
 
-  /* "Local preferences" qualifies the title, so it reads after it as a quiet subtitle. */
+  /* "Local preferences" qualifies the title, so it reads after it as a lead line. */
   .eyebrow {
     order: 1;
-    color: var(--quiet);
+    color: var(--muted);
     font-size: var(--text-sm);
   }
 
@@ -432,16 +435,17 @@
     align-items: center;
     max-width: 300px;
     margin-left: auto;
-    padding: 0 10px;
+    padding: 0 12px;
     border: 1px solid var(--edge);
     border-radius: var(--radius);
-    background: var(--surround);
+    background: var(--inset);
     color: var(--muted);
     gap: 8px;
     transition: border-color var(--fast) ease;
   }
 
-  .search:focus-within { border-color: var(--blueprint); }
+  .search:hover { border-color: var(--edge-strong); }
+  .search:focus-within { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 
   .search svg {
     width: var(--icon-dense);
@@ -476,9 +480,11 @@
     color: var(--muted);
     cursor: pointer;
     place-items: center;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
   .close:hover { background: var(--wash); color: var(--text); }
+  .close:active { background: var(--wash-strong); }
 
   .close svg {
     width: var(--icon-dense);
@@ -493,20 +499,21 @@
 
   .nav {
     display: flex;
-    width: 190px;
+    width: 200px;
     flex: none;
     flex-direction: column;
     padding: 12px;
     border-right: 1px solid var(--edge-soft);
-    gap: 2px;
+    gap: 4px;
     overflow-y: auto;
   }
 
   .nav button {
     display: flex;
     height: var(--control);
+    flex: none;
     align-items: center;
-    padding: 0 10px;
+    padding: 0 12px;
     border: 0;
     border-radius: var(--radius);
     background: transparent;
@@ -515,12 +522,13 @@
     font-size: var(--text-md);
     text-align: left;
     cursor: pointer;
-    gap: 10px;
+    gap: 12px;
     transition: background var(--fast) ease, color var(--fast) ease;
   }
 
   .nav button:hover { background: var(--wash); color: var(--text); }
-  .nav button.on { background: var(--accent-fill); color: var(--text); }
+  .nav button:active { background: var(--wash-strong); }
+  .nav button.on { background: var(--accent-fill); color: var(--text); font-weight: 600; }
 
   .nav svg {
     width: var(--icon-dense);
@@ -533,32 +541,25 @@
     stroke-width: var(--stroke-dense);
   }
 
-  .tally {
-    margin-left: auto;
-    color: var(--quiet);
-    font-size: var(--text-xs);
-    font-variant-numeric: tabular-nums;
-  }
-
   .pane {
     min-width: 0;
     flex: 1;
-    padding: 18px 22px 22px;
+    padding: 24px;
     overflow-y: auto;
   }
 
-  .pane-head { margin-bottom: 14px; }
-  .pane-head h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; }
+  .pane-head { margin-bottom: 12px; }
+  .pane-head h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; line-height: 1.25; }
 
   .blurb {
-    max-width: 46ch;
-    margin: 6px 0 0;
+    max-width: 52ch;
+    margin: 4px 0 0;
     color: var(--muted);
     font-size: var(--text-sm);
-    line-height: 1.5;
+    line-height: 1.4;
   }
 
-  .setting-section { margin: 18px 0 6px; color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
+  .setting-section { margin: 24px 0 12px; color: var(--text); font-size: var(--text-md); font-weight: 600; }
 
   .settings { display: flex; flex-direction: column; }
 
@@ -566,19 +567,19 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    padding: 14px 0;
+    padding: 12px 0;
     border-top: 1px solid var(--edge-soft);
-    gap: 20px;
+    gap: 24px;
   }
 
   .setting:first-child { border-top: 0; padding-top: 4px; }
 
   /* A slider or a set of choices needs the width, so it drops under its own label rather than
      fighting the description for the same line. */
-  .setting.stacked { flex-direction: column; gap: 10px; }
+  .setting.stacked { flex-direction: column; gap: 12px; }
 
-  .words { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
-  .name { font-size: var(--text-md); }
+  .words { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+  .name { font-size: var(--text-md); line-height: 1.4; }
 
   .where {
     color: var(--quiet);
@@ -590,7 +591,7 @@
     max-width: 52ch;
     color: var(--muted);
     font-size: var(--text-sm);
-    line-height: 1.5;
+    line-height: 1.4;
   }
 
   .toggle {
@@ -620,49 +621,54 @@
 
   .toggle.on { background: var(--blueprint); }
   .toggle.on span { background: var(--text); transform: translateX(14px); }
-  .toggle:disabled { opacity: var(--disabled); cursor: not-allowed; }
+  .toggle:disabled { opacity: var(--disabled); cursor: default; }
 
   /* An action is not a preference, so it is a button rather than a control with a state. */
-  .run {
+  .settings :global(.run) {
     height: var(--control);
     flex: none;
-    padding: 0 14px;
-    border: 1px solid var(--edge);
+    padding: 0 16px;
+    border: 0;
     border-radius: var(--radius);
-    background: transparent;
+    background: var(--wash);
     color: var(--text);
     font: inherit;
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
     cursor: pointer;
     transition: background var(--fast) ease;
   }
 
-  .run:hover { background: var(--wash); }
+  .settings :global(.run:hover:not(:disabled)) { background: var(--wash-strong); }
+  .settings :global(.run:disabled) { opacity: var(--disabled); cursor: default; }
 
   .choices {
     display: flex;
     align-self: stretch;
-    gap: 6px;
+    padding: 3px;
+    border: 1px solid var(--edge);
+    border-radius: var(--radius);
+    background: var(--inset);
+    gap: 3px;
   }
 
   .choice {
-    height: var(--control);
+    height: calc(var(--control) - 8px);
     flex: 1;
-    border: 1px solid var(--edge);
+    border: 0;
     border-radius: var(--radius);
     background: transparent;
     color: var(--muted);
     font: inherit;
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
     cursor: pointer;
-    transition: background var(--fast) ease, border-color var(--fast) ease, color var(--fast) ease;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
 
   .choice:hover { background: var(--wash); color: var(--text); }
 
   .choice.on {
-    border-color: var(--accent-edge);
     background: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-edge);
     color: var(--text);
   }
 
@@ -676,7 +682,7 @@
   .slider input { flex: 1; accent-color: var(--blueprint); }
 
   .slider output {
-    min-width: 46px;
+    min-width: 48px;
     color: var(--text);
     font-size: var(--text-sm);
     font-variant-numeric: tabular-nums;
@@ -684,30 +690,38 @@
   }
 
   .empty {
-    max-width: 46ch;
+    max-width: 52ch;
     margin: 0;
     color: var(--muted);
-    font-size: var(--text-sm);
-    line-height: 1.55;
+    font-size: var(--text-md);
+    line-height: 1.4;
   }
 
-  button:focus-visible,
-  .search:focus-within { outline: none; }
+  button:focus-visible { outline: none; }
 
   .nav button:focus-visible,
   .close:focus-visible,
   .toggle:focus-visible,
   .choice:focus-visible,
-  .run:focus-visible,
+  .settings :global(.run:focus-visible),
+  .setting-select:focus-visible,
   .slider input:focus-visible {
     outline: 2px solid var(--blueprint-light);
     outline-offset: 2px;
   }
 
+  /* Inside the clipped, scrolling nav the ring sits inside the row. */
+  .nav button:focus-visible { outline-offset: -2px; }
+
   @media (max-width: 720px) {
-    .nav { width: 62px; padding: 12px 8px; }
+    .nav { width: 64px; padding: 12px 8px; }
     .nav button { justify-content: center; padding: 0; font-size: 0; gap: 0; }
-    .nav .tally { display: none; }
+  }
+
+  @media (pointer: coarse) {
+    .nav button, .close, .run, .search, .setting-select { min-height: var(--control-touch); }
+    .close { min-width: var(--control-touch); }
+    .choice { min-height: calc(var(--control-touch) - 8px); }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -718,6 +732,9 @@
     .toggle span,
     .nav button,
     .choice,
+    .close,
+    .run,
+    .setting-select,
     .search { transition: none; }
   }
 </style>

@@ -25,6 +25,27 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows-
 
 The script packages the desktop app and its helpers, verifies a fresh extraction and writes a manifest and checksum beside the ZIP in `target`. Keep the extracted folder together when moving it. Retain the two newest verified local packages and their ZIPs. Preserve notebooks, backups and worktrees under `target`.
 
+## Portable app updates
+
+In **Settings → App updates**, use **Check for updates** to contact GitHub. Stable is the default.
+Enable beta releases to include published dev candidates. Daily startup checks are optional.
+Download and restart are separate actions. Goodtype saves settings and the active notebook before
+closing, verifies the release signature, ZIP checksum and managed files, and restarts from the
+same folder. Keep that folder writable and close any additional Goodtype instances and MCP relays
+before restarting. User-added files and notebooks can stay in place.
+
+The first updater-capable build must be extracted manually. Local builds and older unsigned
+releases use the manual ZIP workflow. After an interruption, launch the original Goodtype.exe
+to recover. Leave the temporary .goodtype-update-* folder in place during recovery. If the
+drive is unwritable or the package contents were edited, extract a fresh official ZIP to a new
+folder and reopen the existing notebook.
+
+The dev publishing job signs each manifest using the GOODTYPE_RELEASE_SIGNING_KEY environment
+secret in the dev-only portable-release GitHub environment. The desktop verifies the raw
+Ed25519 signature in the adjacent .json.sig file against the bundled public key. For a planned
+key rotation, first ship support for the replacement public key in a candidate signed by the
+current key. If key custody is lost, distribute and verify a new trusted build manually.
+
 ## Source map
 
 The [desktop app](../apps/desktop) contains the Tauri shell and Svelte frontend. The [core crate](../crates/goodtype-core) owns notebook persistence, history and ink geometry. The [Typst crate](../crates/goodtype-typst) compiles previews and exports PDFs. The canvas and exporter check their ink geometry against [shared fixtures](../fixtures).

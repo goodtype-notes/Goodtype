@@ -93,6 +93,7 @@
     bind:this={chip}
     type="button"
     class="back-to-cell"
+   
     class:over-palette={overPalette}
     class:reduced-motion={reducedMotion}
     onpointerdown={(event) => event.preventDefault()}
@@ -125,12 +126,12 @@
   }
 
   .back-to-cell.over-palette { bottom: 104px; }
-  /* The wash is laid over the panel, not instead of it: alone it would let the page show through. */
-  .back-to-cell:hover { background: linear-gradient(var(--wash), var(--wash)), var(--panel); }
+  .back-to-cell:hover { background: var(--wash); }
+  .back-to-cell:active { background: var(--wash-strong); }
   .back-to-cell:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 
   @keyframes chip-in {
-    from { opacity: 0; transform: translate(-50%, 6px); }
+    from { opacity: 0; transform: translate(-50%, 4px); }
   }
 
   .back-to-cell.reduced-motion { transition: none; animation: none; }

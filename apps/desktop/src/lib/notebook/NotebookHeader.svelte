@@ -53,61 +53,42 @@
 <style>
   button { border: 0; }
   button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
-  button:disabled { cursor: not-allowed; opacity: var(--disabled); }
+  button:disabled { cursor: default; opacity: var(--disabled); }
   .command-strip {
     z-index: 30;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
-    padding: 0 14px 0 18px;
-    border-bottom: 1px solid var(--wash);
-    background: var(--charcoal);
+    gap: 16px;
+    padding: 0 12px 0 16px;
+    border-bottom: 1px solid var(--edge-soft);
+    background: var(--panel);
   }
 
-  .notebook-identity {
-    display: flex;
-    align-items: center;
-  }
+  /* The gap matches the one between tabs, so the trailing "+" reads as the next seat in the row. */
+  .notebook-identity { display: flex; flex: 1; min-width: 0; align-items: center; gap: 4px; }
+  .notebook-identity .home-button { margin-right: 8px; }
 
-  /* The gap matches the one between tabs, so the trailing "+" reads as the next seat in the row
-     rather than a separate control that happens to sit nearby. */
-  .notebook-identity { flex: 1; min-width: 0; gap: 4px; }
-  .notebook-identity .home-button { margin-right: 6px; }
-
-  /* Sized like the strip's other icon controls so the row reads as one set, and it replaces the
-     decorative square that used to sit here — the corner was already the eye's first stop. */
-  .home-button {
+  .home-button, .new-tab-button {
     display: grid;
     width: var(--control);
     height: var(--control);
     flex: none;
     padding: 0;
-    border: 0;
-    border-radius: var(--radius);
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    place-items: center;
-  }
-
-  .home-button:hover:not(:disabled) { background: var(--wash); }
-  .new-tab-button {
-    display: grid;
-    width: var(--control);
-    height: var(--control);
-    flex: none;
-    padding: 0;
-    border: 0;
     border-radius: var(--radius);
     background: transparent;
     color: var(--muted);
     cursor: pointer;
     place-items: center;
+    transition: background var(--fast) ease, color var(--fast) ease;
   }
-  .new-tab-button:hover:not(:disabled) { background: var(--wash); color: var(--text); }
-
+  .home-button:hover:not(:disabled), .new-tab-button:hover:not(:disabled) { background: var(--wash); color: var(--text); }
+  .home-button:active:not(:disabled), .new-tab-button:active:not(:disabled) { background: var(--wash-strong); }
 
   .command-strip svg { width: var(--icon); height: var(--icon); fill: none;
     stroke: currentColor; stroke-width: var(--stroke); stroke-linecap: round; stroke-linejoin: round; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .home-button, .new-tab-button { transition: none; }
+  }
 </style>

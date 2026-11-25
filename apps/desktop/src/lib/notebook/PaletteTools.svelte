@@ -125,14 +125,16 @@
     flex: none;
     padding: 0;
     border: 0;
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius);
     background: transparent;
     color: var(--muted);
     cursor: pointer;
     place-items: center;
   }
   .tool-tile:hover { background: var(--wash); color: var(--text); }
+  .tool-tile:active:not(.active) { background: var(--wash-strong); }
   .tool-tile.active { background: var(--blueprint); color: var(--on-accent); }
+  .tool-tile.active:hover { background: var(--blueprint-hover); }
   .tool-tile:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
   .tool-tile svg {
     /* A touch larger than chrome icons: the tip is the detail that names the instrument. */
@@ -146,10 +148,10 @@
   }
   .tool-tile svg circle { fill: currentColor; stroke: none; }
   /* Ink sits on a pale halo so graphite stays visible on the dark rail and on the blue tile. */
-  .tool-tile svg .ink-halo { stroke: rgb(255 255 255 / 62%); }
+  .tool-tile svg .ink-halo { stroke: var(--paper); stroke-opacity: 0.62; }
   .tool-tile svg .band { stroke: none; }
   .tool-tile svg circle.eraser-size { fill: none; stroke: currentColor; stroke-width: 1.2; }
   .tool-tile svg path.eraser-cut { fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
-  .palette-divider { width: 26px; height: 1px; margin: 1px 0; background: var(--edge); }
+  .palette-divider { width: 26px; height: 1px; margin: 1px 0; background: var(--edge-soft); }
   .palette-divider.horizontal { width: 1px; height: 26px; margin: 0 3px; }
 </style>

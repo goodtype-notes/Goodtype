@@ -28,22 +28,25 @@
     gap: 6px;
     margin-bottom: 14px;
     color: var(--text);
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
   }
+  strong { font-weight: 600; }
+  p { margin: 0; color: var(--muted); font-size: var(--text-sm); }
   button {
     display: block;
     min-height: var(--control);
     max-width: 100%;
     padding: 8px 12px;
     overflow-wrap: anywhere;
-    border: 1px solid var(--edge);
+    border: 0;
     border-radius: var(--radius);
     background: var(--wash);
+    font: inherit;
     color: var(--text);
     cursor: pointer;
     text-align: left;
   }
   button:hover { background: var(--wash-strong); }
-  button.current { border-color: var(--accent-edge); background: var(--accent-fill); }
+  button.current { background: var(--accent-fill); box-shadow: inset 0 0 0 1px var(--accent-edge); font-weight: 600; }
   button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 </style>

@@ -92,6 +92,7 @@
   import { applyTheme, contentPacks, installedThemes, packText, shapeLibraries, type ContentPack, type PackShape, type ShapeChoice } from "../workspace/addons/content";
   import { createTapTracker, dropPoint, loadRecent, nextStamp, previewMargin, rememberShape, saveRecent, sameShape, type ShapeDrag } from "../workspace/addons/shapePanel";
   import AddonStore from "../workspace/addons/AddonStore.svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import SettingsPanel from "../workspace/SettingsPanel.svelte";
   import LibrarySurface from "../library/LibrarySurface.svelte";
   import { SHELF_ROOT, type ShelfLocation } from "../library/location";
@@ -177,6 +178,7 @@
   }
   let activityOpen = $state(false);
   let aiPanelOpen = $state(false);
+  let aiWaiting = $state(false);
   $effect(() => { if (!settings.aiHelper.enabled) { aiPanelOpen = false; activityOpen = false; codexSelection = null; } });
   function helperError() { session.status = notice("helper.error"); }
   let codexSelection = $state<{ share: SharePayload; anchor: { left: number; top: number } } | null>(null);
@@ -1177,6 +1179,32 @@
     const block = session.typstBlocks.find(candidate => candidate.id === selection.selectedTypstId);
     return block ? `${block.id}:${block.transform.x}:${block.transform.y}:${block.transform.rotation ?? 0}` : null;
   });
+  let { onAppNotice }: { onAppNotice?: (message: UiText) => void } = $props();
+
+  async function restartForUpdate() {
+    await windowClose.handle({ preventDefault() {} }, async () => {
+      await invoke("arm_app_restart", { armed: true });
+      try { await getCurrentWindow().destroy(); }
+      catch (error) { await invoke("arm_app_restart", { armed: false }); throw error; }
+    });
+  }
+
+  async function checkUpdatesOnStartup() {
+    if (!tauriAvailable || !settings.autoCheckAppReleases) return;
+    try {
+      const channel = settings.includeBetaReleases;
+      const key = channel ? "goodtype.update-check.beta" : "goodtype.update-check.stable";
+      const now = Date.now();
+      const last = Number(localStorage.getItem(key));
+      if (last <= now && now - last < 86_400_000) return;
+      localStorage.setItem(key, String(now));
+      const offer = await invoke<{ version: string } | null>("check_app_release", { beta: channel });
+      if (offer && !destroyed && settings.autoCheckAppReleases && channel === settings.includeBetaReleases) {
+        onAppNotice?.(notice("appUpdates.notice", { version: offer.version }));
+      }
+    } catch { /* Offline startup continues. Manual checks report the error. */ }
+  }
+
   let destroyed = false;
   const windowClose = createWindowCloseHandler({
     saveSettings: flushSettings,
@@ -1274,6 +1302,7 @@
     settings = await loadSettings(tauriAvailable);
     setLanguage(settings.uiLanguage);
     settingsReady = true;
+    void checkUpdatesOnStartup();
     paletteDock = settings.paletteDock;
     if (!tauriAvailable) {
       session.root = "Browser preview (persistence and real Typst compilation require Tauri)";
@@ -1389,7 +1418,7 @@
           title: $t("workspace.notebook"),
           entries: [
             { kind: "action", id: "reopen", label: $t("workspace.reopenNotebook"), icon: "M4 12a8 8 0 1 1 2.3 5.6M4 12V6M4 12h6", onSelect: session.reopen },
-            { kind: "action", id: "settings", label: $t("library.settings"), icon: "M4 8h8M17 8h3M4 16h3M12 16h8M14.5 5.8v4.4M9.5 13.8v4.4", hint: "Ctrl ,", onSelect: () => (settingsOpen = true) },
+            { kind: "action", id: "settings", label: $t("library.settings"), icon: "M4 8h8M17 8h3M4 16h3M12 16h8M14.5 5.8v4.4M9.5 13.8v4.4", hint: "Ctrl+,", onSelect: () => (settingsOpen = true) },
           ],
         },
       ];
@@ -1421,7 +1450,7 @@
       {
         entries: [
           { kind: "action", id: "style", label: $t("workspace.editSharedTypstStyle"), icon: "M5 4.5h14M12 4.5v15M8 19.5h8", onSelect: openSharedStyle },
-          { kind: "action", id: "settings", label: $t("library.settings"), hint: "Ctrl ,", icon: "M4 8h8M17 8h3M4 16h3M12 16h8M14.5 5.8v4.4M9.5 13.8v4.4", onSelect: () => (settingsOpen = true) },
+          { kind: "action", id: "settings", label: $t("library.settings"), hint: "Ctrl+,", icon: "M4 8h8M17 8h3M4 16h3M12 16h8M14.5 5.8v4.4M9.5 13.8v4.4", onSelect: () => (settingsOpen = true) },
         ],
       },
     ]);
@@ -2318,7 +2347,7 @@
     if (event.target instanceof Element && event.target.closest(".active-page") && !event.target.closest(".helper-crop, .selection-actions") && tool !== "lasso") region = null;
     selection.closeObjectSelection(event);
   }} onfocusout={() => session.scheduleFocus()} onwheel={navigation.wheelZoom}>
-<HelperWorkspace pages={helperPages} {session} bind:activityOpen bind:panelOpen={aiPanelOpen} hasConversation={Boolean(codexSelection && $codexStatus)} available={tauriAvailable} onError={helperError}>
+<HelperWorkspace pages={helperPages} {session} bind:activityOpen bind:panelOpen={aiPanelOpen} bind:waiting={aiWaiting} hasConversation={Boolean(codexSelection && $codexStatus)} available={tauriAvailable} onError={helperError}>
 {#snippet conversation(review)}
 {#if codexSelection && $codexStatus}
   <CodexWorkspace {cellEntry} active={aiPanelOpen} entry={editorEntry} pages={helperPages} summary={summaryDraft} share={codexSelection.share} status={$codexStatus}
@@ -2430,6 +2459,17 @@
       <button class="icon-button" class:active={sideEditorOpen} type="button" aria-label={$t("workspace.pageTextAndTypstSourceView")} aria-pressed={sideEditorOpen} title={$t("workspace.editorViewCtrlShiftE")} onclick={toggleSideEditor}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"></rect><path d="M10 4.5v15"></path></svg>
       </button>
+      {#if settings.aiHelper.enabled && $helper?.enabled}
+        <!-- The AI panel's one way in and back: a toggle beside the other panel toggles, shown only when
+             the helper is really running (the same test the panel uses), with a dot while a
+             conversation or an unreviewed proposal waits behind it. -->
+        <button class="icon-button ai-toggle" class:active={aiPanelOpen} type="button" data-preserve-selection
+          aria-label={aiWaiting && !aiPanelOpen ? $t("codex.panelWaiting") : $t("codex.panelTitle")}
+          aria-pressed={aiPanelOpen} title={$t("codex.panelTitle")} onclick={() => (aiPanelOpen = !aiPanelOpen)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v10H10l-5 4Z"></path></svg>
+          {#if aiWaiting && !aiPanelOpen}<span class="waiting-dot" aria-hidden="true"></span>{/if}
+        </button>
+      {/if}
       <button class="icon-button" class:active={moreOpen} bind:this={moreTrigger} type="button" aria-label={$t("workspace.moreNotebookActions")} aria-expanded={moreOpen} data-preserve-selection data-helper-activity-trigger onclick={() => (moreOpen = !moreOpen)}>
         <svg class="solid-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="19" cy="12" r="1.7"></circle></svg>
       </button>
@@ -3192,7 +3232,7 @@
       selectedBlockFont={selection.selectedTypstId ? blockFont(session.typstBlocks.find(block => block.id === selection.selectedTypstId)?.source ?? "") : null}
       onFontChange={changeInlineFont}
       {settings}
-      actions={{ browseAddons: () => openAddons(true), openMetrics: () => (metricsOpen = true), changePython: () => { settingsOpen = false; void calculations.changePython(); } }}
+      actions={{ restartForUpdate, browseAddons: () => openAddons(true), openMetrics: () => (metricsOpen = true), changePython: () => { settingsOpen = false; void calculations.changePython(); } }}
       onChange={changeSettings}
       onClose={() => { settingsOpen = false; settingsInitialGroup = "appearance"; }}
     />
@@ -3279,13 +3319,12 @@
   /* Only shown when no notebook is open, so it never sits in the icon row and can stay worded. */
   .text-action {
     height: var(--control);
-    padding: 0 12px;
-    border: 1px solid var(--edge);
+    padding: 0 14px;
+    border: 0;
     border-radius: var(--radius);
-    background: transparent;
+    background: var(--wash);
     color: var(--text);
     font-size: var(--text-md);
-    font-weight: 600;
     cursor: pointer;
   }
 
@@ -3296,9 +3335,22 @@
     border: 0;
     border-radius: var(--radius);
     background: transparent;
-    color: var(--text);
+    color: var(--muted);
     cursor: pointer;
     place-items: center;
+  }
+
+  .ai-toggle { position: relative; }
+  /* A live state, not decoration: something waits in the hidden AI panel. */
+  .waiting-dot {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--blueprint-light);
+    box-shadow: 0 0 0 2px var(--panel);
   }
 
   .command-actions svg { width: var(--icon); height: var(--icon); }
@@ -3312,7 +3364,8 @@
     stroke-linejoin: round;
   }
   .command-actions svg.solid-icon { fill: currentColor; }
-  .text-action:hover, .icon-button:hover, .icon-button.active { background: var(--wash); }
+  .text-action:hover { background: var(--wash-strong); }
+  .icon-button:hover, .icon-button.active { background: var(--wash); color: var(--text); }
   .icon-button:disabled { opacity: var(--disabled); cursor: default; }
 
   /* The add-page popout hangs off its own button rather than the strip's right edge, so the
@@ -3385,8 +3438,8 @@
     margin-top: calc(var(--calculation-top-space, 32px) * var(--page-zoom));
     margin-bottom: calc(var(--calculation-bottom-space, 30px) * var(--page-zoom));
   }
-  /* Springs back when a pull is let go; follows the finger without lag while it lasts. */
-  .page-pan-field { transition: transform 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+  /* Settles back when a pull is let go (no overshoot); follows the finger while it lasts. */
+  .page-pan-field { transition: transform 220ms cubic-bezier(0.2, 0.9, 0.3, 1); }
   .page-pan-field.pulling { transition: none; }
   .touch-history-toast {
     position: absolute;
@@ -3395,6 +3448,7 @@
     z-index: 20;
     transform: translateX(-50%);
     padding: 8px 18px;
+    border: 1px solid var(--edge);
     border-radius: var(--radius-pill);
     background: var(--panel);
     color: var(--text);
@@ -3405,6 +3459,7 @@
   }
   .touch-history-toast.below-palette { top: 90px; }
   .touch-history-toast.reduced-motion { animation: none; }
+  @media (prefers-reduced-motion: reduce) { .touch-history-toast { animation: none; } }
   @keyframes touch-history-fade { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
   .pull-badge {
     position: absolute;
@@ -3420,13 +3475,13 @@
     background: var(--panel);
     box-shadow: var(--shadow-menu);
     color: var(--text);
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
     pointer-events: none;
     transform: translateX(-50%);
   }
   .pull-badge.over-palette { bottom: 104px; }
   .pull-badge svg { width: 30px; height: 30px; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-  .pull-badge .track { stroke: rgb(255 255 255 / 14%); stroke-width: 3; }
+  .pull-badge .track { stroke: var(--wash-strong); stroke-width: 3; }
   .pull-badge .fill { stroke: var(--blueprint); stroke-width: 3; }
   .pull-badge .mark { stroke: var(--text); stroke-width: 2; }
   .pull-badge.ready { border-color: var(--blueprint); }
@@ -3445,17 +3500,19 @@
     white-space: nowrap;
   }
   .page-number button {
-    width: 26px;
-    height: 26px;
-    border: 1px solid var(--edge);
+    width: 28px;
+    height: 28px;
+    border: 0;
     border-radius: var(--radius);
     background: var(--panel);
     color: var(--muted);
     cursor: pointer;
   }
-  .page-number button:hover:not(:disabled),
+  .page-number button:hover:not(:disabled) {
+    background: var(--wash);
+    color: var(--text);
+  }
   .page-number button:focus-visible {
-    background: var(--panel-high);
     color: var(--text);
     outline: 2px solid var(--blueprint-light);
     outline-offset: 2px;
@@ -3552,18 +3609,20 @@
   :global(.instrument-palette.dock-right) .palette-panel-anchor { right: calc(100% + 10px); }
 
   .closed-state { display: grid; align-content: center; justify-items: center; padding: 2rem; background: var(--surround); text-align: center; }
-  .closed-mark { width: 34px; height: 42px; border: 1px solid var(--quiet); border-radius: 3px; box-shadow: inset 0 5px var(--panel); }
-  .closed-state h1 { margin: 18px 0 5px; font-size: 20px; font-weight: 600; }
-  .closed-state p { margin: 0; color: var(--muted); font-size: var(--text-md); }
-  .closed-state button { margin-top: 20px; padding: 10px 14px; border-radius: var(--radius); background: var(--blueprint); color: var(--on-accent); font-size: var(--text-md); font-weight: 600; cursor: pointer; }
+  .closed-mark { width: 34px; height: 42px; border: 1px solid var(--edge-strong); border-radius: 3px; background: var(--panel); }
+  .closed-state h1 { margin: 16px 0 8px; font-family: var(--font-display); font-size: var(--text-xl); font-weight: 600; line-height: 1.25; }
+  .closed-state p { margin: 0; color: var(--muted); font-size: var(--text-md); line-height: 1.5; }
+  .closed-state button { min-height: var(--control); margin-top: 24px; padding: 0 16px; border: 0; border-radius: var(--radius); background: var(--blueprint); color: var(--on-accent); font-size: var(--text-md); font-weight: 600; cursor: pointer; }
+  .closed-state button:hover { background: var(--blueprint-hover); }
+  .closed-state button:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
 
   .workspace-app:has(:global(.typst-block.editing)) :global(.selection-actions) { visibility: hidden; pointer-events: none; }
-  .panel-scrim { position: absolute; z-index: 70; inset: 58px 0 34px; display: grid; padding: 24px; background: rgb(10 12 16 / 62%); place-items: start end; }
+  .panel-scrim { position: absolute; z-index: 70; inset: 58px 0 34px; display: grid; padding: 24px; background: rgb(8 10 12 / 60%); place-items: start end; }
   .diagnostics-panel {
     width: min(620px, 100%);
     max-height: 100%;
     overflow: auto;
-    padding: 22px 24px;
+    padding: 24px;
     border: 1px solid var(--edge);
     border-radius: var(--radius-lg);
     background: var(--panel);
@@ -3572,11 +3631,11 @@
 
   .panel-heading { display: flex; align-items: flex-start; justify-content: space-between; }
   .panel-heading span { color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
-  .panel-heading h2 { margin: 4px 0 0; font-size: 20px; font-weight: 600; }
-  .diagnostic-path { overflow-wrap: anywhere; color: var(--quiet); font: 10px "Cascadia Mono", Consolas, monospace; }
-  .diagnostics-panel dl { display: grid; grid-template-columns: minmax(210px, 1fr) 1fr; gap: 8px 18px; margin: 18px 0 0; padding-top: 16px; border-top: 1px solid var(--wash); font-size: var(--text-md); }
+  .panel-heading h2 { margin: 4px 0 0; font-family: var(--font-display); font-size: var(--text-xl); font-weight: 600; line-height: 1.25; }
+  .diagnostic-path { overflow-wrap: anywhere; color: var(--quiet); font: var(--text-sm) var(--font-code); }
+  .diagnostics-panel dl { display: grid; grid-template-columns: minmax(210px, 1fr) 1fr; gap: 8px 16px; margin: 16px 0 0; padding-top: 16px; border-top: 1px solid var(--edge-soft); font-size: var(--text-md); }
   .diagnostics-panel dt { color: var(--muted); }
-  .diagnostics-panel dd { margin: 0; color: var(--text); font-family: "Cascadia Mono", Consolas, monospace; font-variant-numeric: tabular-nums; }
+  .diagnostics-panel dd { margin: 0; color: var(--text); font-family: var(--font-code); font-variant-numeric: tabular-nums; }
 
   .screen-reader-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
   @media (max-width: 800px) {

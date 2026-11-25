@@ -73,8 +73,8 @@
 
 <style>
   .mixed-selection { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 2147483647; pointer-events: none; }
-  rect { fill: transparent; stroke: var(--blueprint); stroke-width: calc(1.5px / var(--zoom)); stroke-dasharray: calc(4px / var(--zoom)) calc(3px / var(--zoom)); pointer-events: all; cursor: move; touch-action: none; }
+  rect { fill: transparent; stroke: var(--paper-select); stroke-width: calc(1.5px / var(--zoom)); stroke-dasharray: calc(4px / var(--zoom)) calc(3px / var(--zoom)); pointer-events: all; cursor: move; touch-action: none; }
   circle { fill: transparent; pointer-events: all; cursor: nwse-resize; touch-action: none; }
-  .visible-handle { fill: var(--panel); stroke: var(--blueprint); stroke-width: calc(1.5px / var(--zoom)); pointer-events: none; }
-  [role=button]:focus-visible { outline: 2px solid var(--blueprint-light); outline-offset: 2px; }
+  .visible-handle { fill: var(--paper); stroke: var(--paper-select); stroke-width: calc(1.5px / var(--zoom)); pointer-events: none; }
+  [role=button]:focus-visible { outline: 2px solid var(--paper-select); outline-offset: 2px; }
 </style>

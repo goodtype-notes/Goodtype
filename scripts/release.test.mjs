@@ -3,7 +3,18 @@ import { test } from 'node:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkCandidate, nextDevVersion, promotion, sha256 } from './release.mjs';
+import { generateKeyPairSync, verify } from 'node:crypto';
+import { checkCandidate, nextDevVersion, promotion, sha256, signReleaseManifest } from './release.mjs';
+
+test('release signatures bind exact manifest bytes to the app public key', () => {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const pinned = Buffer.from(publicKey.export({ format: 'jwk' }).x, 'base64url');
+  const bytes = Buffer.from('{"version":"0.3.20"}\n');
+  const sig = signReleaseManifest(bytes, privateKey, pinned);
+  assert.ok(verify(null, bytes, publicKey, sig));
+  assert.equal(verify(null, bytes.subarray(0, -1), publicKey, sig), false);
+  assert.throws(() => signReleaseManifest(bytes, generateKeyPairSync('ed25519').privateKey, pinned));
+});
 
 const tag = (name, sha = 'previous') => ({ name, commit: { sha } });
 
