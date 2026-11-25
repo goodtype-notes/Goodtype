@@ -681,6 +681,15 @@ fn math_archive_uses_shared_install_and_detects_tampering() {
     writer
         .write_all(&serde_json::to_vec(&MATH.declaration(VERSION)).unwrap())
         .unwrap();
+    // Published math and connector packages ship their own build manifest; the host's record
+    // replaces it.
+    writer
+        .start_file(
+            format!("{}/{}", package_folder(&MATH, VERSION), PACKAGE_MANIFEST),
+            SimpleFileOptions::default(),
+        )
+        .unwrap();
+    writer.write_all(br#"{"files":[]}"#).unwrap();
     let bytes = writer.finish().unwrap().into_inner();
     let archive = home.path().join("math.zip");
     fs::write(&archive, &bytes).unwrap();
