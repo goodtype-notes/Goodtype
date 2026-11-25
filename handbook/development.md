@@ -53,7 +53,7 @@ The [desktop app](../apps/desktop) contains the Tauri shell and Svelte frontend.
 ## Branches and releases
 
 1. Branch from `dev` using `feature/*` or `fix/*`. Open a pull request to `dev`. Both long lived branches require passing checks and resolved conversations.
-2. Each successful merge into `dev` runs full verification, smoke builds on macOS and Linux, and portable Windows packaging. CI publishes a Windows prerelease with a plain tag such as `v0.3.1`, the ZIP, a JSON manifest and a SHA256 checksum. The workflow artifact is available for 14 days.
+2. Each successful merge into `dev` runs smoke builds on macOS and Linux and portable Windows packaging. It runs full verification again unless the merged pull request's CI already passed for the identical source tree. CI publishes a Windows prerelease with a plain tag such as `v0.3.1`, the ZIP, a JSON manifest and a SHA256 checksum. The workflow artifact is available for 14 days.
 3. Download and test that exact candidate on Windows. Record the tag, tests performed, results and accepted limitations. Record any physical pen or touch testing separately from automated package checks.
 4. Open a promotion PR from `dev` to `main`. Include the following two lines with the actual tag and evidence.
 
