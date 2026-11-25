@@ -289,7 +289,7 @@ impl PageObject {
                 geometry, style, ..
             } => {
                 geometry.validate()?;
-                style.validate()?;
+                style.validate_for(geometry)?;
             }
             Self::InkGroup { .. } | Self::Group { .. } => {}
         }

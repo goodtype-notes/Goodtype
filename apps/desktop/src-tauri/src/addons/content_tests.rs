@@ -29,7 +29,7 @@ fn parse(value: &Value) -> Result<manifest::Manifest, manifest::Error> {
 fn shape_file() -> Value {
     json!({"id":"circuits","label":"label","items":[
         {"id":"resistor","label":"label","search":"search","widthPt":48,"heightPt":16,"objects":[
-            {"type":"shape","x":0,"y":8,"geometry":{"kind":"line","start":{"x":0,"y":0},"end":{"x":10,"y":0}},"style":{}},
+            {"type":"shape","x":0,"y":8,"geometry":{"kind":"line","start":{"x":0,"y":0},"end":{"x":10,"y":0}},"style":{"startCap":"dot","endCap":"arrow"}},
             {"type":"shape","x":10,"y":2,"geometry":{"kind":"rectangle","widthPt":28,"heightPt":12,"cornerRadiusPt":0},"style":{"fillColor":null}},
             {"type":"typst","x":14,"y":-5,"source":"$R_1$","layoutWidthPt":24,"scale":1}
         ]}
@@ -111,6 +111,8 @@ fn contribution_validation_checks_structure_labels_and_caps() {
         ("/items/0/objects/0/style", json!({"strokeColor":"red"})),
         ("/items/0/objects/0/style", json!({"opacity":1.5})),
         ("/items/0/objects/0/style", json!({"unknown":false})),
+        ("/items/0/objects/0/style", json!({"endCap":"custom"})),
+        ("/items/0/objects/1/style", json!({"startCap":"arrow"})),
         ("/items/0/objects/0/geometry/end", json!({"x":0,"y":0})),
         (
             "/items/0/objects/0/geometry/end",
@@ -360,6 +362,16 @@ fn verifies_install_without_probe_and_insertion_survives_removing_pack() {
     assert_eq!(
         (style.stroke_color.as_str(), style.stroke_width_pt),
         ("#223344", 2.5)
+    );
+    assert_eq!(
+        (style.start_cap, style.end_cap),
+        (ShapeCap::Dot, ShapeCap::Arrow)
+    );
+    storage::undo_notebook(&root, &mut history).unwrap();
+    let redone = storage::redo_notebook(&root, &mut history).unwrap();
+    assert_eq!(
+        redone.snapshot.page.objects[source.page.objects.len()..],
+        *added
     );
     let export = crate::export::export_page_from_bundle(&reopened, false).unwrap();
     let exported =

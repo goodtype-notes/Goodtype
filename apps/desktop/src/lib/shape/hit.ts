@@ -1,7 +1,7 @@
-import type { Point } from "../geometry/coordinates";
+import { rotatedVector, type Point } from "../geometry/coordinates";
 import type { ShapePoint } from "../model";
 import type { ShapeView } from "../notebook/pageView";
-import { containsPoint, distanceToOutline } from "./geometry";
+import { containsPoint, distanceToOutline, distanceToShapeCap, shapeCaps } from "./geometry";
 
 /**
  * Whether an eraser — or anything else with a reach — touches a shape.
@@ -18,7 +18,9 @@ export function shapeTouchedAt(shape: ShapeView, page: Point, reachPt: number): 
   const scale = Math.max(Math.abs(shape.scale), 1e-6);
   // The point has been brought back through the shape's scale, so the reach must be too.
   const reach = (reachPt + shape.style.strokeWidthPt * scale * 0.5) / scale;
-  if (distanceToOutline(shape.geometry, local) <= reach) return true;
+  const { shaft, caps } = shapeCaps(shape.geometry, shape.style);
+  if (shaft && distanceToOutline(shaft, local) <= reach) return true;
+  if (caps.some((cap) => distanceToShapeCap(cap, local) <= reachPt / scale)) return true;
   return shape.style.fillColor !== null && containsPoint(shape.geometry, local);
 }
 
@@ -43,24 +45,14 @@ export function topmostShapeAt(
 /// A point in the shape's own coordinates on the page: the transform every renderer applies,
 /// `translate(x y) rotate(rotation) scale(scale)`. [`toLocalPoint`] is its inverse.
 export function toPagePoint(shape: ShapeView, local: ShapePoint): Point {
-  const angle = (shape.rotation * Math.PI) / 180;
-  const x = local.x * shape.scale;
-  const y = local.y * shape.scale;
-  return {
-    x: x * Math.cos(angle) - y * Math.sin(angle) + shape.x,
-    y: x * Math.sin(angle) + y * Math.cos(angle) + shape.y,
-  };
+  const { x, y } = rotatedVector({ x: local.x * shape.scale, y: local.y * shape.scale }, shape.rotation);
+  return { x: x + shape.x, y: y + shape.y };
 }
 
 /// A page point in the shape's own coordinates: the inverse of the transform every renderer
 /// applies, `translate(x y) rotate(rotation) scale(scale)`.
 export function toLocalPoint(shape: ShapeView, page: Point): ShapePoint {
-  const angle = (-shape.rotation * Math.PI) / 180;
-  const x = page.x - shape.x;
-  const y = page.y - shape.y;
+  const { x, y } = rotatedVector({ x: page.x - shape.x, y: page.y - shape.y }, -shape.rotation);
   const scale = Math.max(Math.abs(shape.scale), 1e-6);
-  return {
-    x: (x * Math.cos(angle) - y * Math.sin(angle)) / scale,
-    y: (x * Math.sin(angle) + y * Math.cos(angle)) / scale,
-  };
+  return { x: x / scale, y: y / scale };
 }

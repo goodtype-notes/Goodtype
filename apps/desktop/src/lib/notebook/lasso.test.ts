@@ -33,11 +33,21 @@ describe("lasso categories and geometry", () => {
 
   it("uses rotated/scaled shape outlines and does not select the empty corner of an ellipse's box", () => {
     const shape = { id: "shape", x: 20, y: 20, scale: 2, rotation: 90,
-      geometry: { kind: "line", start: { x: 0, y: 0 }, end: { x: 30, y: 0 } } } as ShapeView;
+      geometry: { kind: "line", start: { x: 0, y: 0 }, end: { x: 30, y: 0 } },
+      style: { strokeColor: "#000000", strokeWidthPt: 2, opacity: 1, fillColor: null } } as ShapeView;
     expect(selectLassoObjects([shapeLassoItem(shape)], boxOutline(15, 40, 10, 10), DEFAULT_LASSO_TARGETS)).toEqual(["shape"]);
     shape.geometry = { kind: "ellipse", widthPt: 100, heightPt: 100 };
     shape.x = 0; shape.y = 0; shape.rotation = 0; shape.scale = 1;
     expect(selectLassoObjects([shapeLassoItem(shape)], boxOutline(0, 0, 3, 3), DEFAULT_LASSO_TARGETS)).toEqual([]);
+  });
+
+  it("lassos the cap away from the shaft and includes it in selection bounds", () => {
+    const shape: ShapeView = { id: "shape", x: 0, y: 0, scale: 1, rotation: 0, zIndex: 0, readingOrder: 0,
+      geometry: { kind: "line", start: { x: 0, y: 0 }, end: { x: 30, y: 0 } },
+      style: { strokeColor: "#000000", strokeWidthPt: 2, opacity: 1, fillColor: null, endCap: "arrow" } };
+    const item = shapeLassoItem(shape);
+    expect(selectLassoObjects([item], boxOutline(22, 2, 2, 1), DEFAULT_LASSO_TARGETS)).toEqual(["shape"]);
+    expect(combinedBounds([item], null)).toEqual({ left: 0, top: -4, right: 30, bottom: 4 });
   });
 
   it("combines ink/object bounds and applies one affine move/scale to every material", () => {

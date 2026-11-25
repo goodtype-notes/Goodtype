@@ -1,4 +1,6 @@
 <script lang="ts">
+  import ShapeCapSelect from "./ShapeCapSelect.svelte";
+  import type { ShapeCap } from "../model";
   import { tick } from "svelte";
   import { subjectLabel } from "../i18n/labels";
   import { t } from "../i18n";
@@ -49,6 +51,11 @@
     onPaste?: () => void;
     pasteDisabled?: boolean;
     onDuplicate?: () => void;
+    shapeCaps?: {
+      startCap?: ShapeCap;
+      endCap?: ShapeCap;
+      onChange: (end: "startCap" | "endCap", cap: ShapeCap) => void;
+    };
     element?: HTMLElement;
   };
 
@@ -79,6 +86,7 @@
     onPaste,
     pasteDisabled = false,
     onDuplicate,
+    shapeCaps,
     element = $bindable(),
   }: Props = $props();
 
@@ -173,6 +181,10 @@
   style:top={`${top}px`}
   aria-label={subject === "page" ? $t("workspace.pageActions") : $t("workspace.selectedActions", { "subject": what })}
 >
+  {#if shapeCaps}
+    <ShapeCapSelect end="start" value={shapeCaps.startCap} onChange={(cap) => shapeCaps?.onChange("startCap", cap)} />
+    <ShapeCapSelect end="end" value={shapeCaps.endCap} onChange={(cap) => shapeCaps?.onChange("endCap", cap)} />
+  {/if}
   {#if onAI}
     <button type="button" title={$t("aiEntry.shortcut")} aria-label={$t("aiEntry.ask")}
       onclick={event => { const rect = event.currentTarget.getBoundingClientRect(); onAI({ left: rect.left, top: rect.bottom }); }}>

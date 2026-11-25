@@ -84,6 +84,7 @@
     followHeldLine,
     shapeFromDrag,
     shapeDashArray,
+    shapeCaps,
     shapePath,
     splineFromPoints,
     type ShapeDraft,
@@ -1143,7 +1144,10 @@
     context.lineJoin = "round";
     context.globalAlpha = draft.style.opacity;
     context.setLineDash(shapeDashArray(draft.style) ?? []);
-    const path = new Path2D(shapePath(draft.geometry));
+    const { shaft, caps, startTrim } = shapeCaps(draft.geometry, draft.style);
+    if (caps.length > 0) context.lineWidth = draft.style.strokeWidthPt;
+    context.lineDashOffset = (draft.style.patternOffsetPt ?? 0) + startTrim;
+    const path = new Path2D(shaft ? shapePath(shaft) : undefined);
     const closed =
       draft.geometry.kind === "rectangle" ||
       draft.geometry.kind === "ellipse" ||
@@ -1153,6 +1157,14 @@
       context.fill(path);
     }
     context.stroke(path);
+    context.setLineDash([]);
+    context.lineWidth = draft.style.strokeWidthPt;
+    context.fillStyle = draft.style.strokeColor;
+    for (const cap of caps) {
+      const mark = new Path2D(cap.path);
+      if (cap.kind === "arrow" || cap.kind === "dot") context.fill(mark);
+      else context.stroke(mark);
+    }
     context.restore();
   }
 

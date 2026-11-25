@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from "../i18n";
   import { untrack } from "svelte";
+  import ShapeMarks from "./ShapeMarks.svelte";
   import type { Point } from "../geometry/coordinates";
   import {
     anchorPoints,
@@ -16,7 +17,7 @@
     toggleSplineClosed,
     type ShapeAnchor,
   } from "../shape/edit";
-  import { describeShape, shapeBounds, shapeDashArray, shapePath } from "../shape/geometry";
+  import { describeShape, shapeBounds, shapeCaps, shapePath } from "../shape/geometry";
   import { toLocalPoint, toPagePoint } from "../shape/hit";
   import { SNAP_RADIUS_SCREEN_PT, snapPoint, snapTargets } from "../shape/snap";
   import type { ShapeEditCommit, ShapeView } from "./pageView";
@@ -78,8 +79,12 @@
   let snapRing = $state<Point | null>(null);
   /// The curve knot last touched, whose tangent arms show while the curve is only selected.
   let activeNode = $state<number | null>(null);
-  const path = $derived(shapePath(preview.geometry));
-  const bounds = $derived(shapeBounds(preview.geometry));
+  const marks = $derived(shapeCaps(preview.geometry, preview.style));
+  const hitPath = $derived([
+    marks.shaft ? shapePath(marks.shaft) : "",
+    ...marks.caps.map((cap) => cap.path),
+  ].join(" "));
+  const bounds = $derived(shapeBounds(preview.geometry, preview.style));
   const anchors = $derived(
     editing ? anchorPoints(preview.geometry) : selectionAnchors(preview.geometry, activeNode),
   );
@@ -91,7 +96,7 @@
   const label = $derived($t("workspace.readingPosition", { "value1": describeShape(preview.geometry, $t), "value2": preview.readingOrder + 1 }));
   const controlScale = $derived(1 / Math.max(zoom * preview.scale, 0.05));
   const spline = $derived(preview.geometry.kind === "spline" ? preview.geometry : null);
-  const rotationHandle = $derived(rotationHandlePoint(preview.geometry, 28 * controlScale));
+  const rotationHandle = $derived(rotationHandlePoint(preview.geometry, 28 * controlScale, preview.style));
   /// A line is defined by its two ends, so selecting one goes straight to those handles: dragging
   /// either end fixes a slightly wrong angle or length in one move. The box, rotate and resize
   /// controls only restate what the ends already do.
@@ -278,22 +283,11 @@
     data-object-id={preview.id}
     transform={`translate(${preview.x} ${preview.y}) rotate(${preview.rotation}) scale(${preview.scale})`}
   >
-    <path
-      class="shape-mark"
-      d={path}
-      fill={closed ? (preview.style.fillColor ?? "none") : "none"}
-      stroke={preview.style.strokeColor}
-      stroke-width={preview.style.strokeWidthPt}
-      stroke-dasharray={shapeDashArray(preview.style)?.join(" ")}
-      stroke-dashoffset={preview.style.patternOffsetPt}
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      opacity={preview.style.opacity}
-    ></path>
+    <ShapeMarks {marks} style={preview.style} {closed} />
     <path
       class:closed
       class="shape-hit"
-      d={path}
+      d={hitPath}
       fill={closed ? "transparent" : "none"}
       stroke="transparent"
       stroke-width={Math.max(preview.style.strokeWidthPt, 44 * controlScale)}
@@ -428,7 +422,6 @@
 
 <style>
   .shape-object { position: absolute; inset: 0; display: block; overflow: visible; pointer-events: none; touch-action: none; user-select: none; }
-  .shape-mark { pointer-events: none; }
   .shape-controls { z-index: 2147483647; }
   .shape-hit { pointer-events: none; cursor: move; outline: none; }
   .grabbable .shape-hit { pointer-events: stroke; }

@@ -154,7 +154,11 @@ export type ShapeGeometry =
   | { kind: "ellipse"; widthPt: number; heightPt: number }
   | { kind: "spline"; nodes: BezierNode[]; closed: boolean };
 
+export type ShapeCap = "none" | "arrow" | "open" | "dot" | "bar";
+
 export type ShapeStyle = {
+  startCap?: ShapeCap;
+  endCap?: ShapeCap;
   strokeColor: string;
   strokeWidthPt: number;
   fillColor: string | null;

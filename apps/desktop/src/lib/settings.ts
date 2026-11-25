@@ -1,7 +1,7 @@
 import { translate, type Translator } from "./i18n";
 import { loadAppSettings, saveAppSettings } from "./ipc/workspace";
 import type { PenSideButton, PressureCalibration } from "./ink/pipeline";
-import type { StrokePattern } from "./model";
+import type { ShapeCap, StrokePattern } from "./model";
 import type { HistoryCorner } from "./notebook/chromeLayout";
 import type { PaletteCommand } from "./notebook/palette";
 import type { ShapeKind } from "./shape/geometry";
@@ -145,6 +145,7 @@ export type AppSettings = {
   shapeFill: boolean;
   /** Line pattern for shapes drawn with the Shapes tool. Held figures follow the pen instead. */
   shapePattern: StrokePattern;
+  shapeEndCap: ShapeCap;
   shapePatternSpacing: number;
   shapeConstrain: boolean;
   /** Line ends and rectangle corners meet nearby ends and corners; Alt places freely. */
@@ -220,6 +221,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   shapeKind: "line",
   shapeFill: false,
   shapePattern: "solid",
+  shapeEndCap: "none",
   shapePatternSpacing: 1,
   shapeConstrain: false,
   shapeEndSnap: true,

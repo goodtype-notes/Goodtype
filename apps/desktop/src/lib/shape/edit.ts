@@ -1,7 +1,8 @@
 import type { Point } from "../geometry/coordinates";
-import type { ShapeGeometry, ShapePoint } from "../model";
+import type { ShapeGeometry, ShapePoint, ShapeStyle } from "../model";
 import type { ShapeView } from "../notebook/pageView";
 import { MIN_CLOSED_SPLINE_NODES, MIN_SHAPE_SIZE_PT, shapeBounds } from "./geometry";
+import { toPagePoint } from "./hit";
 
 /// Shift-rotation lands on the same twelfth-turn grid a constrained line snaps to.
 const ROTATION_SNAP_DEGREES = 15;
@@ -48,7 +49,7 @@ export function resizeShape(
   delta: Point,
   constrain = false,
 ): ShapeView {
-  const bounds = shapeBounds(shape.geometry);
+  const bounds = shapeBounds(shape.geometry, shape.style);
   const width = Math.max(bounds.right - bounds.left, 1);
   const height = Math.max(bounds.bottom - bounds.top, 1);
   let scaleX = Math.max((width + delta.x) / width, 0.05);
@@ -121,16 +122,16 @@ export function rotateShape(
   delta: Point,
   snap = false,
 ): ShapeView {
-  const centre = boundsCentre(shape.geometry);
-  const pivot = worldPoint(shape, centre);
-  const from = worldPoint(shape, grabbed);
+  const centre = boundsCentre(shape.geometry, shape.style);
+  const pivot = toPagePoint(shape, centre);
+  const from = toPagePoint(shape, grabbed);
   const to = { x: from.x + delta.x, y: from.y + delta.y };
   const turned =
     Math.atan2(to.y - pivot.y, to.x - pivot.x) - Math.atan2(from.y - pivot.y, from.x - pivot.x);
   const degrees = shape.rotation + (turned * 180) / Math.PI;
   const rotation = snap ? Math.round(degrees / ROTATION_SNAP_DEGREES) * ROTATION_SNAP_DEGREES : degrees;
   const turnedShape = { ...shape, rotation };
-  const moved = worldPoint(turnedShape, centre);
+  const moved = toPagePoint(turnedShape, centre);
   return {
     ...turnedShape,
     x: turnedShape.x + pivot.x - moved.x,
@@ -139,8 +140,8 @@ export function rotateShape(
 }
 
 /// Where a rotation handle sits: straight above the bounds, in the shape's own coordinates.
-export function rotationHandlePoint(geometry: ShapeGeometry, offset: number): ShapePoint {
-  const bounds = shapeBounds(geometry);
+export function rotationHandlePoint(geometry: ShapeGeometry, offset: number, style?: ShapeStyle): ShapePoint {
+  const bounds = shapeBounds(geometry, style);
   return { x: (bounds.left + bounds.right) / 2, y: bounds.top - offset };
 }
 
@@ -153,7 +154,12 @@ export function toggleSplineClosed(shape: ShapeView): ShapeView {
   const geometry = shape.geometry;
   if (geometry.kind !== "spline") return shape;
   if (!geometry.closed && !canCloseSpline(geometry)) return shape;
-  return { ...shape, geometry: { ...geometry, closed: !geometry.closed } };
+  const style = { ...shape.style };
+  if (!geometry.closed) {
+    delete style.startCap;
+    delete style.endCap;
+  }
+  return { ...shape, style, geometry: { ...geometry, closed: !geometry.closed } };
 }
 
 /**
@@ -218,21 +224,9 @@ export function selectionAnchors(
   }
 }
 
-function boundsCentre(geometry: ShapeGeometry): ShapePoint {
-  const bounds = shapeBounds(geometry);
+function boundsCentre(geometry: ShapeGeometry, style: ShapeStyle): ShapePoint {
+  const bounds = shapeBounds(geometry, style);
   return { x: (bounds.left + bounds.right) / 2, y: (bounds.top + bounds.bottom) / 2 };
-}
-
-/// A point in the shape's own coordinates, placed on the page by the transform every renderer
-/// applies: `translate(x y) rotate(rotation) scale(scale)`.
-function worldPoint(shape: ShapeView, point: ShapePoint): Point {
-  const angle = (shape.rotation * Math.PI) / 180;
-  const x = point.x * shape.scale;
-  const y = point.y * shape.scale;
-  return {
-    x: shape.x + x * Math.cos(angle) - y * Math.sin(angle),
-    y: shape.y + x * Math.sin(angle) + y * Math.cos(angle),
-  };
 }
 
 /// Push `point` off `anchor` along the line they already make, so the two never coincide.

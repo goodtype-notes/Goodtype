@@ -4,7 +4,8 @@
   import { cancelAddonCommand, contributionText, dismissAddonForm, previewAddonForm, type AddonValues, type ContributionEntry, type FormPreview } from "../../ipc/addons";
   import type { PageGeometry } from "../../model";
   import { templatePreviewSvg } from "../../page/template";
-  import { shapePath, shapeDashArray } from "../../shape/geometry";
+  import { shapeCaps, supportsShapeCaps } from "../../shape/geometry";
+  import ShapeMarks from "../../notebook/ShapeMarks.svelte";
   import { dismissable } from "../dismiss";
   import AddonField from "./AddonField.svelte";
   import { accepts, formDefaults } from "./formModel";
@@ -165,10 +166,10 @@
               {#each page.items as item (item.object.id)}
                 {#if item.object.type === "shape"}
                   {@const object = item.object}
-                  <path d={shapePath(object.geometry)} transform={`translate(${object.x} ${object.y})`}
-                    stroke={object.style.strokeColor} stroke-width={object.style.strokeWidthPt}
-                    stroke-dasharray={shapeDashArray(object.style)?.join(" ")} opacity={object.style.opacity}
-                    fill={object.style.fillColor ?? "none"} />
+                  <g transform={`translate(${object.x} ${object.y})`}>
+                    <ShapeMarks marks={shapeCaps(object.geometry, object.style)} style={object.style}
+                      closed={!supportsShapeCaps(object.geometry)} />
+                  </g>
                 {:else if item.svg}
                   <image href={`data:image/svg+xml,${encodeURIComponent(item.svg)}`} x={item.object.x} y={item.object.y} width={item.widthPt} height={item.heightPt} />
                 {/if}
