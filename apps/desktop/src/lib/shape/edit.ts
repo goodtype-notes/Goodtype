@@ -63,18 +63,22 @@ export function resizeShape(
   return { ...shape, geometry: scaleGeometry(shape.geometry, { x: bounds.left, y: bounds.top }, scaleX, scaleY) };
 }
 
+/**
+ * Drag one handle. `constrain` (Shift) snaps a line end to 15° steps, keeps a rectangle's
+ * proportions from a corner, and keeps an ellipse's proportions from a side.
+ */
 export function moveShapeAnchor(
   shape: ShapeView,
   anchor: ShapeAnchor,
   delta: Point,
-  snapAngle = false,
+  constrain = false,
 ): ShapeView {
   const geometry = shape.geometry;
   if (geometry.kind === "line" && typeof anchor === "string") {
     // The store refuses a line whose ends coincide, and rightly — it is not a line. Catching it
     // here keeps a dragged handle from turning into a commit failure the user cannot act on.
     const place = (moved: Point, fixed: Point) =>
-      separated(snapAngle ? snapAround(moved, fixed, shape.rotation) : moved, fixed);
+      separated(constrain ? snapAround(moved, fixed, shape.rotation) : moved, fixed);
     if (anchor === "line-start") {
       return {
         ...shape,
@@ -88,11 +92,8 @@ export function moveShapeAnchor(
       };
     }
   }
-  if (geometry.kind === "rectangle" && typeof anchor === "string") {
-    return resizeParametric(shape, anchor, delta, geometry.cornerRadiusPt);
-  }
-  if (geometry.kind === "ellipse" && typeof anchor === "string") {
-    return resizeParametric(shape, anchor, delta);
+  if ((geometry.kind === "rectangle" || geometry.kind === "ellipse") && typeof anchor === "string") {
+    return resizeParametric(shape, anchor, delta, constrain);
   }
   if (geometry.kind !== "spline" || typeof anchor === "string") return shape;
   const node = geometry.nodes[anchor.node];
@@ -193,6 +194,30 @@ export function anchorPoints(geometry: ShapeGeometry): { anchor: ShapeAnchor; po
   }
 }
 
+/**
+ * The handles a shape shows as soon as it is selected, before it is opened for editing: a line's
+ * two ends, a rectangle's four corners, an ellipse's four sides, and a curve's knots — with the
+ * tangent arms of `activeNode` only, the knot last touched, so a long curve is not buried in arms.
+ */
+export function selectionAnchors(
+  geometry: ShapeGeometry,
+  activeNode: number | null,
+): { anchor: ShapeAnchor; point: ShapePoint }[] {
+  const all = anchorPoints(geometry);
+  switch (geometry.kind) {
+    case "line":
+      return all;
+    case "rectangle":
+      return all.filter(({ anchor }) => typeof anchor === "string" && anchor.includes("-"));
+    case "ellipse":
+      return all.filter(({ anchor }) => typeof anchor === "string" && !anchor.includes("-"));
+    case "spline":
+      return all.filter(
+        ({ anchor }) => typeof anchor !== "string" && (!("handle" in anchor) || anchor.node === activeNode),
+      );
+  }
+}
+
 function boundsCentre(geometry: ShapeGeometry): ShapePoint {
   const bounds = shapeBounds(geometry);
   return { x: (bounds.left + bounds.right) / 2, y: (bounds.top + bounds.bottom) / 2 };
@@ -236,7 +261,7 @@ function resizeParametric(
   shape: ShapeView,
   anchor: string,
   delta: Point,
-  cornerRadius?: number,
+  constrain = false,
 ): ShapeView {
   const geometry = shape.geometry;
   if (geometry.kind !== "rectangle" && geometry.kind !== "ellipse") return shape;
@@ -244,10 +269,32 @@ function resizeParametric(
   const movesEast = anchor === "north-east" || anchor === "south-east" || anchor === "east";
   const movesNorth = anchor === "north-west" || anchor === "north-east" || anchor === "north";
   const movesSouth = anchor === "south-west" || anchor === "south-east" || anchor === "south";
-  const left = movesWest ? Math.min(delta.x, geometry.widthPt - 4) : 0;
-  const top = movesNorth ? Math.min(delta.y, geometry.heightPt - 4) : 0;
-  const right = geometry.widthPt + (movesEast ? delta.x : 0);
-  const bottom = geometry.heightPt + (movesSouth ? delta.y : 0);
+  const width = geometry.widthPt;
+  const height = geometry.heightPt;
+  let left = movesWest ? Math.min(delta.x, width - 4) : 0;
+  let top = movesNorth ? Math.min(delta.y, height - 4) : 0;
+  let right = width + (movesEast ? delta.x : 0);
+  let bottom = height + (movesSouth ? delta.y : 0);
+  if (constrain) {
+    // One factor for both axes. From a corner it follows whichever way the pointer moved
+    // further, as `resizeShape` does; from a side it follows that side, and the other axis grows
+    // about its own middle so the shape stays where it was drawn.
+    const horizontal = movesWest || movesEast;
+    const vertical = movesNorth || movesSouth;
+    const byWidth = horizontal && (!vertical || Math.abs(delta.x) >= Math.abs(delta.y));
+    const factor = Math.max(
+      byWidth ? (right - left) / width : (bottom - top) / height,
+      4 / Math.min(width, height),
+    );
+    const sizedWidth = width * factor;
+    const sizedHeight = height * factor;
+    if (movesWest) left = right - sizedWidth;
+    else if (movesEast) right = left + sizedWidth;
+    else [left, right] = [(width - sizedWidth) / 2, (width + sizedWidth) / 2];
+    if (movesNorth) top = bottom - sizedHeight;
+    else if (movesSouth) bottom = top + sizedHeight;
+    else [top, bottom] = [(height - sizedHeight) / 2, (height + sizedHeight) / 2];
+  }
   const widthPt = Math.max(4, right - left);
   const heightPt = Math.max(4, bottom - top);
   const origin = rotateAndScale({ x: left, y: top }, shape.rotation, shape.scale);
@@ -256,7 +303,7 @@ function resizeParametric(
         kind: "rectangle" as const,
         widthPt,
         heightPt,
-        cornerRadiusPt: Math.min(cornerRadius ?? geometry.cornerRadiusPt, widthPt / 2, heightPt / 2),
+        cornerRadiusPt: Math.min(geometry.cornerRadiusPt, widthPt / 2, heightPt / 2),
       }
     : { kind: "ellipse" as const, widthPt, heightPt };
   return { ...shape, x: shape.x + origin.x, y: shape.y + origin.y, geometry: resized };
