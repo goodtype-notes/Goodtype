@@ -508,6 +508,18 @@ manifest's English and German string tables.
   `rgb(r g b / a%)` values. The host checks text, muted and quiet contrast
   on the panel and surround, and on-accent contrast on blueprint, at 4.5:1.
   A pack may contain up to 8 themes. Missing themes return to Default.
+- A shape item with two explicit ports can declare `stretch` (ADR 0049).
+  `axis` lists the port indices in left-to-right order on a horizontal axis.
+  `roles` lists one role per object in order. A `fixedBody` rule uses one or
+  more `body` parts, a `startLead` and an `endLead`, and optionally a
+  `throughLine`. A body with a through-line and no leads requires
+  `virtualSockets`, two distances from the start port. Optional `leadFloors`
+  default to 4 pack points per end. A `span` rule uses only `span` parts
+  made from lines, open splines or square-corner rectangles and stops at
+  half the authored span or 4 pack points, whichever is larger. At least
+  one span part must meet both ports. The host stores the resolved rule on
+  a Group even for a single shape. Publish these packs after the host
+  supports the declaration.
 - Typst package directories must be `content/typst/preview/<name>/<version>`
   with matching `typst.toml`. A pack may contain up to 16. Goodtype resolves
   regular local Typst packages first, then app-owned offline copies, then

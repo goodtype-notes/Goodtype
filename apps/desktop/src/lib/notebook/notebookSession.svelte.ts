@@ -13,7 +13,7 @@ import { notebookFailureCode } from "../ipc/errors";
 import { tick } from "svelte";
 import { get } from "svelte/store";
 
-import { commitNotebook, createNotebook, createPage, deletePage, deletePages as deletePagesIpc, duplicatePage, focusPage, importPdfPages, openNotebook, openPage, pickPdfReference, reorderPages, runHistory, runStructureHistory } from "../ipc/notebook";
+import { commitGroupStretch, type StretchRequest, commitNotebook, createNotebook, createPage, deletePage, deletePages as deletePagesIpc, duplicatePage, focusPage, importPdfPages, openNotebook, openPage, pickPdfReference, reorderPages, runHistory, runStructureHistory } from "../ipc/notebook";
 import { discardRecoveryCandidate, listRecoveryCandidates, restoreRecoveryCandidate } from "../ipc/recovery";
 import { moveLibraryEntries } from "../ipc/library";
 import { type TypstCompileRequest } from "../ipc/typst";
@@ -1668,6 +1668,36 @@ export function createSession(env: SessionEnvironment) {
     await transactionQueue;
   }
 
+  async function stretchGroup(request: StretchRequest) {
+    const requestRoot = root, generation = notebookGeneration;
+    const current = () => root === requestRoot && notebookGeneration === generation && activePageId === request.pageId;
+    if (!requestRoot || !current() || !await persist() || !current() || transactionFailed) return;
+    replacingPageCount += 1;
+    pendingTransactions += 1;
+    transactionQueue = transactionQueue.then(async () => {
+      if (!current() || transactionFailed) return;
+      try {
+        const result = await commitGroupStretch(requestRoot, request);
+        if (!current() || result.snapshot.page.revision === request.revision) return;
+        applySnapshot(result.snapshot);
+        revision = result.snapshot.page.revision;
+        canUndo = result.canUndo;
+        canRedo = result.canRedo;
+        const group = result.snapshot.page.objects.find(object => object.id === request.groupId);
+        if (group?.type === "group") env.selection.lassoObjectIds = [...group.childIds];
+        status = notice("workspace.savedRevision", { label: notice("workspace.stretchedShapeGroup"), revision });
+        editGeneration += 1;
+        recordNotebookAction(request.pageId);
+      } catch (error) {
+        if (current()) reportCommitFailure(notice("workspace.stretchedShapeGroup"), error);
+      }
+    }).finally(() => {
+      replacingPageCount -= 1;
+      pendingTransactions -= 1;
+    });
+    await transactionQueue;
+  }
+
   async function detachAddon(addon: string, ids: string[]) {
     const requestRoot = root, pageId = activePageId, generation = notebookGeneration;
     if (!requestRoot || !await persist()) return;
@@ -2591,6 +2621,7 @@ export function createSession(env: SessionEnvironment) {
     addCopiedGroups: (groups: typeof copiedGroups) => { copiedGroups = [...copiedGroups, ...groups]; },
     detachAddon,
     applyAddonObjectAction,
+    stretchGroup,
     changeStrokes,
     addStroke,
     addShape,

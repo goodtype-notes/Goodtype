@@ -126,6 +126,27 @@ struct Item {
     )]
     ports: Option<Vec<goodtype_core::ShapePoint>>,
     objects: Vec<ContentObject>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stretch: Option<ItemStretch>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ItemStretch {
+    axis: [usize; 2],
+    roles: Vec<goodtype_core::stretch::Role>,
+    mode: StretchMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lead_floors: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    virtual_sockets: Option<[f64; 2]>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum StretchMode {
+    FixedBody,
+    Span,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -200,6 +221,152 @@ impl Style {
 }
 
 impl Item {
+    fn stretch_rule(
+        &self,
+        child_ids: &[String],
+        scale: f64,
+    ) -> Result<Option<goodtype_core::stretch::StretchRule>, &'static str> {
+        use goodtype_core::stretch::{Limits, Part, Role, StretchRule, inner_lead, ordered_ports};
+
+        let Some(declaration) = &self.stretch else {
+            return Ok(None);
+        };
+        let invalid = "invalid content stretch declaration";
+        let [start, end] = ordered_ports(self.ports.as_deref().ok_or(invalid)?, declaration.axis)?;
+        if declaration.roles.len() != self.objects.len()
+            || child_ids.len() != self.objects.len()
+            || ![start, end].iter().all(|p| {
+                (0.0..=self.width_pt).contains(&p.x) && (0.0..=self.height_pt).contains(&p.y)
+            })
+        {
+            return Err(invalid);
+        }
+        let length = end.x - start.x;
+        let limits = match declaration.mode {
+            StretchMode::Span
+                if declaration.lead_floors.is_some() || declaration.virtual_sockets.is_some() =>
+            {
+                return Err(invalid);
+            }
+            StretchMode::Span => Limits::Span {
+                minimum_length: (length / 2.0).max(4.0) * scale,
+            },
+            StretchMode::FixedBody => {
+                let ItemStretch {
+                    lead_floors,
+                    virtual_sockets,
+                    ..
+                } = declaration;
+                let lead = |role, port| {
+                    let index = declaration
+                        .roles
+                        .iter()
+                        .position(|candidate| *candidate == role)
+                        .ok_or(invalid)?;
+                    let ContentObject::Shape {
+                        x,
+                        y,
+                        geometry: ShapeGeometry::Line { start, end },
+                        ..
+                    } = &self.objects[index]
+                    else {
+                        return Err(invalid);
+                    };
+                    inner_lead(
+                        [*start, *end].map(|p| goodtype_core::ShapePoint {
+                            x: x + p.x,
+                            y: y + p.y,
+                        }),
+                        port,
+                    )
+                };
+                let sockets = if let Some(sockets) = virtual_sockets {
+                    if declaration
+                        .roles
+                        .iter()
+                        .any(|role| matches!(role, Role::StartLead | Role::EndLead))
+                    {
+                        return Err(invalid);
+                    }
+                    *sockets
+                } else {
+                    [
+                        lead(Role::StartLead, start)?.x - start.x,
+                        lead(Role::EndLead, end)?.x - start.x,
+                    ]
+                };
+                Limits::fixed(
+                    length * scale,
+                    sockets.map(|x| x * scale),
+                    lead_floors.unwrap_or([4.0; 2]).map(|x| x * scale),
+                )?
+            }
+        };
+        Ok(Some(StretchRule {
+            axis: declaration.axis,
+            parts: child_ids
+                .iter()
+                .zip(&declaration.roles)
+                .map(|(id, &role)| Part {
+                    child_id: id.clone(),
+                    role,
+                })
+                .collect(),
+            limits,
+        }))
+    }
+
+    fn validate_stretch(&self) -> Result<(), &'static str> {
+        if self.stretch.is_none() {
+            return Ok(());
+        }
+        let ids: Vec<_> = (0..self.objects.len())
+            .map(|index| index.to_string())
+            .collect();
+        let Some(rule) = self.stretch_rule(&ids, 1.0)? else {
+            return Ok(());
+        };
+        let fields = |id, x, y, group_id, ports| ObjectFields {
+            id,
+            x,
+            y,
+            rotation: 0.0,
+            scale: 1.0,
+            z_index: 0,
+            reading_order: 0,
+            group_id,
+            ports,
+            addon_data: None,
+            created_at: String::new(),
+            modified_at: String::new(),
+        };
+        let mut children = Vec::with_capacity(ids.len());
+        for (object, id) in self.objects.iter().zip(&ids) {
+            let ContentObject::Shape {
+                x,
+                y,
+                geometry,
+                style,
+            } = object
+            else {
+                return Err("stretch parts must be shapes");
+            };
+            children.push(PageObject::Shape {
+                fields: fields(id.clone(), *x, *y, Some("group".into()), None),
+                geometry: geometry.clone(),
+                style: style.resolve("#000000", 1.0),
+            });
+        }
+        rule.validate(
+            &fields("group".into(), 0.0, 0.0, None, self.ports.clone()),
+            &ids,
+            &children
+                .iter()
+                .map(|child| (child.fields().id.as_str(), child))
+                .collect(),
+        )
+    }
+
     fn validate(&self) -> Result<(), &'static str> {
         if !valid_dimension(self.width_pt)
             || !valid_dimension(self.height_pt)
@@ -257,7 +424,7 @@ impl Item {
                 return Err("content object exceeds the item bounds");
             }
         }
-        Ok(())
+        self.validate_stretch()
     }
 }
 
@@ -725,7 +892,8 @@ fn commit_shape(
         )
         .max()
         .unwrap_or(0);
-    let group_id = (item.objects.len() > 1).then(|| format!("pack-{}", unique_suffix()));
+    let group_id = (item.objects.len() > 1 || item.stretch.is_some())
+        .then(|| format!("pack-{}", unique_suffix()));
     let stamp = crate::helper::now().to_string();
     let mut next_fields = |id, x, y, object_scale, group_id| -> Result<_, storage::StorageError> {
         z = z
@@ -849,6 +1017,7 @@ fn commit_shape(
         page.page.objects.push(PageObject::Group {
             fields,
             child_ids: child_ids.clone(),
+            stretch: item.stretch_rule(&child_ids, scale).map_err(invalid)?,
         });
     }
     storage::raise_schema_version(&mut page);

@@ -16,6 +16,11 @@ Choose **Lasso select** and draw a loop around the graph. Drag the selection to 
 
 ![The lasso encloses the graph while its heading stays outside the selection](media/selection.png)
 
+Select a stretchable shape-pack symbol and drag either end dot. The opposite port
+stays in place while the symbol turns and changes length. Hold Shift to snap to
+15-degree angles. Drag the symbol body to move the whole group, or tap it again
+to edit its parts.
+
 ## Typeset an equation
 
 Choose **New Typst block** to place an equation beside your sketch. Enter ordinary Typst source, such as `$ T = 2 pi sqrt(L / g) $`. Drag a corner to scale the result or a side to change the width and reflow the text. If a source edit fails to compile, the previous rendering stays on the page. Use **Page text** for longer passages that follow the paper ruling.

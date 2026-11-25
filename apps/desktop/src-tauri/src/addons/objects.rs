@@ -875,6 +875,89 @@ mod tests {
     }
 
     #[test]
+    fn stretch_notifies_connector_reactions_with_both_group_ports() {
+        use goodtype_core::stretch::{self, Limits, Part, Role, StretchRequest, StretchRule};
+        let mut before = fixture();
+        let child = &mut before.page.objects[0];
+        let mut fields = child.fields().clone();
+        child.fields_mut().group_id = Some("symbol".into());
+        fields.id = "symbol".into();
+        fields.ports = Some(vec![
+            ShapePoint { x: 0.0, y: 5.0 },
+            ShapePoint { x: 20.0, y: 5.0 },
+        ]);
+        before.page.objects.push(PageObject::Group {
+            fields,
+            child_ids: vec!["left".into()],
+            stretch: Some(StretchRule {
+                axis: [0, 1],
+                parts: vec![Part {
+                    child_id: "left".into(),
+                    role: Role::Span,
+                }],
+                limits: Limits::Span {
+                    minimum_length: 10.0,
+                },
+            }),
+        });
+        let start = &mut before.page.objects[3];
+        start.fields_mut().addon_data = Some(
+            serde_json::from_value(json!({
+                "connectors": {"refs":["symbol"],"data":{"attach":{"objectId":"symbol","port":0}}}
+            }))
+            .unwrap(),
+        );
+        let mut end = start.clone();
+        end.fields_mut().id = "end-connector".into();
+        end.fields_mut().addon_data = Some(
+            serde_json::from_value(json!({
+                "connectors": {"refs":["symbol"],"data":{"attach":{"objectId":"symbol","port":1}}}
+            }))
+            .unwrap(),
+        );
+        before.page.objects.push(end);
+        for (port, x, expected) in [(0, 10.0, [10.0, 40.0]), (1, 60.0, [20.0, 60.0])] {
+            let mut after = before.clone();
+            assert!(
+                stretch::apply(
+                    &mut after.page.objects,
+                    &StretchRequest {
+                        page_id: before.page.id.clone(),
+                        revision: before.page.revision,
+                        group_id: "symbol".into(),
+                        port,
+                        endpoint: ShapePoint { x, y: 25.0 },
+                        modified_at: "2026-11-25".into(),
+                    }
+                )
+                .unwrap()
+            );
+            let (payload, scope) = reactions(&before, &after, "connectors").unwrap();
+            assert_eq!(
+                scope,
+                HashSet::from(["connector".to_owned(), "end-connector".to_owned()])
+            );
+            assert_eq!(payload["deleted"], json!([]));
+            assert_eq!(payload["changed"].as_array().unwrap().len(), 1);
+            assert_eq!(payload["changed"][0]["id"], "symbol");
+            assert_eq!(
+                payload["changed"][0]["ports"],
+                json!([
+                    {"x":expected[0],"y":25.0}, {"x":expected[1],"y":25.0},
+                ])
+            );
+            for index in 0..2 {
+                assert_eq!(
+                    payload["own"][index]["addonData"]["connectors"]["data"]["attach"],
+                    json!({"objectId":"symbol","port":index})
+                );
+            }
+            assert_eq!(before.page.objects[3], after.page.objects[3]);
+            assert_eq!(before.page.objects[5], after.page.objects[5]);
+        }
+    }
+
+    #[test]
     fn reactions_scope_changed_deleted_and_own_objects() {
         let before = fixture();
         let mut after = before.clone();

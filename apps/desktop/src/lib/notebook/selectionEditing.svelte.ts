@@ -224,6 +224,9 @@ export function createSelection(env: SelectionEnvironment) {
     return { ...object, ...point, scale: object.scale * scale, rotation: (object.rotation ?? 0) + rotation };
   }
 
+  const previewGroup = $derived(selectedGroup && transformPreview
+    ? transformed(selectedGroup, transformPreview) : selectedGroup);
+
   const previewShapes = $derived(env.shapes.map(shape =>
     transformPreview?.objects.has(shape.id) ? transformed(shape, transformPreview) : shape,
   ));
@@ -798,6 +801,9 @@ export function createSelection(env: SelectionEnvironment) {
     const now = new Date().toISOString();
     if (groups.length) env.addCopiedGroups?.(groups.map((group) => ({
       ...group, id: copies.get(group.id)!, childIds: group.childIds.map((id) => copies.get(id)!),
+      ...(group.stretch ? { stretch: { ...group.stretch, parts: group.stretch.parts.map(part => ({
+        ...part, childId: copies.get(part.childId)!,
+      })) } } : {}),
       x: group.x + shift.dx, y: group.y + shift.dy, zIndex: zIndex++, readingOrder: readingOrder++,
       groupId: parents.get(group.id) ?? null, createdAt: now, modifiedAt: now,
       addonData: pastedAddonData(group.addonData, copies, destination),
@@ -1147,6 +1153,7 @@ export function createSelection(env: SelectionEnvironment) {
     ungroupShapes,
     shapeGroupFor,
     get selectedGroup() { return selectedGroup; },
+    get previewGroup() { return previewGroup; },
     get enteredGroup() { return enteredGroup; },
     get groupEdits() { return groupEdits; },
     set groupEdits(value: typeof groupEdits) { groupEdits = value; },

@@ -343,7 +343,10 @@ pub(super) fn apply_owned(
             .objects
             .iter()
             .filter_map(|object| {
-                let PageObject::Group { fields, child_ids } = object else {
+                let PageObject::Group {
+                    fields, child_ids, ..
+                } = object
+                else {
                     return None;
                 };
                 (!deleted.contains(&fields.id) && child_ids.iter().all(|id| deleted.contains(id)))
@@ -463,7 +466,11 @@ fn objects(
                 child_ids.push(child.id.clone());
                 items.push(item);
             }
-            items.push(preview_item(PageObject::Group { fields, child_ids }));
+            items.push(preview_item(PageObject::Group {
+                fields,
+                child_ids,
+                stretch: None,
+            }));
         } else {
             items.push(leaf(root, geometry, op)?);
         }

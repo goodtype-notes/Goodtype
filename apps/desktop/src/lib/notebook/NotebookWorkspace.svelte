@@ -68,6 +68,8 @@
   import LassoPanel from "./LassoPanel.svelte";
   import HelperCrop from "../helper/HelperCrop.svelte";
   import { viewportToPage } from "../geometry/coordinates";
+  import StretchHandles from "./StretchHandles.svelte";
+  import type { StretchPreview } from "./stretch";
   import MixedSelection from "./MixedSelection.svelte";
   import { DEFAULT_LASSO_TARGETS } from "./lasso";
   import { addonPaletteId, type PaletteCommand, type PaletteDock } from "./palette";
@@ -1099,6 +1101,12 @@
   }
   const stampTaps = createTapTracker();
   let stampPointer: number | null = null;
+  let stretchPreview = $state.raw<StretchPreview | null>(null);
+  const presentedShapes = $derived.by(() => {
+    if (!stretchPreview || stretchPreview.group.id !== selection.selectedGroup?.id) return selection.previewShapes;
+    const parts = new Map(stretchPreview.shapes.map(shape => [shape.id, shape]));
+    return selection.previewShapes.map(shape => parts.get(shape.id) ?? shape);
+  });
   let groupPointer: { id: number; x: number; y: number; frame: number; moved: boolean; selected: boolean } | null = null;
 
   function groupChildAt(event: PointerEvent) {
@@ -1134,6 +1142,7 @@
   }
 
   function surroundPointerDown(event: PointerEvent) {
+    if (event.target instanceof Element && event.target.closest(".stretch-handles")) return;
     selection.noteCanvasPointer(event);
     if (groupPointer) {
       event.preventDefault();
@@ -1176,6 +1185,7 @@
   }
 
   function surroundPointerMove(event: PointerEvent) {
+    if (event.target instanceof Element && event.target.closest(".stretch-handles")) return;
     if (groupPointer?.id === event.pointerId) {
       event.stopPropagation();
       cancelAnimationFrame(groupPointer.frame);
@@ -1194,6 +1204,7 @@
   }
 
   function surroundPointerEnd(event: PointerEvent) {
+    if (event.target instanceof Element && event.target.closest(".stretch-handles")) return;
     if (groupPointer?.id === event.pointerId) {
       event.stopPropagation();
       cancelAnimationFrame(groupPointer.frame);
@@ -2451,6 +2462,7 @@
 {/snippet}
 
 <main bind:this={workspaceElement} inert={addonsOpen} tabindex="-1" class="workspace-app" class:ai-open={aiPanelOpen} onpointerdowncapture={event => {
+    if (event.target instanceof Element && event.target.closest(".stretch-handles")) return;
     if (event.target instanceof Element && event.target.closest(".active-page") && !event.target.closest(".helper-crop, .selection-actions") && tool !== "lasso") region = null;
     if (groupPointer) return;
     const group = selection.enteredGroup ?? selection.selectedGroup;
@@ -2743,7 +2755,7 @@
                       ? activePageTypstView
                       : pageTypstViewFromSnapshot(entry.snapshot!)}
                     images={active ? activeImageViews : imageViewsFromSnapshot(entry.snapshot!, session.assetUrls(entry.id))}
-                    shapes={active ? selection.previewShapes : shapeViewsFromSnapshot(entry.snapshot!)}
+                    shapes={active ? presentedShapes : shapeViewsFromSnapshot(entry.snapshot!)}
                     results={active ? activeResults : (session.neighborResults[entry.id] ?? {})}
                     strokes={active ? session.strokes : session.neighborStrokesFor(entry)}
                     newStrokeZIndex={newInkZIndex(
@@ -2891,6 +2903,15 @@
                     <MixedSelection bounds={selection.mixedSelectionBounds} {zoom}
                       onStart={selection.beginMixedTransform} onPreview={selection.previewMixedTransform} onEnd={selection.endMixedTransform}
                       onEnter={selection.selectedGroup ? enterSelectedGroup : undefined} />
+                  {/if}
+                  {#if active && keepsSelection(tool) && !shapeStamp && !selectedAddonTool && selection.selectedGroup?.stretch && session.activeSnapshot}
+                    {@const group = selection.previewGroup ?? selection.selectedGroup}
+                    {@const page = session.activeSnapshot.page}
+                    {#key `${session.root}/${page.id}/${group.id}`}
+                      <StretchHandles {group} {zoom} shapes={selection.previewShapes} pageId={page.id} revision={page.revision}
+                        disabled={Boolean(selection.mixedStrokePreview)}
+                        onPreview={value => stretchPreview = value} onCommit={session.stretchGroup} />
+                    {/key}
                   {/if}
                 {:else}
                   <span class="page-loading">{$t("workspace.loadingPage")}</span>

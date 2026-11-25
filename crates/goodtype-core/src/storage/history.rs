@@ -174,6 +174,37 @@ pub fn commit_notebook_with_undo(
     commit_notebook_inner(selected_root, history, snapshot, None, true)
 }
 
+/// Apply a symbol endpoint against the revision the user started dragging from.
+pub fn commit_group_stretch(
+    selected_root: &Path,
+    history: &mut NotebookHistory,
+    request: &crate::stretch::StretchRequest,
+) -> Result<HistoryResult, StorageError> {
+    let root = canonical_root(selected_root)?;
+    let current = open_page(&root, &request.page_id)?;
+    if current.page.revision != request.revision {
+        return Err(StorageError::RevisionConflict {
+            expected: request.revision,
+            found: current.page.revision,
+        });
+    }
+    ensure_current(&root, history, &current, request.revision)?;
+    if current.page.calculation.is_some() {
+        return Err(invalid_error(
+            "computational pages use calculation transactions",
+        ));
+    }
+    let mut snapshot = current.clone();
+    if !crate::stretch::apply(&mut snapshot.page.objects, request).map_err(invalid_error)? {
+        return Ok(history_result(current, history));
+    }
+    snapshot
+        .manifest
+        .modified_at
+        .clone_from(&request.modified_at);
+    commit_current_with_precondition(&root, history, current, snapshot, None, true)
+}
+
 /// Caller must hold the notebook lock throughout this operation.
 pub fn commit_notebook_with_precondition(
     selected_root: &Path,
@@ -256,6 +287,7 @@ fn prepared(
         .filter(|id| !kept.contains(*id))
         .collect::<std::collections::HashSet<_>>();
     crate::addon_data::remove_refs(&mut snapshot.page.objects, &deleted);
+    crate::stretch::reconcile(&current.page.objects, &mut snapshot.page.objects);
     validate_page_bundle_versions(&snapshot)?;
     // A preloaded neighbouring page may carry a timestamp from before another page saved.
     // Keep the current manifest and only advance its bookkeeping time.

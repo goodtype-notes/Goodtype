@@ -10,6 +10,7 @@ pub mod paths;
 pub mod pattern;
 pub mod shape;
 pub mod storage;
+pub mod stretch;
 pub mod template;
 
 pub use object::{IdRemap, ObjectFields, PageObject, SourceRef, SourceRole};
