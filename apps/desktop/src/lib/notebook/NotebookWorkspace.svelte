@@ -32,7 +32,7 @@
   import { createTypstPreset, installPageTypstPreset, listenPresetChanges, readTypstPreset, pickTypstPreset, setDefaultTypstPreset } from "../ipc/presets";
   import { presetHeader, presetTargetCurrent, DEFAULT_PRESET_PATH, withPagePreset, type PresetChoice, type PresetTarget } from "../page/presets";
   import { summarizeMetric, type StrokePerformance } from "../ink/metrics";
-  import { DEFAULT_POINTER_MAPPING, type InkTool, type PointerMapping } from "../ink/pipeline";
+  import { DEFAULT_POINTER_MAPPING, pointerRole, type InkTool, type PointerMapping } from "../ink/pipeline";
   import { keepsSelection, shared, type Bounds } from "../ink/selection";
   import ColorPanel from "./ColorPanel.svelte";
   import WidthPanel from "./WidthPanel.svelte";
@@ -67,6 +67,7 @@
   import type { ShapeDraft } from "../shape/geometry";
   import LassoPanel from "./LassoPanel.svelte";
   import HelperCrop from "../helper/HelperCrop.svelte";
+  import { viewportToPage } from "../geometry/coordinates";
   import MixedSelection from "./MixedSelection.svelte";
   import { DEFAULT_LASSO_TARGETS } from "./lasso";
   import { addonPaletteId, type PaletteCommand, type PaletteDock } from "./palette";
@@ -496,7 +497,7 @@
   // The page being edited renders through the same surface as its neighbours, so its state is
   // projected into the same view model they use.
   const activeBlockViews: BlockView[] = $derived(
-    session.typstBlocks.map(({ transform, result: _result, ...block }) => ({ ...block, ...transform })),
+    selection.previewBlocks.map(({ transform, result: _result, ...block }) => ({ ...block, ...transform })),
   );
   const activePageTypstView: PageTypstView | null = $derived(session.pageTypst);
   const activeResults: Record<string, TypstCompileResult | null> = $derived(
@@ -505,7 +506,7 @@
       ...(session.pageTypst ? [[session.pageTypst.id, session.pageTypst.result] as const] : []),
     ]),
   );
-  const activeImageViews: ImageView[] = $derived(session.images);
+  const activeImageViews: ImageView[] = $derived(selection.previewImages);
 
   // Full-height source view beside the canvas. It is a sibling of the canvas region rather than
   // an overlay, so the canvas genuinely narrows — and the palette, which is positioned inside
@@ -1084,8 +1085,47 @@
   }
   const stampTaps = createTapTracker();
   let stampPointer: number | null = null;
+  let groupPointer: { id: number; x: number; y: number; frame: number; moved: boolean; selected: boolean } | null = null;
+
+  function groupChildAt(event: PointerEvent) {
+    const hit = document.elementsFromPoint(event.clientX, event.clientY)
+      .map(element => element.closest<HTMLElement | SVGElement>(".active-page .shape-hit, .active-page .typst-block, .active-page .image-object"))
+      .find(Boolean);
+    return hit?.closest<HTMLElement | SVGElement>("[data-object-id]")?.dataset.objectId ??
+      hit?.querySelector<HTMLElement>("[data-object-id]")?.dataset.objectId ?? null;
+  }
+
+  function enterSelectedGroup(event?: PointerEvent) {
+    const group = selection.selectedGroup;
+    if (!group) return false;
+    const hit = event ? groupChildAt(event) : group.childIds[0];
+    const id = hit && group.childIds.includes(hit) ? hit : undefined;
+    if (!selection.enterGroup(id)) return false;
+    if (id) void tick().then(() => {
+      workspaceElement?.querySelector<SVGElement>(
+        `.active-page [data-object-id="${CSS.escape(id)}"] .shape-hit, .active-page .typst-block[data-object-id="${CSS.escape(id)}"] .preview`,
+      )?.focus({ preventScroll: true });
+    });
+    return true;
+  }
+
+  function previewGroupPointer(event: PointerEvent) {
+    if (!groupPointer) return;
+    const dx = event.clientX - groupPointer.x, dy = event.clientY - groupPointer.y;
+    if (Math.hypot(dx, dy) >= 4) groupPointer.moved = true;
+    if (!groupPointer.moved) return;
+    selection.previewMixedTransform(viewportToPage({ x: dx, y: dy }, {
+      pageOriginX: 0, pageOriginY: 0, zoom,
+    }), 1, { x: 0, y: 0 });
+  }
 
   function surroundPointerDown(event: PointerEvent) {
+    selection.noteCanvasPointer(event);
+    if (groupPointer) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const pageId = shapeStamp ? stampPage(event.target) : null;
     if (pageId && (event.pointerType !== "mouse" || event.button === 0)) {
       stampTaps.down(event.pointerId, event.clientX, event.clientY, event.timeStamp, pageId);
@@ -1098,10 +1138,36 @@
         return;
       }
     } else if (shapeStamp && event.pointerType === "touch") stampTaps.cancel();
+    const role = pointerRole(event, tool, pointerMapping);
+    if (!shapeStamp && !selectedAddonTool && !session.pageInputLocked && event.button === 0 &&
+      event.target instanceof Element && event.target.closest(".active-page") &&
+      !event.target.closest(".mixed-selection, .control-hit, .helper-crop, .addon-tool-surface") &&
+      tool !== "shape" && tool !== "eraser" && tool !== "lasso" &&
+      role !== "lasso" && role !== "erase" && (role !== "ignore" || event.pointerType === "touch") &&
+      ((event.pointerType !== "pen" && !navigation.fingerDraws(event)) || keepsSelection(tool))) {
+      const group = selection.shapeGroupFor(groupChildAt(event));
+      if (group && group.id !== selection.enteredGroup?.id) {
+        event.preventDefault();
+        event.stopPropagation();
+        const selected = selection.selectedGroup?.id === group.id;
+        navigation.stopTouchInertia();
+        selection.selectGroup(group);
+        selection.beginMixedTransform();
+        (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+        groupPointer = { id: event.pointerId, x: event.clientX, y: event.clientY, frame: 0, moved: false, selected };
+        return;
+      }
+    }
     navigation.workspacePointerDown(event);
   }
 
   function surroundPointerMove(event: PointerEvent) {
+    if (groupPointer?.id === event.pointerId) {
+      event.stopPropagation();
+      cancelAnimationFrame(groupPointer.frame);
+      groupPointer.frame = requestAnimationFrame(() => previewGroupPointer(event));
+      return;
+    }
     if (shapeStamp) {
       stampTaps.move(event.pointerId, event.clientX, event.clientY);
       if (!shapeDragging) {
@@ -1114,6 +1180,17 @@
   }
 
   function surroundPointerEnd(event: PointerEvent) {
+    if (groupPointer?.id === event.pointerId) {
+      event.stopPropagation();
+      cancelAnimationFrame(groupPointer.frame);
+      const cancelled = event.type !== "pointerup";
+      if (!cancelled) previewGroupPointer(event);
+      const enter = !cancelled && !groupPointer.moved && groupPointer.selected;
+      groupPointer = null;
+      selection.endMixedTransform(cancelled);
+      if (enter) enterSelectedGroup(event);
+      return;
+    }
     if (stampTaps.owns(event.pointerId)) {
       const tap = stampTaps.up(event.pointerId, event.clientX, event.clientY, event.timeStamp, event.type !== "pointerup");
       if (tap && shapeStamp) void placePackShape(shapeStamp, tap, false);
@@ -1601,6 +1678,7 @@
     // the tool that acted on it is.
     if (!keepsSelection(next)) {
       region = null;
+      selection.exitGroup();
       selection.lassoObjectIds = [];
       selection.updateInkSelection([]);
       selection.selectedTypstId = null;
@@ -2113,6 +2191,15 @@
       event.target.closest(".cm-editor, input, textarea, [contenteditable=true]");
     if (editingText) return;
     if (event.key === "Escape") {
+      if (groupPointer) {
+        cancelAnimationFrame(groupPointer.frame);
+        groupPointer = null;
+        selection.endMixedTransform(true);
+      }
+      if (selection.exitGroup(true)) {
+        event.preventDefault();
+        return;
+      }
       region = null;
       selection.lassoObjectIds = [];
       selection.updateInkSelection([]);
@@ -2152,6 +2239,10 @@
       return;
     }
     if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (event.key === "Enter" && enterSelectedGroup()) {
+        event.preventDefault();
+        return;
+      }
       if (event.key === "Enter" && selection.selectedShapeId) {
         event.preventDefault();
         selection.editingShapeId = selection.editingShapeId === selection.selectedShapeId ? null : selection.selectedShapeId;
@@ -2345,7 +2436,19 @@
 
 <main bind:this={workspaceElement} inert={addonsOpen} tabindex="-1" class="workspace-app" class:ai-open={aiPanelOpen} onpointerdowncapture={event => {
     if (event.target instanceof Element && event.target.closest(".active-page") && !event.target.closest(".helper-crop, .selection-actions") && tool !== "lasso") region = null;
+    if (groupPointer) return;
+    const group = selection.enteredGroup ?? selection.selectedGroup;
+    if (group && event.target instanceof Element && event.target.closest(".page-frame")) {
+      const part = event.target.closest<HTMLElement | SVGElement>("[data-object-id]")?.dataset.objectId ?? groupChildAt(event);
+      if (part && group.childIds.includes(part)) return;
+      if (selection.enteredGroup) selection.exitGroup();
+    }
     selection.closeObjectSelection(event);
+  }} onkeydowncapture={event => {
+    if (event.key === "Escape" && event.target instanceof Element && event.target.closest(".shape-object") && selection.exitGroup(true)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
   }} onfocusout={() => session.scheduleFocus()} onwheel={navigation.wheelZoom}>
 <HelperWorkspace pages={helperPages} {session} bind:activityOpen bind:panelOpen={aiPanelOpen} bind:waiting={aiWaiting} hasConversation={Boolean(codexSelection && $codexStatus)} available={tauriAvailable} onError={helperError}>
 {#snippet conversation(review)}
@@ -2557,7 +2660,10 @@
       onpointerupcapture={surroundPointerEnd}
       onpointercancelcapture={surroundPointerEnd}
       onpointerleave={() => { if (!shapeDragging) hideShapeGhost(); }}
-      onlostpointercapture={navigation.releasePagePointer}
+      onlostpointercapture={event => {
+        if (groupPointer?.id === event.pointerId) surroundPointerEnd(event);
+        navigation.releasePagePointer(event);
+      }}
     >
       <div class="page-scroll-content" bind:this={pageViewport} onscroll={() => { session.lastScrollAt = performance.now(); selection.scheduleSelectionToolbar(); session.scheduleFocus(session.FOCUS_SETTLE_MS); }}>
         <div
@@ -2621,7 +2727,7 @@
                       ? activePageTypstView
                       : pageTypstViewFromSnapshot(entry.snapshot!)}
                     images={active ? activeImageViews : imageViewsFromSnapshot(entry.snapshot!, session.assetUrls(entry.id))}
-                    shapes={active ? session.shapes : shapeViewsFromSnapshot(entry.snapshot!)}
+                    shapes={active ? selection.previewShapes : shapeViewsFromSnapshot(entry.snapshot!)}
                     results={active ? activeResults : (session.neighborResults[entry.id] ?? {})}
                     strokes={active ? session.strokes : session.neighborStrokesFor(entry)}
                     newStrokeZIndex={newInkZIndex(
@@ -2677,14 +2783,25 @@
                     selectedImageId={active ? selection.selectedImageId : null}
                     selectedShapeId={active ? selection.selectedShapeId : null}
                     shapesGrabbable={tool !== "eraser"}
+                    dimmedGroupChildIds={active && selection.enteredGroup
+                      ? selection.enteredGroup.childIds.filter(id => id !== selection.selectedShapeId && id !== selection.selectedTypstId)
+                      : []}
                     editingShapeId={active ? selection.editingShapeId : null}
                     onCompile={(id, request) =>
                       active
                         ? compileTypst(id, request)
                         : session.compileNeighborTypst(entry.id, id, request)}
                     onSourceChange={(id, source) => session.updateTypstSource(id, source)}
-                    onTransform={(id, transform) => session.updateTypstTransform(id, transform)}
+                    onTransform={(id, transform) => {
+                      const group = selection.shapeGroupFor(id);
+                      if (!group || group.id === selection.enteredGroup?.id) session.updateTypstTransform(id, transform);
+                    }}
                     onSelectBlock={(id) => {
+                      const group = selection.shapeGroupFor(id);
+                      if (group && group.id !== selection.enteredGroup?.id) {
+                        selection.selectGroup(group);
+                        return;
+                      }
                       selection.selectedTypstId = id;
                       selection.selectedImageId = null;
                       selection.selectedShapeId = null;
@@ -2699,15 +2816,17 @@
                     }}
                     onMoveImage={(id, position) => session.changeImage(id, position)}
                     onScaleImage={(id, scale) => session.changeImage(id, { scale })}
-                    onSelectShape={(id) => {
-                      selection.selectedShapeId = id;
-                      selection.selectedImageId = null;
-                      selection.selectedTypstId = null;
-                      selection.updateInkSelection([]);
-                    }}
-                    onChangeShape={active ? session.changeShape : undefined}
+                    onSelectShape={selection.selectShape}
+                    onChangeShape={active ? (shape, commit) => {
+                      const group = selection.shapeGroupFor(shape.id);
+                      if (!group || group.id === selection.enteredGroup?.id) session.changeShape(shape, commit);
+                    } : undefined}
                     onEditShape={(id, editing) => {
-                      selection.selectedShapeId = id;
+                      selection.selectShape(id);
+                      if (selection.selectedGroup) {
+                        enterSelectedGroup();
+                        return;
+                      }
                       selection.editingShapeId = editing ? id : null;
                       session.status = editing ? $t("workspace.editingShapeAnchorPoints") : $t("workspace.shapeSelected");
                     }}
@@ -2754,7 +2873,8 @@
                   {/if}
                   {#if active && selection.mixedSelectionBounds}
                     <MixedSelection bounds={selection.mixedSelectionBounds} {zoom}
-                      onStart={selection.beginMixedTransform} onPreview={selection.previewMixedTransform} onEnd={selection.endMixedTransform} />
+                      onStart={selection.beginMixedTransform} onPreview={selection.previewMixedTransform} onEnd={selection.endMixedTransform}
+                      onEnter={selection.selectedGroup ? enterSelectedGroup : undefined} />
                   {/if}
                 {:else}
                   <span class="page-loading">{$t("workspace.loadingPage")}</span>
@@ -3092,8 +3212,8 @@
           canMoveBack={selection.canMoveInkVisual(-1)}
           canMoveForward={selection.canMoveInkVisual(1)}
           onMove={selection.changeInkVisualOrder}
-          grouped={selection.groupedStrokeIds.length > 0}
-          onGroup={selection.lassoObjectIds.length ? undefined : selection.groupedStrokeIds.length > 0
+          grouped={Boolean(selection.selectedGroup) || selection.groupedStrokeIds.length > 0}
+          onGroup={selection.selectedGroup ? selection.ungroupShapes : selection.lassoObjectIds.length ? undefined : selection.groupedStrokeIds.length > 0
             ? selection.ungroupInk
             : selection.selectedTypstId
               ? selection.groupSelectedInk
