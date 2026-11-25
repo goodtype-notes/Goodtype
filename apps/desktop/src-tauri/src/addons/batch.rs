@@ -534,7 +534,7 @@ pub(super) fn validate_shape(
     style: &ShapeStyle,
 ) -> Result<(), &'static str> {
     geometry.validate()?;
-    style.validate()
+    style.validate_for(geometry)
 }
 
 /// The one construction path for addon shapes: an ordinary shape object after validation.
@@ -748,4 +748,42 @@ fn append(
         objects.push(object);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod cap_tests {
+    use super::*;
+
+    #[test]
+    fn addon_add_shape_preserves_caps_and_rejects_invalid_values_and_geometry() {
+        let root = tempfile::tempdir().unwrap();
+        let geometry: PageGeometry = serde_json::from_value(json!({
+            "widthPt": 595, "heightPt": 842
+        }))
+        .unwrap();
+        let mut reply = json!({ "batch": { "operations": [{
+            "op": "addShape", "x": 20, "y": 20,
+            "geometry": {"kind": "line", "start": {"x": 0, "y": 0}, "end": {"x": 30, "y": 0}},
+            "style": {"strokeColor": "#123456", "strokeWidthPt": 2, "fillColor": null,
+                "opacity": 1, "startCap": "bar", "endCap": "arrow"}
+        }] } });
+        let [preview] = prepare(root.path(), &geometry, reply.clone(), false, || false)
+            .unwrap()
+            .try_into()
+            .ok()
+            .unwrap();
+        let PageObject::Shape { style, .. } = &preview.items[0].object else {
+            panic!("expected a shape");
+        };
+        assert_eq!(
+            (style.start_cap, style.end_cap),
+            (goodtype_core::ShapeCap::Bar, goodtype_core::ShapeCap::Arrow)
+        );
+        let mut invalid = reply.clone();
+        invalid["batch"]["operations"][0]["style"]["endCap"] = "custom".into();
+        assert!(prepare(root.path(), &geometry, invalid, false, || false).is_err());
+        reply["batch"]["operations"][0]["geometry"] =
+            json!({"kind": "ellipse", "widthPt": 30, "heightPt": 20});
+        assert!(prepare(root.path(), &geometry, reply, false, || false).is_err());
+    }
 }

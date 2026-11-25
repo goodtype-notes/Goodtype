@@ -27,7 +27,7 @@
   import { listRecentNotebooks, recordNotebookPage, recordNotebookSession, resumeNotebookSession, writeMetrics } from "../ipc/workspace";
   import { placeFloatingToolbar } from "../geometry/placement";
   import { dismissable } from "../workspace/dismiss";
-  import { type PageDefaults, type PagePosition, type ShapeStyle, type PageTemplate, type StrokePattern } from "../model";
+  import { type PageDefaults, type PagePosition, type ShapeStyle, type ShapeCap, type PageTemplate, type StrokePattern } from "../model";
   import { TYPST_IDLE_DEBOUNCE_MS, type TypstCompileResult } from "../editor/typst";
   import { createTypstPreset, installPageTypstPreset, listenPresetChanges, readTypstPreset, pickTypstPreset, setDefaultTypstPreset } from "../ipc/presets";
   import { presetHeader, presetTargetCurrent, DEFAULT_PRESET_PATH, withPagePreset, type PresetChoice, type PresetTarget } from "../page/presets";
@@ -64,7 +64,7 @@
   import PaletteTools from "./PaletteTools.svelte";
   import PalettePocket from "./PalettePocket.svelte";
   import { blockViewsFromSnapshot, imageViewsFromSnapshot, pageTypstViewFromSnapshot, shapeViewsFromSnapshot, type BlockView, type ImageView, type PageTypstView, type ShapeView } from "./pageView";
-  import type { ShapeDraft } from "../shape/geometry";
+  import { supportsShapeCaps, type ShapeDraft } from "../shape/geometry";
   import LassoPanel from "./LassoPanel.svelte";
   import HelperCrop from "../helper/HelperCrop.svelte";
   import MixedSelection from "./MixedSelection.svelte";
@@ -882,6 +882,20 @@
   /// Whether the pocket edits a selection rather than the pen (specs/qol-wave.md section 2).
   const selectedInk = $derived(session.strokes.filter((stroke) => selection.selectedStrokeIds.includes(stroke.id)));
   const selectedShape = $derived(session.shapes.find((shape) => shape.id === selection.selectedShapeId) ?? null);
+  const selectedShapeCaps = $derived(selectedShape && supportsShapeCaps(selectedShape.geometry) ? {
+    startCap: selectedShape.style.startCap,
+    endCap: selectedShape.style.endCap,
+    onChange: changeSelectedShapeCap,
+  } : undefined);
+
+  function changeSelectedShapeCap(end: "startCap" | "endCap", cap: ShapeCap) {
+    if (!selectedShape || !supportsShapeCaps(selectedShape.geometry)) return;
+    const style = { ...selectedShape.style };
+    if (cap === "none") delete style[end];
+    else style[end] = cap;
+    session.changeShape({ ...selectedShape, style });
+  }
+
   const selectedShapes = $derived(session.shapes.filter(shape => shape.id === selection.selectedShapeId || selection.lassoObjectIds.includes(shape.id)));
   const restyling = $derived(!activeAddonTool && (selectedInk.length > 0 || selectedShapes.length > 0));
   const paletteContext = $derived<"ink" | "eraser" | null>(
@@ -1959,6 +1973,8 @@
       opacity: 1,
       pattern: tool === "shape" ? settings.shapePattern : tool === "pen" ? inkPattern() : "solid",
       patternSpacing: tool === "shape" ? settings.shapePatternSpacing : inkPatternSpacing(),
+      ...(tool === "shape" && settings.shapeKind === "line" && settings.shapeEndCap !== "none"
+        ? { endCap: settings.shapeEndCap } : {}),
     };
   }
 
@@ -2110,7 +2126,7 @@
     }
     const editingText =
       event.target instanceof Element &&
-      event.target.closest(".cm-editor, input, textarea, [contenteditable=true]");
+      event.target.closest(".cm-editor, input, textarea, select, [contenteditable=true]");
     if (editingText) return;
     if (event.key === "Escape") {
       region = null;
@@ -2915,6 +2931,8 @@
               onMinimumLineLengthChange={(heldLineMinimumPt) => changeSettings({ ...settings, heldLineMinimumPt })}
               strokeColor={currentShapeStyle().strokeColor}
               strokeWidthPt={currentShapeStyle().strokeWidthPt}
+              endCap={settings.shapeEndCap}
+              onEndCapChange={(shapeEndCap) => changeSettings({ ...settings, shapeEndCap })}
               pattern={settings.shapePattern}
               onPatternChange={(shapePattern) => changeSettings({ ...settings, shapePattern })}
               spacing={settings.shapePatternSpacing}
@@ -3046,6 +3064,7 @@
             <SelectionActions
               bind:element={selection.contextBarElement}
               subject={selection.selectedImageId ? "image" : selection.selectedShapeId ? "shape" : "Typst block"}
+              shapeCaps={selectedShapeCaps}
               left={selection.contextBarPosition.left}
               top={selection.contextBarPosition.top}
               ready={selection.contextBarPosition.ready}
@@ -3111,6 +3130,7 @@
         <SelectionActions
           bind:element={selection.selectionToolbarElement}
           subject={selection.selectedImageId ? "image" : selection.selectedShapeId ? "shape" : "Typst block"}
+          shapeCaps={selectedShapeCaps}
           left={selection.selectionToolbarPosition.left}
           top={selection.selectionToolbarPosition.top}
           ready={selection.selectionToolbarPosition.ready}

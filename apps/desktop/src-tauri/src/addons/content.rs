@@ -1,5 +1,5 @@
 use super::*;
-use goodtype_core::{ShapeGeometry, ShapeStyle, StrokePattern, template::PageTemplate};
+use goodtype_core::{ShapeCap, ShapeGeometry, ShapeStyle, StrokePattern, template::PageTemplate};
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 
@@ -155,6 +155,10 @@ enum ContentObject {
 #[derive(Default, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 struct Style {
+    #[serde(skip_serializing_if = "ShapeCap::is_none")]
+    start_cap: ShapeCap,
+    #[serde(skip_serializing_if = "ShapeCap::is_none")]
+    end_cap: ShapeCap,
     #[serde(deserialize_with = "present")]
     stroke_color: Option<String>,
     #[serde(deserialize_with = "present")]
@@ -179,6 +183,8 @@ fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
 impl Style {
     fn resolve(&self, color: &str, width: f64) -> ShapeStyle {
         ShapeStyle {
+            start_cap: self.start_cap,
+            end_cap: self.end_cap,
             stroke_color: self.stroke_color.as_deref().unwrap_or(color).into(),
             stroke_width_pt: self.stroke_width_pt.unwrap_or(width),
             fill_color: self

@@ -22,9 +22,14 @@ describe("drawing length controls", () => {
     const props = { dock: "bottom" as const, kind: "line" as const, fill: false, constrain: false,
       drawAndHold: true, strokeColor: "#000000", strokeWidthPt: 2, pattern: "solid" as const, spacing: 1,
       onKindChange: noop, onFillChange: noop, onConstrainChange: noop, onDrawAndHoldChange: noop,
-      endSnap: true, onEndSnapChange: noop,
+      endSnap: true, onEndSnapChange: noop, endCap: "arrow" as const, onEndCapChange: noop,
       onPatternChange: noop, onSpacingChange: noop, onMinimumLineLengthChange: noop, onClose: noop };
-    expect(render(ShapeCard, { props }).body).toContain('aria-valuetext="2.1 millimetres"');
+    const card = render(ShapeCard, { props }).body;
+    expect(card).toContain('aria-valuetext="2.1 millimetres"');
+    expect(card).toContain('aria-label="End cap"');
+    expect(card).toContain('value="arrow" selected');
+    expect(render(ShapeCard, { props: { ...props, kind: "ellipse" } }).body)
+      .not.toContain('aria-label="End cap"');
     expect(render(ShapeCard, { props: { ...props, minimumLineLengthPt: 24 } }).body)
       .toContain('aria-valuetext="8.5 millimetres"');
     expect(render(ShapeCard, { props: { ...props, drawAndHold: false } }).body)

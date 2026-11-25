@@ -1,0 +1,20 @@
+[
+  {
+    "geometry": {"kind": "line", "start": {"x": 0, "y": 0}, "end": {"x": 40, "y": 0}},
+    "style": {"strokeColor": "#16212b", "strokeWidthPt": 2, "fillColor": null, "opacity": 1, "pattern": "dashed", "startCap": "arrow", "endCap": "arrow"},
+    "caps": [{"kind": "arrow", "points": [{"x": 8, "y": 4}, {"x": 0, "y": 0}, {"x": 8, "y": -4}], "radius": 0}, {"kind": "arrow", "points": [{"x": 32, "y": -4}, {"x": 40, "y": 0}, {"x": 32, "y": 4}], "radius": 0}],
+    "shaft": {"kind": "line", "start": {"x": 7, "y": 0}, "end": {"x": 33, "y": 0}}
+  },
+  {
+    "geometry": {"kind": "spline", "closed": false, "nodes": [{"point": {"x": 0, "y": 0}, "handleIn": null, "handleOut": {"x": 0, "y": 8}}, {"point": {"x": 16, "y": 16}, "handleIn": {"x": 0, "y": 0}, "handleOut": null}]},
+    "style": {"strokeColor": "#16212b", "strokeWidthPt": 2, "fillColor": null, "opacity": 1, "pattern": "dashed", "startCap": "open", "endCap": "bar"},
+    "caps": [{"kind": "open", "points": [{"x": -3.5, "y": 8}, {"x": 0, "y": 0}, {"x": 3.5, "y": 8}], "radius": 1}, {"kind": "bar", "points": [{"x": 18.82842712474619, "y": 13.17157287525381}, {"x": 13.17157287525381, "y": 18.82842712474619}], "radius": 1}],
+    "shaft": {"kind": "spline", "closed": false, "nodes": [{"point": {"x": 0, "y": 0}, "handleIn": null, "handleOut": {"x": 0, "y": 8}}, {"point": {"x": 16, "y": 16}, "handleIn": {"x": 0, "y": 0}, "handleOut": null}]}
+  },
+  {
+    "geometry": {"kind": "spline", "closed": false, "nodes": [{"point": {"x": 0, "y": 0}, "handleIn": null, "handleOut": {"x": 4, "y": 0}}, {"point": {"x": 12, "y": 0}, "handleIn": {"x": -4, "y": 0}, "handleOut": null}]},
+    "style": {"strokeColor": "#16212b", "strokeWidthPt": 1.7142857142857142, "fillColor": null, "opacity": 1, "pattern": "dashed", "startCap": "dot", "endCap": "arrow"},
+    "caps": [{"kind": "dot", "points": [{"x": 0, "y": 0}], "radius": 2.5714285714285716}, {"kind": "arrow", "points": [{"x": 5.142857142857143, "y": -3.4285714285714284}, {"x": 12, "y": 0}, {"x": 5.142857142857143, "y": 3.4285714285714284}], "radius": 0}],
+    "shaft": {"kind": "spline", "closed": false, "nodes": [{"point": {"x": 0, "y": 0}, "handleIn": null, "handleOut": {"x": 2, "y": 0}}, {"point": {"x": 6, "y": 0}, "handleIn": {"x": -2, "y": 0}, "handleOut": null}]}
+  }
+]

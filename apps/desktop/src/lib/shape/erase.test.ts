@@ -38,6 +38,18 @@ describe("precise eraser on shapes", () => {
     expect(pieces[1].zIndex).toBe(3);
   });
 
+  it("keeps a cap only at its original end and erases a cap reached on its own", () => {
+    const line = shape({ kind: "line", start: { x: 0, y: 0 }, end: { x: 100, y: 0 } }, {
+      style: { ...style, startCap: "bar", endCap: "arrow" },
+    });
+    const [left, right] = cutShape(line, [vertical(50)], newId)!;
+    expect(left.style).toEqual({ ...style, startCap: "bar" });
+    expect(right.style).toEqual({ ...style, endCap: "arrow" });
+    const [uncapped] = cutShape(line, [vertical(0, 4, 6, 0.1)], newId)!;
+    expect(uncapped.geometry).toEqual(line.geometry);
+    expect(uncapped.style).toEqual({ ...style, endCap: "arrow" });
+  });
+
   it("opens a rectangle into one spline that runs round its corners without handles", () => {
     const box = shape({ kind: "rectangle", widthPt: 100, heightPt: 60, cornerRadiusPt: 0 });
     const [piece] = cutShape(box, [vertical(50)], newId)!;
