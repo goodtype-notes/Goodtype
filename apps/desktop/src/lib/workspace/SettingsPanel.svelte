@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AppUpdates from "./AppUpdates.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import AddonSettings from "./addons/AddonSettings.svelte";
   import { matchesField } from "./addons/formModel";
@@ -353,6 +354,7 @@
               {/if}
               {@render setting(item)}
             {/each}
+            {#if group.id === "updates"}{#key settings.includeBetaReleases}<AppUpdates restart={actions.restartForUpdate} beta={settings.includeBetaReleases} />{/key}{/if}
             {#if group.id === "aiHelper" && settings.aiHelper.enabled}<CodexSettings {settings} {onChange} /><HelperSetup />{/if}
           </div>
         {/if}
@@ -622,7 +624,7 @@
   .toggle:disabled { opacity: var(--disabled); cursor: default; }
 
   /* An action is not a preference, so it is a button rather than a control with a state. */
-  .run {
+  .settings :global(.run) {
     height: var(--control);
     flex: none;
     padding: 0 16px;
@@ -636,8 +638,8 @@
     transition: background var(--fast) ease;
   }
 
-  .run:hover:not(:disabled) { background: var(--wash-strong); }
-  .run:disabled { opacity: var(--disabled); cursor: default; }
+  .settings :global(.run:hover:not(:disabled)) { background: var(--wash-strong); }
+  .settings :global(.run:disabled) { opacity: var(--disabled); cursor: default; }
 
   .choices {
     display: flex;
@@ -701,7 +703,7 @@
   .close:focus-visible,
   .toggle:focus-visible,
   .choice:focus-visible,
-  .run:focus-visible,
+  .settings :global(.run:focus-visible),
   .setting-select:focus-visible,
   .slider input:focus-visible {
     outline: 2px solid var(--blueprint-light);

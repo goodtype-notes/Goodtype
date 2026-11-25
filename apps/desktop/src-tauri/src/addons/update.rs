@@ -51,7 +51,7 @@ struct Archive {
     url: String,
 }
 
-fn stable_version(version: &str) -> Result<[u32; 3], String> {
+pub(crate) fn stable_version(version: &str) -> Result<[u32; 3], String> {
     let parts = version
         .split('.')
         .map(|part| {
@@ -83,7 +83,7 @@ pub(super) fn is_hash(value: &str, length: usize) -> bool {
     value.len() == length && value.bytes().all(|c| c.is_ascii_hexdigit())
 }
 
-pub(super) fn verify_signature(
+pub(crate) fn verify_signature(
     bytes: &[u8],
     signature: &[u8],
     key: &[u8; 32],
@@ -157,7 +157,7 @@ fn verify(
     })
 }
 
-pub(super) fn fetch(
+pub(crate) fn fetch(
     url: &str,
     limit: u64,
     allowed: impl Fn(&str, bool) -> bool,

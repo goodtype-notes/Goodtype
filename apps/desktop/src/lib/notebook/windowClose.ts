@@ -9,7 +9,7 @@ export function createWindowCloseHandler(options: {
   let closing = false;
   return {
     get closing() { return closing; },
-    async handle(event: { preventDefault(): void }) {
+    async handle(event: { preventDefault(): void }, destroy = options.destroy) {
       event.preventDefault();
       if (closing) return;
       closing = true;
@@ -18,7 +18,7 @@ export function createWindowCloseHandler(options: {
         if (!(await options.saveNotebook())) return;
         await options.rememberPage();
         // close() would re-enter the native event. Destroy only after all writes confirm.
-        await options.destroy();
+        await destroy();
       } catch (error) {
         options.failed(error);
       } finally {

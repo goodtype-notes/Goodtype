@@ -25,7 +25,7 @@ import { addonPaletteId, paletteTools } from "../notebook/palette";
  * diagnostic belongs in Settings rather than one tap from the page, but it is not a preference,
  * so it needs somewhere to send the request.
  */
-export type SettingActions = { openMetrics: () => void; changePython: () => void; browseAddons?: () => void };
+export type SettingActions = { restartForUpdate?: () => Promise<void>; openMetrics: () => void; changePython: () => void; browseAddons?: () => void };
 
 export type SettingControl =
   | { kind: "addonPolicy"; preference: "autoCheck" | "allowDirectApply" }
@@ -402,6 +402,11 @@ export function settingGroups(t: Translator = translate, fonts: string[] = [], a
     ],
   },
 ];
+  groups.push({
+    id: "updates", title: t("appUpdates.title"), blurb: t("appUpdates.privacy"), icon: "M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4",
+    items: [{ id: "autoCheckAppReleases", label: t("appUpdates.auto"), control: { kind: "toggle", read: s => s.autoCheckAppReleases, write: (s, enabled) => ({ ...s, autoCheckAppReleases: enabled }) } },
+      { id: "includeBetaReleases", label: t("appUpdates.beta"), control: { kind: "toggle", read: s => s.includeBetaReleases, write: (s, enabled) => ({ ...s, includeBetaReleases: enabled }) } }],
+  });
   groups.push({
     id: "addons",
     title: t("addons.manager.title"),

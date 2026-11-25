@@ -13,12 +13,17 @@ mod settings;
 mod store;
 mod tinymist;
 mod typst;
+mod updates;
 mod workspace;
 
 use tauri::Manager;
 
 fn main() {
+    if updates::install::helper_entry() {
+        return;
+    }
     tauri::Builder::default()
+        .manage(updates::install::Pending::default())
         .plugin(tauri_plugin_dialog::init())
         .manage(notebook::NotebookHistories::default())
         .manage(workspace::AllowedRoots::default())
@@ -59,6 +64,7 @@ fn main() {
                     std::sync::atomic::Ordering::SeqCst,
                 );
             }
+            updates::install::confirm_start();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -101,6 +107,9 @@ fn main() {
             helper::helper_answer_scope,
             helper::helper_revoke,
             helper::helper_activity,
+            updates::check_app_release,
+            updates::install::stage_app_release,
+            updates::install::arm_app_restart,
             library::library_root,
             library::pick_library_root,
             library::list_library,
@@ -219,6 +228,7 @@ fn main() {
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
                 app.state::<helper::Helper>().stop();
+                updates::install::launch_on_exit(app);
             }
         });
 }

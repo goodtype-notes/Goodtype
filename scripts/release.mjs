@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, createPublicKey, sign, verify } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -96,6 +96,15 @@ export async function sha256(path) {
   return hash.digest('hex');
 }
 
+export function signReleaseManifest(bytes, privateKey, pinnedKey) {
+  const publicKey = createPublicKey({ key: {
+    kty: 'OKP', crv: 'Ed25519', x: pinnedKey.toString('base64url'),
+  }, format: 'jwk' });
+  const signature = sign(null, bytes, privateKey);
+  assert.ok(verify(null, bytes, publicKey, signature), 'Release signing key differs from the app key.');
+  return signature;
+}
+
 async function manifest() {
   const metadata = await json(metadataPath);
   assert.equal(git('rev-parse', 'HEAD'), metadata.sourceCommit, 'Source changed during packaging.');
@@ -109,7 +118,8 @@ async function manifest() {
   }
   const archive = `${metadata.packageName}.zip`;
   const checksum = await sha256(resolve(root, 'target', archive));
-  await save(`target/${metadata.packageName}.json`, { ...metadata, archive, sha256: checksum, files });
+  const archiveBytes = (await stat(resolve(root, 'target', archive))).size;
+  await save(`target/${metadata.packageName}.json`, { ...metadata, archive, archiveBytes, sha256: checksum, files });
   await writeFile(resolve(root, 'target', `${metadata.packageName}.sha256`), `${checksum}  ${archive}\n`);
 }
 
@@ -175,7 +185,8 @@ async function publish(directory) {
   const names = await readdir(directory);
   const manifests = names.filter((name) => /^Goodtype-Windows-.*\.json$/.test(name));
   assert.equal(manifests.length, 1);
-  const metadata = JSON.parse(await readFile(resolve(directory, manifests[0]), 'utf8'));
+  const manifestBytes = await readFile(resolve(directory, manifests[0]));
+  const metadata = JSON.parse(manifestBytes);
   assert.equal(metadata.sourceCommit, sourceCommit);
   assert.equal(metadata.sourceDirty, false);
   assert.equal(metadata.channel, 'dev');
@@ -194,6 +205,11 @@ async function publish(directory) {
     console.log(`${tag} is already published for ${sourceCommit}.`);
     return;
   }
+  const signatureName = manifests[0] + '.sig';
+  const publicKey = await readFile(resolve(root, 'apps/desktop/src-tauri/release-public-key.bin'));
+  const signature = signReleaseManifest(manifestBytes, process.env.GOODTYPE_RELEASE_SIGNING_KEY, publicKey);
+  await writeFile(resolve(directory, signatureName), signature);
+  if (!names.includes(signatureName)) names.push(signatureName);
   if (!existingTag) {
     // Creating the ref is atomic. If the name was taken since the listing, GitHub rejects it.
     gh('api', '--method', 'POST', `repos/${repository}/git/refs`, '-f', `ref=refs/tags/${tag}`, '-f', `sha=${sourceCommit}`);
@@ -201,7 +217,7 @@ async function publish(directory) {
   const args = ['release', 'create', tag, ...names.map((name) => resolve(directory, name)),
     '--repo', repository, '--verify-tag', '--title', `Goodtype ${tag} - Pre-alpha`,
     '--prerelease', '--latest=false',
-    '--notes', `Source: ${metadata.sourceCommit}\nBuild: ${metadata.buildUrl}\n\nWindows x64 portable ZIP. Extract the entire folder. WebView2 is required. This build is unsigned; physical pen/touch validation remains separate. See the included README and SHA-256 metadata.`];
+    '--notes', `Source: ${metadata.sourceCommit}\nBuild: ${metadata.buildUrl}\n\nWindows x64 portable ZIP. Extract the entire folder. WebView2 is required. The updater verifies the signed release manifest and ZIP checksum. Windows Authenticode signing and physical pen/touch validation remain separate.`];
   gh(...args);
 }
 
