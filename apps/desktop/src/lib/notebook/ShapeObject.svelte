@@ -22,6 +22,9 @@
   import { SNAP_RADIUS_SCREEN_PT, snapPoint, snapTargets } from "../shape/snap";
   import type { ShapeEditCommit, ShapeView } from "./pageView";
 
+  import { nearbyPorts, type Port } from "./addonPorts";
+  import type { PathEdit } from "../ipc/addons";
+
   type Gesture = {
     kind: "move" | "resize" | "anchor" | "rotate";
     pointerId: number;
@@ -33,6 +36,7 @@
     grabbed?: { x: number; y: number };
     /// Ends of other shapes a dragged line end may meet, on the page.
     targets: Point[];
+    pathEdit?: typeof endpointEdit;
   };
 
   let {
@@ -49,6 +53,7 @@
     onSelect,
     onChange,
     onEditingChange,
+    endpointEdit,
   }: {
     shape: ShapeView;
     selected?: boolean;
@@ -70,12 +75,18 @@
     toPageDelta: (screenDx: number, screenDy: number) => Point;
     onSelect?: () => void;
     onChange?: (shape: ShapeView, commit?: ShapeEditCommit) => void;
+    endpointEdit?: {
+      name: string; owned: boolean; ports: Port[]; pointAt: (x: number, y: number) => Point | null;
+      apply: (edit: PathEdit) => void;
+    };
     onEditingChange?: (editing: boolean) => void;
   } = $props();
 
   let preview = $state.raw(untrack(() => shape));
   let gesture = $state<Gesture | null>(null);
   /// The end a dragged line handle has met, marked until the drag ends.
+  let portRings = $state<Port[]>([]);
+  let portSnap = $state<Port>();
   let snapRing = $state<Point | null>(null);
   /// The curve knot last touched, whose tangent arms show while the curve is only selected.
   let activeNode = $state<number | null>(null);
@@ -125,6 +136,7 @@
       start: preview,
       anchor,
       grabbed: kind === "rotate" ? rotationHandle : undefined,
+      pathEdit: endpoint(preview, anchor) ? endpointEdit : undefined,
       targets: endSnap && (anchor === "line-start" || anchor === "line-end")
         ? snapTargets(snapShapes, preview.id)
         : [],
@@ -151,8 +163,13 @@
       preview = resizeShape(gesture.start, local, event.shiftKey);
       return;
     }
-    const snapped = snappedLineEnd(gesture, local, event);
-    snapRing = snapped?.target ?? null;
+    const port = samplePort(gesture, event);
+    const point = endpoint(gesture.start, gesture.anchor)?.point;
+    const target = port && toLocalPoint(gesture.start, port);
+    const snapped = target && point
+      ? { target: port, local: { x: target.x - point.x, y: target.y - point.y } }
+      : snappedLineEnd(gesture, local, event);
+    snapRing = port ? null : snapped?.target ?? null;
     preview = snapped
       ? moveShapeAnchor(gesture.start, gesture.anchor!, snapped.local)
       : moveShapeAnchor(gesture.start, gesture.anchor!, local, event.shiftKey);
@@ -174,19 +191,61 @@
     return { target, local: { x: onTarget.x - end.x, y: onTarget.y - end.y } };
   }
 
+  function endpoint(view: ShapeView, anchor?: ShapeAnchor) {
+    const geometry = view.geometry;
+    if (geometry.kind === "line") {
+      if (anchor === "line-start") return { end: "start" as const, point: geometry.start };
+      if (anchor === "line-end") return { end: "end" as const, point: geometry.end };
+    }
+    if (geometry.kind === "spline" && !geometry.closed && anchor && typeof anchor !== "string" && !("handle" in anchor)) {
+      if (anchor.node === 0) return { end: "start" as const, point: geometry.nodes[0].point };
+      if (anchor.node === geometry.nodes.length - 1) return { end: "end" as const, point: geometry.nodes[anchor.node].point };
+    }
+  }
+
+  function samplePort(active: Gesture, event: PointerEvent) {
+    const raw = active.pathEdit?.pointAt(event.clientX, event.clientY);
+    const sample = raw && !event.altKey && active.pathEdit
+      ? nearbyPorts(raw, active.pathEdit.ports, zoom) : null;
+    portRings = sample?.nearby ?? [];
+    portSnap = sample?.snapped;
+    return portSnap;
+  }
+
   function finish(event: PointerEvent) {
     if (!gesture || event.pointerId !== gesture.pointerId) return;
-    const changed = preview !== gesture.start;
-    gesture = null;
-    snapRing = null;
-    if (changed) onChange?.(preview);
+    const active = gesture;
+    const moved = event.clientX !== active.clientX || event.clientY !== active.clientY || preview !== active.start;
+    if (moved && active.pathEdit) update(event);
+    const port = portSnap;
+    const end = endpoint(preview, active.anchor);
+    const changed = preview !== active.start;
+    clearGesture();
+    if (moved && active.pathEdit && end && (port || active.pathEdit.owned)) {
+      active.pathEdit.apply({ kind: "endpoint", end: end.end,
+        point: toPagePoint(preview, end.point), attach: port?.attach ?? null });
+    } else if (changed) onChange?.(preview);
   }
 
   function cancel(event: PointerEvent) {
     if (!gesture || event.pointerId !== gesture.pointerId) return;
     preview = gesture.start;
+    clearGesture();
+  }
+
+  function clearGesture() {
     gesture = null;
     snapRing = null;
+    portRings = [];
+    portSnap = undefined;
+  }
+
+  function cancelOnEscape(event: KeyboardEvent) {
+    if (!gesture || event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    preview = gesture.start;
+    clearGesture();
   }
 
   function objectKeydown(event: KeyboardEvent) {
@@ -403,8 +462,13 @@
             onpointermove={update}
             onpointerup={finish}
             onpointercancel={cancel}
+            onlostpointercapture={cancel}
             onkeydown={(event) => anchorKeydown(event, item.anchor)}
-          ></circle>
+          >
+            {#if endpointEdit && endpoint(preview, item.anchor)}
+              <title>{$t("addons.pathEndpoint", { addon: endpointEdit.name })}</title>
+            {/if}
+          </circle>
           <circle
             class:handle
             class="control"
@@ -414,13 +478,26 @@
           ></circle>
         {/each}
   </g>
+  {#each portRings as port}
+    {@const snapped = portSnap?.attach.objectId === port.attach.objectId && portSnap.attach.port === port.attach.port}
+    <circle class="snap-ring" class:port-winner={snapped} cx={port.x} cy={port.y} r={(snapped ? 6 : 4) / zoom} stroke-width={1.5 / zoom}>
+      {#if snapped && gesture?.pathEdit}<title>{$t("addons.pathEndpoint", { addon: gesture.pathEdit.name })}</title>{/if}
+    </circle>
+  {/each}
+  {#if portSnap && gesture?.pathEdit}
+    <text class="port-name" x={portSnap.x + 9 / zoom} y={portSnap.y - 9 / zoom} font-size={12 / zoom}>{gesture.pathEdit.name}</text>
+  {/if}
   {#if snapRing}
     <circle class="snap-ring" cx={snapRing.x} cy={snapRing.y} r={4 / zoom} stroke-width={1.5 / zoom}></circle>
   {/if}
 </svg>
 {/if}
 
+<svelte:window onkeydowncapture={cancelOnEscape} />
+
 <style>
+  .port-winner { fill: var(--paper-select); }
+  .port-name { fill: var(--ink); pointer-events: none; }
   .shape-object { position: absolute; inset: 0; display: block; overflow: visible; pointer-events: none; touch-action: none; user-select: none; }
   .shape-controls { z-index: 2147483647; }
   .shape-hit { pointer-events: none; cursor: move; outline: none; }

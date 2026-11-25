@@ -157,10 +157,10 @@ export type AddonReview = {
   status: "pending";
   addon: AddonName;
   items: import("./helper").ProposalItem[];
-  anchor: { x: number; y: number; width: number; height: number };
+  anchor: { x: number; y: number; width: number; height: number } | null;
   /** Unsupported math: the recognized LaTeX, shown for correction. */
   latex: string | null;
-  kind: "blocks";
+  kind: "blocks" | "pathChoice" | "pathStart" | "pathEnd";
 };
 
 export type AddonSelection = {
@@ -199,12 +199,17 @@ export type AddonTool = {
 export type AddonPoint = { x: number; y: number; attach: { objectId: string; port: number } | null };
 export type AddonObjectAction =
   | { kind: "tool"; id: string; points: AddonPoint[]; style?: import("../model").ShapeStyle; pen?: { strokeColor: string; strokeWidthPt: number } }
-  | { kind: "command"; id: string; selected: string[] };
-export const addonObjectAction = (root: string, pageId: string, revision: number, addonId: string, action: AddonObjectAction) =>
-  invoke<import("./types").HistoryResult | null>("addon_object_action", { request: { root, pageId, revision, addonId, action } });
+  | { kind: "command"; id: string; selected: string[] }
+  | { kind: "pathEdit"; id: string; objectId: string; edit: PathEdit };
+export type PathEdit =
+  | { kind: "endpoint"; end: "start" | "end"; point: { x: number; y: number }; attach: AddonPoint["attach"] }
+  | { kind: "choice"; value: string };
+export const addonObjectAction = (root: string, pageId: string, revision: number, addonId: string, action: AddonObjectAction, requestId?: string) =>
+  invoke<import("./types").HistoryResult | { review: AddonReview; direct: boolean } | null>(
+    "addon_object_action", { request: { root, pageId, revision, addonId, action, requestId } });
 
 export const prepareAddonReactions = (root: string, pageId: string, revision: number, baseRevision: number, retry: boolean) =>
-  invoke<{ token: string | null; retry: boolean }>("addon_react", { root, pageId, revision, baseRevision, retry });
+  invoke<{ token: string | null; retry: boolean; failed: AddonName | null }>("addon_react", { root, pageId, revision, baseRevision, retry });
 export const applyAddonReaction = (token: string) =>
   invoke<[import("./types").HistoryResult | null, boolean]>("addon_apply_reaction", { token });
 
@@ -220,7 +225,7 @@ export type AddonContribution = {
 };
 export type ContributionCommand = { id: string; label: string } & (
   | { surface: "insert-form" | "page-generator"; form: AddonField[] }
-  | { surface: "own-object" }
+  | { surface: "own-object"; pathEdit?: { choice: string; snap: "ports" } }
   | { surface: "export"; format: { extension: string; label: string; assets: boolean } }
 );
 export type ContributionEntry = { addon: AddonContribution; command: ContributionCommand };

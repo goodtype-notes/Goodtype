@@ -1644,7 +1644,7 @@ export function createSession(env: SessionEnvironment) {
       if (root !== requestRoot || pageId !== activePageId || generation !== notebookGeneration || transactionFailed) return;
       try {
         const result = await addonObjectAction(requestRoot, pageId, revision, addonId, action);
-        if (!result || root !== requestRoot || generation !== notebookGeneration) return;
+        if (!result || "review" in result || root !== requestRoot || generation !== notebookGeneration) return;
         recordNotebookAction(pageId);
         editGeneration += 1;
         if (activePageId !== pageId) return;
@@ -1668,11 +1668,51 @@ export function createSession(env: SessionEnvironment) {
     await transactionQueue;
   }
 
-  async function detachAddon(addon: string, ids: string[]) {
+  /** One path-edit request. Page input waits for the reply, as for own-object commands, so no
+   *  local snapshot built before it can overwrite the addon's committed path. */
+  async function runAddonPathEdit(addonId: string, action: AddonObjectAction, requestId: string,
+    current: () => boolean): Promise<Awaited<ReturnType<typeof addonObjectAction>>> {
+    const requestRoot = root, pageId = activePageId, generation = notebookGeneration;
+    if (!requestRoot || !await persist() || !current()) return null;
+    // Assigned inside the queued callback, so it must not narrow to its initial null.
+    let outcome = null as Awaited<ReturnType<typeof addonObjectAction>>;
+    let failure: unknown;
+    replacingPageCount += 1;
+    pendingTransactions += 1;
+    transactionQueue = transactionQueue.then(async () => {
+      if (root !== requestRoot || activePageId !== pageId || generation !== notebookGeneration || transactionFailed
+        || !current()) return;
+      try {
+        const result = await addonObjectAction(requestRoot, pageId, revision, addonId, action, requestId);
+        outcome = result;
+        if (!result || "review" in result || root !== requestRoot || generation !== notebookGeneration) return;
+        recordNotebookAction(pageId);
+        editGeneration += 1;
+        if (activePageId !== pageId) return;
+        applySnapshot(result.snapshot);
+        // The edited path stays selected so its routing and Detach controls remain at hand.
+        if (action.kind === "pathEdit" && shapes.some((shape) => shape.id === action.objectId)) {
+          env.selection.selectedShapeId = action.objectId;
+        }
+        revision = result.snapshot.page.revision;
+        canUndo = result.canUndo;
+        canRedo = result.canRedo;
+        scheduleAddonReactions(pageId);
+      } catch (error) { failure = error; }
+    }).finally(() => {
+      pendingTransactions -= 1;
+      replacingPageCount -= 1;
+    });
+    await transactionQueue;
+    if (failure) throw failure;
+    return outcome;
+  }
+
+  async function detachAddon(addon: string, ids: string[], name = addon) {
     const requestRoot = root, pageId = activePageId, generation = notebookGeneration;
     if (!requestRoot || !await persist()) return;
     const selected = new Set(ids);
-    const label = notice("addons.detached", { addon });
+    const label = notice("addons.detached", { addon: name });
     replacingPageCount += 1;
     pendingTransactions += 1;
     transactionQueue = transactionQueue.then(async () => {
@@ -1956,6 +1996,7 @@ export function createSession(env: SessionEnvironment) {
         const prepared = await prepareAddonReactions(context.root, pageId, committedRevision, baseRevision, retry);
         if (!isCurrent() || pendingTransactions > 0) return;
         let retryNeeded = prepared.retry;
+        if (prepared.failed) status = notice("addons.reactionFailed", { addon: addonText(prepared.failed, get(locale)) });
         if (prepared.token) {
           const token = prepared.token;
           replacingPageCount += 1;
@@ -2591,6 +2632,7 @@ export function createSession(env: SessionEnvironment) {
     addCopiedGroups: (groups: typeof copiedGroups) => { copiedGroups = [...copiedGroups, ...groups]; },
     detachAddon,
     applyAddonObjectAction,
+    runAddonPathEdit,
     changeStrokes,
     addStroke,
     addShape,

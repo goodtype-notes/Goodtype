@@ -44,7 +44,7 @@
     /** Ink only, and only where Windows offers a recognizer (ADR 0040). */
     onTranscribe?: () => void;
     /** Installed addons' ink-selection commands, labeled from their manifest strings. */
-    addonCommands?: { id: string; label: string; onSelect: () => void }[];
+    addonCommands?: { id: string; label: string; icon?: string; onSelect: () => void }[];
     onCut?: () => void;
     onCopy?: () => void;
     /** Shown greyed when nothing has been copied, so the bar keeps its shape. */
@@ -139,7 +139,7 @@
         ...entry("convert", $t("selectionMenu.convertToShape"), "M4 17.5 9.5 5 14 16l3-8 3 9.5m-3-3.5 3 3-3 3", onConvert),
         ...entry("transcribe", $t("selectionMenu.transcribe"), "M3 16c1.5-5 3-5 4 0s2.5 5 4 0M14 6.5h7M17.5 6.5V18", onTranscribe),
         ...addonCommands.flatMap((command) => entry(`addon-${command.id}`, command.label,
-          "M9 4h6v3a2 2 0 1 0 4 0h1v6h-3a2 2 0 1 0 0 4h3v3H4V8h5z", command.onSelect)),
+          command.icon ?? "M9 4h6v3a2 2 0 1 0 4 0h1v6h-3a2 2 0 1 0 0 4h3v3H4V8h5z", command.onSelect)),
         ...entry("share", $t("helper.share"), "M4 4h16v12H9l-5 4z", onShare),
       ],
     },

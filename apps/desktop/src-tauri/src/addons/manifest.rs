@@ -99,10 +99,24 @@ pub(super) struct Tool {
 
 #[derive(Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub(super) struct PathEdit {
+    pub choice: String,
+    pub snap: Snap,
+}
+
+#[derive(Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub(super) struct Command {
     pub id: String,
     pub label: String,
     pub surface: Surface,
+    #[serde(
+        default,
+        rename = "pathEdit",
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional"
+    )]
+    pub path_edit: Option<PathEdit>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -292,6 +306,7 @@ impl Addon {
                 vec![]
             } else {
                 vec![Command {
+                    path_edit: None,
                     id: id.into(),
                     label: "run".into(),
                     surface,
@@ -345,6 +360,12 @@ impl Manifest {
                 .any(|command| command.id == id && command.surface == Surface::InkSelection)
     }
 
+    pub(super) fn path_edit(&self) -> bool {
+        self.commands
+            .iter()
+            .any(|command| command.path_edit.is_some())
+    }
+
     pub(super) fn uses_session(&self) -> bool {
         self.transport == Transport::StdioJsonrpc
     }
@@ -373,6 +394,7 @@ impl Manifest {
                         &command.id,
                         command.surface,
                         command.format.as_ref().is_some_and(|f| f.assets),
+                        &command.path_edit,
                     )
                 })
                 .eq(other.commands.iter().map(|command| {
@@ -380,6 +402,7 @@ impl Manifest {
                         &command.id,
                         command.surface,
                         command.format.as_ref().is_some_and(|f| f.assets),
+                        &command.path_edit,
                     )
                 }))
     }
@@ -453,6 +476,14 @@ pub(super) fn parse(bytes: &[u8], addon: &Addon, version: &str) -> Result<Manife
                 || !manifest.strings.en.contains_key(&command.label)
                 || !identifier(&command.id)
                 || !addon.allows_command(command)
+                || command.path_edit.as_ref().is_some_and(|edit| {
+                    !addon.allows_path_edit(&command.id)
+                        || command.surface != Surface::OwnObject
+                        || edit.snap != Snap::Ports
+                        || !manifest.settings.iter().any(
+                            |field| matches!(field, Field::Choice { id, .. } if id == &edit.choice),
+                        )
+                })
                 || match command.surface {
                     Surface::LibraryImport => command.form.is_some() || command.format.is_some(),
                     Surface::InkSelection => {
@@ -513,6 +544,9 @@ pub(super) fn parse(bytes: &[u8], addon: &Addon, version: &str) -> Result<Manife
                 })
                 .map_or_else(String::new, |_| manifest.api_version.clone()),
         ));
+    }
+    if !addon.path_edit_release(version) {
+        return Err(Error::Incompatible("path-edit-v0".into()));
     }
     Ok(manifest)
 }

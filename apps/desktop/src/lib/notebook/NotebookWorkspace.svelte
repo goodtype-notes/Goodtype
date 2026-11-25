@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { addonPorts } from "./addonPorts";
+  import { cancelAddonCommand, dismissAddonProposal, type AddonReview, type PathEdit } from "../ipc/addons";
   import { refreshPageRaster } from "./refreshPageRaster";
   import { createWindowCloseHandler } from "./windowClose";
   import { cellGrant, registerCellApply, type CellEntry } from "../calculation/cellIntent";
@@ -1340,6 +1342,7 @@
     }
   });
   onDestroy(() => {
+    dismissPath();
     destroyed = true;
     clearTimeout(settingsSaveTimer);
     calculations.dispose();
@@ -2093,6 +2096,130 @@
     transcribing = { pageId: session.activePageId, polylines, bounds };
   }
 
+  let pathRequest = $state<{ id: string; pageId: string; objectId: string; root: string } | null>(null);
+  let pathReview = $state<AddonReview | null>(null);
+  let pathUndo = $state<{ root: string; pageId: string; revision: number; addon: string } | null>(null);
+  let pathAccepting = $state(false);
+  const pathObject = $derived(
+    session.activeSnapshot?.page.objects.find((object) => object.id === selectedShape?.id)
+  );
+  const pathChoices = $derived.by(() => {
+    if (!tauriAvailable || !pathObject || pathObject.type !== "shape" || selection.lassoObjectIds.length ||
+      selection.selectedStrokeIds.length || selection.selectedImageId || selection.selectedTypstId ||
+      !(pathObject.geometry.kind === "line" || pathObject.geometry.kind === "spline" && !pathObject.geometry.closed)) return [];
+    const owners = Object.keys(pathObject.addonData ?? {});
+    const capped = [pathObject.style.startCap, pathObject.style.endCap].some((cap) => cap && cap !== "none");
+    return contributions.filter((addon) => addon.enabled && (owners.length ? owners.includes(addon.addonId) : capped))
+      .flatMap((addon) => addon.commands.flatMap((command) => {
+        if (command.surface !== "own-object" || !command.pathEdit) return [];
+        const field = addon.settings.find((field) => field.id === command.pathEdit?.choice);
+        return field?.type === "choice" ? [{ addon, command, field }] : [];
+      }));
+  });
+  const endpointEdit = $derived.by(() => {
+    if (pathChoices.length !== 1 || !pathObject || pathRequest || pathReview) return undefined;
+    const choice = pathChoices[0];
+    const { addon } = choice;
+    const objectId = pathObject.id;
+    const revision = session.activeSnapshot?.page.revision;
+    return {
+      name: contributionText(addon, "name", $locale),
+      owned: Boolean(pathObject.addonData?.[addon.addonId]),
+      ports: addonPorts(session.activeSnapshot?.page.objects ?? [], objectId),
+      pointAt: navigation.pagePointAt,
+      apply: (edit: PathEdit) => {
+        if (revision !== session.activeSnapshot?.page.revision || !pathChoices.some((current) =>
+          current.addon.addonId === choice.addon.addonId && current.command.id === choice.command.id)) {
+          pathFailed(contributionText(addon, "name", $locale), "addon-stale-page");
+          return;
+        }
+        void runPathEdit(choice, objectId, edit);
+      },
+    };
+  });
+  const pathPreviewShapes = $derived(selection.previewShapes.map((shape) => {
+    const replacement = pathReview?.items[0]?.object;
+    return replacement?.type === "shape" && replacement.id === shape.id ? { ...shape, ...replacement } : shape;
+  }));
+
+  function dismissPath() {
+    if (pathRequest) void cancelAddonCommand(pathRequest.id).catch(() => {});
+    pathRequest = null;
+    if (pathReview) void dismissAddonProposal(pathReview.id).catch(() => {});
+    pathReview = null;
+  }
+
+  $effect(() => {
+    if (pathRequest && (pathRequest.root !== session.root || pathRequest.pageId !== session.activePageId ||
+        pathRequest.objectId !== selection.selectedShapeId)) dismissPath();
+  });
+
+  function pathFailed(addon: string, error: unknown) {
+    const field = (key: string) => typeof error === "object" && error && key in error
+      ? String((error as Record<string, unknown>)[key]) : undefined;
+    // Rust wraps host refusals raised under the notebook lock as "invalid notebook: <code>".
+    const problem = (field("message") ?? field("details") ?? String(error)).replace(/^invalid notebook: /, "");
+    if (problem === "addon-needs-update") window.dispatchEvent(new Event(ADDON_AVAILABILITY_CHANGED));
+    const code = field("code");
+    const reason = problem === "addon-needs-update" ? "addons.pathNeedsUpdate"
+      : problem === "addon-stale-page" || problem === "proposal_changed" || code === "proposal_stale" ||
+        code === "revision_conflict" || problem.startsWith("proposal dependencies changed") ||
+        problem.startsWith("revision conflict") ? "addons.pathStale"
+      : problem === "addon-timeout" ? "addons.pathTimeout"
+      : problem === "Legacy connector upgrade requires review" ? "addons.pathLegacyReview"
+      : problem === "addon-does-not-fit" || problem === "The connector does not fit the page" ||
+        problem === "The connector caps do not fit the page" ? "addons.pathDoesNotFit" : "addons.pathRejected";
+    session.status = notice("addons.pathFailed", { addon, reason: notice(reason) });
+  }
+
+  function pathApplied(addon: string) {
+    if (!session.root || !session.activeSnapshot) return;
+    pathUndo = { root: session.root, pageId: session.activePageId, revision: session.activeSnapshot.page.revision, addon };
+    session.status = notice("addons.objectActionApplied", { label: addon });
+  }
+
+  async function runPathEdit(choice: (typeof pathChoices)[number], objectId: string, edit: PathEdit) {
+    if (pathRequest || !session.root || !choice) return;
+    const { addon, command } = choice;
+    const name = contributionText(addon, "name", $locale);
+    const id = crypto.randomUUID();
+    pathRequest = { id, objectId, pageId: session.activePageId, root: session.root };
+    const current = () => pathRequest?.id === id;
+    try {
+      const result = await session.runAddonPathEdit(addon.addonId,
+        { kind: "pathEdit", id: command.id, objectId, edit }, id, current);
+      if (!current()) {
+        if (result && "review" in result) await dismissAddonProposal(result.review.id);
+        return;
+      }
+      if (!result) return;
+      if ("review" in result) {
+        if (result.direct && await session.insertAddonProposal(result.review, true)) pathApplied(name);
+        else if (current()) pathReview = result.review;
+        else await dismissAddonProposal(result.review.id);
+      } else pathApplied(name);
+    } catch (error) {
+      if (current()) pathFailed(name, error);
+    } finally {
+      if (current() && !pathReview) pathRequest = null;
+    }
+  }
+
+  async function acceptPath() {
+    const review = pathReview;
+    if (!review || pathAccepting) return;
+    const addon = addonText(review.addon, $locale);
+    pathAccepting = true;
+    try {
+      if (await session.insertAddonProposal(review, false)) pathApplied(addon);
+    } catch (error) {
+      pathFailed(addon, error);
+    } finally {
+      pathAccepting = false;
+      dismissPath();
+    }
+  }
+
   /** Ink-only selections on a canvas page; lassoed objects are never sent to an addon. */
   function selectionAddonCommands() {
     if (!tauriAvailable || session.activeCalculation) return [];
@@ -2104,17 +2231,29 @@
     const owners = new Set(session.activeSnapshot?.page.objects
       .filter((object) => selected.has(object.id))
       .flatMap((object) => Object.keys(object.addonData ?? {})));
-    if (owners.size) return [...contributions.filter((addon) => addon.enabled && owners.has(addon.addonId))
-      .flatMap((addon) => addon.commands.filter((command) => command.surface === "own-object").map((command) => {
+    const routing = pathChoices.flatMap((choice) => choice.field.choices.map((option) => {
+      const addon = contributionText(choice.addon, "name", $locale);
+      const label = contributionText(choice.addon, option.label, $locale);
+      return { id: `${choice.addon.addonId}-${choice.command.id}-${option.value}`,
+        label: $t("addons.pathChoice", { addon, choice: label }), icon: option.icon?.paths.join(" "),
+        onSelect: () => pathObject && void runPathEdit(choice, pathObject.id, { kind: "choice", value: option.value }) };
+    }));
+    if (owners.size || routing.length) return [...routing, ...contributions.filter((addon) => addon.enabled && owners.has(addon.addonId))
+      .flatMap((addon) => addon.commands.filter((command) => command.surface === "own-object" && !command.pathEdit).map((command) => {
         const label = contributionText(addon, command.label, $locale);
         return { id: `${addon.addonId}-${command.id}`, label,
           onSelect: () => void session.applyAddonObjectAction(addon.addonId,
             { kind: "command", id: command.id, selected: ids }, label) };
-      })), ...[...owners].map((addon) => ({
-      id: `detach-${addon}`,
-      label: $t("addons.detach", { addon }),
-      onSelect: () => void session.detachAddon(addon, ids),
-    }))];
+      })), ...[...owners].map((addon) => {
+      const contribution = contributions.find((item) => item.addonId === addon);
+      const name = contribution ? contributionText(contribution, "name", $locale)
+        : addon === "connectors" ? $t("addons.connectors.label") : addon;
+      return {
+        id: `detach-${addon}`,
+        label: $t("addons.detach", { addon: name }),
+        onSelect: () => void session.detachAddon(addon, ids, name),
+      };
+    })];
     if (!selection.selectedStrokeIds.length || ids.length) return [];
     return addonCommands.map(command => ({
       id: `${command.addonId}-${command.command}`,
@@ -2461,6 +2600,12 @@
     }
     selection.closeObjectSelection(event);
   }} onkeydowncapture={event => {
+    if (event.key === "Escape" && (pathRequest || pathReview) && !pathAccepting) {
+      dismissPath();
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (event.key === "Escape" && event.target instanceof Element && event.target.closest(".shape-object") && selection.exitGroup(true)) {
       event.preventDefault();
       event.stopPropagation();
@@ -2743,7 +2888,8 @@
                       ? activePageTypstView
                       : pageTypstViewFromSnapshot(entry.snapshot!)}
                     images={active ? activeImageViews : imageViewsFromSnapshot(entry.snapshot!, session.assetUrls(entry.id))}
-                    shapes={active ? selection.previewShapes : shapeViewsFromSnapshot(entry.snapshot!)}
+                    shapes={active ? pathPreviewShapes : shapeViewsFromSnapshot(entry.snapshot!)}
+                    shapeEndpointEdit={active ? endpointEdit : undefined}
                     results={active ? activeResults : (session.neighborResults[entry.id] ?? {})}
                     strokes={active ? session.strokes : session.neighborStrokesFor(entry)}
                     newStrokeZIndex={newInkZIndex(
@@ -3285,6 +3431,20 @@
     </section>
   {/if}
 
+  {#if pathReview}
+    <div class="path-review" role="group" aria-label={$t("addons.pathReview", { addon: addonText(pathReview.addon, $locale) })}>
+      <span>{$t("addons.pathReview", { addon: addonText(pathReview.addon, $locale) })}
+        {$t(pathReview.kind === "pathStart" ? "addons.pathStart" : pathReview.kind === "pathEnd" ? "addons.pathEnd" : "addons.pathBoth")}</span>
+      <button type="button" disabled={pathAccepting} onclick={() => void acceptPath()}>{$t("addons.pathAccept")}</button>
+      <button type="button" disabled={pathAccepting} onclick={dismissPath}>{$t("addons.pathDismiss")}</button>
+    </div>
+  {:else if pathUndo && pathUndo.root === session.root && pathUndo.pageId === session.activePageId &&
+    pathUndo.revision === session.activeSnapshot?.page.revision && session.canUndo}
+    <div class="path-review" role="status">
+      <span>{$t("addons.objectActionApplied", { label: pathUndo.addon })}</span>
+      <button type="button" disabled={session.pendingTransactions > 0} onclick={() => { pathUndo = null; void session.undo(); }}>{$t("addons.pathUndo")}</button>
+    </div>
+  {/if}
   <WorkspaceStatus toolLabel={currentToolLabel()} toolDetail={currentToolDetail()} status={session.status} transactionFailed={session.transactionFailed}
     pageNumber={session.activePageNumber()} pageCount={session.notebookManifest?.pages.length ?? 1} {zoom}
     {saveNeedsAttention} {savePending} onZoom={navigation.changeZoom}
@@ -3427,6 +3587,7 @@
 {/if}
 
 <style>
+  .path-review { position: absolute; z-index: 10; inset-inline-end: 1rem; bottom: 3rem; display: flex; gap: 0.5rem; align-items: center; background: var(--paper); color: var(--ink); border: 1px solid var(--blueprint); padding: 0.5rem; }
   :global(*) { box-sizing: border-box; }
   :global(button), :global(input), :global(textarea) { font: inherit; }
 

@@ -1168,6 +1168,17 @@ struct EndCap {
     radius: f64,
 }
 
+/// Cap marks with the radius of their outline, in the shape's local coordinates.
+pub fn shape_cap_marks(
+    geometry: &ShapeGeometry,
+    style: &ShapeStyle,
+) -> impl Iterator<Item = (Vec<ShapePoint>, f64)> {
+    shape_caps(geometry, style)
+        .0
+        .into_iter()
+        .map(|cap| (cap.points, cap.radius))
+}
+
 // Mirrors shapeCaps in the desktop geometry module.
 fn shape_caps(
     geometry: &ShapeGeometry,

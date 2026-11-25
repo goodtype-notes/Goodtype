@@ -35,6 +35,11 @@ pub struct NotebookHistory {
 }
 
 impl NotebookHistory {
+    /// A closed notebook drops its observed page histories.
+    pub fn observes(&self, page_id: &str) -> bool {
+        self.current_page_id.as_deref() == Some(page_id)
+    }
+
     /// Adopt `snapshot` as the state the next operation is checked against.
     ///
     /// The three fields move together or not at all: a page ID without its matching fingerprint

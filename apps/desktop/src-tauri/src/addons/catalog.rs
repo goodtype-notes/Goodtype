@@ -176,3 +176,17 @@ pub(super) static STUDY: Addon = Addon {
     contribution_surfaces: &[],
     kind: Kind::Content,
 };
+
+impl Addon {
+    pub(super) fn path_edit_release(&self, version: &str) -> bool {
+        if self.id != CONNECTORS.id {
+            return true;
+        }
+        super::registry::numeric_version(version.split('-').next().unwrap_or_default())
+            .is_some_and(|version| version >= [0, 2, 0])
+    }
+
+    pub(super) fn allows_path_edit(&self, command: &str) -> bool {
+        self.id == CONNECTORS.id && command == "change-routing"
+    }
+}

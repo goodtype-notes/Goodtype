@@ -155,6 +155,244 @@ fn legacy_items(items: Vec<ProposalItem>) -> Result<Vec<ProposalItem>, String> {
 
 pub(super) const FORBIDDEN: &str = "addon-object-permission";
 
+/// The two ends of a line or open spline, in its local coordinates.
+pub(super) fn path_ends(geometry: &ShapeGeometry) -> Option<[ShapePoint; 2]> {
+    match geometry {
+        ShapeGeometry::Line { start, end } => Some([*start, *end]),
+        ShapeGeometry::Spline {
+            nodes,
+            closed: false,
+        } => Some([nodes.first()?.point, nodes.last()?.point]),
+        _ => None,
+    }
+}
+
+/// The one-shot path-edit scope captured before the invocation: the source ID, the refs the
+/// reply may name, and the dropped end's index and page point when a port was snapped.
+pub(super) struct PathGrant {
+    pub id: String,
+    pub refs: HashSet<String>,
+    pub attached: Option<(String, usize, ShapePoint)>,
+}
+
+/// Admit exactly one `updateObject` on the captured source that writes its path geometry and
+/// the caller's entry. Transform, style (except a recognized legacy cap fill), order and group
+/// membership stay as captured.
+pub(super) fn apply_path_edit(
+    mut snapshot: storage::NotebookSnapshot,
+    addon: &str,
+    grant: &PathGrant,
+    reply: Value,
+) -> Result<storage::NotebookSnapshot, String> {
+    let raw = reply
+        .pointer("/batch/operations/0")
+        .and_then(Value::as_object)
+        .ok_or(INVALID)?;
+    if raw.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "op" | "id" | "geometry" | "addonData" | "style"
+        )
+    }) || raw.get("style").is_some_and(Value::is_null)
+        || raw
+            .get("style")
+            .and_then(Value::as_object)
+            .is_some_and(|style| {
+                style.keys().any(|key| {
+                    !matches!(
+                        key.as_str(),
+                        "startCap"
+                            | "endCap"
+                            | "strokeColor"
+                            | "strokeWidthPt"
+                            | "fillColor"
+                            | "opacity"
+                            | "pattern"
+                            | "patternSpacing"
+                            | "patternOffsetPt"
+                    )
+                })
+            })
+    {
+        return Err(FORBIDDEN.into());
+    }
+    let Response {
+        batch: Batch { mut operations },
+    } = serde_json::from_value(reply).map_err(|_| INVALID)?;
+    if operations.len() != 1 {
+        return Err(FORBIDDEN.into());
+    }
+    let Some(Operation::UpdateObject {
+        id,
+        geometry: Some(next),
+        style: replacement,
+        addon_data: Some(Some(entry)),
+        ..
+    }) = operations.pop()
+    else {
+        return Err(FORBIDDEN.into());
+    };
+    if id != grant.id
+        || path_ends(&next).is_none()
+        || grant
+            .attached
+            .as_ref()
+            .is_some_and(|(id, _, _)| !entry.refs.contains(id))
+        || entry.refs.iter().any(|id| !grant.refs.contains(id))
+    {
+        return Err(FORBIDDEN.into());
+    }
+    let refs = grant.refs.iter().map(String::as_str).collect();
+    goodtype_core::addon_data::validate_entry(&id, &entry, &refs).map_err(|_| INVALID)?;
+    let Some(PageObject::Shape {
+        fields,
+        geometry,
+        style,
+    }) = snapshot
+        .page
+        .objects
+        .iter_mut()
+        .find(|object| object.fields().id == id)
+    else {
+        return Err(FORBIDDEN.into());
+    };
+    if let Some(replacement) = replacement {
+        let legacy = fields
+            .addon_data
+            .as_ref()
+            .is_some_and(|entries| entries.contains_key(addon))
+            && legacy_cap_conversion(geometry, style, &replacement);
+        if !legacy {
+            return Err(FORBIDDEN.into());
+        }
+        *style = replacement;
+    }
+    validate_shape(&next, style).map_err(|_| INVALID)?;
+    if let Some((_, end, expected)) = &grant.attached {
+        let local = path_ends(&next).ok_or(INVALID)?[*end];
+        let actual = goodtype_core::addon_data::to_page_point(fields, local);
+        if (actual.x - expected.x).hypot(actual.y - expected.y) > 1e-6 {
+            return Err(FORBIDDEN.into());
+        }
+    }
+    if !path_marks_fit(fields, &next, style, &snapshot.page.geometry) {
+        return Err("addon-does-not-fit".into());
+    }
+    *geometry = next;
+    fields
+        .addon_data
+        .get_or_insert_with(AddonData::new)
+        .insert(addon.into(), entry);
+    fields.modified_at = crate::helper::now().to_string();
+    storage::raise_schema_version(&mut snapshot);
+    Ok(snapshot)
+}
+
+fn path_marks_fit(
+    fields: &ObjectFields,
+    path: &ShapeGeometry,
+    style: &ShapeStyle,
+    page: &PageGeometry,
+) -> bool {
+    let to_page = |p| goodtype_core::addon_data::to_page_point(fields, p);
+    let world = match path {
+        ShapeGeometry::Line { start, end } => ShapeGeometry::Line {
+            start: to_page(*start),
+            end: to_page(*end),
+        },
+        ShapeGeometry::Spline { nodes, .. } => ShapeGeometry::Spline {
+            nodes: nodes
+                .iter()
+                .map(|node| {
+                    let point = to_page(node.point);
+                    let vector = |handle: ShapePoint| {
+                        let transformed = to_page(ShapePoint {
+                            x: node.point.x + handle.x,
+                            y: node.point.y + handle.y,
+                        });
+                        ShapePoint {
+                            x: transformed.x - point.x,
+                            y: transformed.y - point.y,
+                        }
+                    };
+                    goodtype_core::BezierNode {
+                        point,
+                        handle_in: node.handle_in.map(vector),
+                        handle_out: node.handle_out.map(vector),
+                    }
+                })
+                .collect(),
+            closed: false,
+        },
+        _ => return false,
+    };
+    shape_within(
+        0.0,
+        0.0,
+        &world,
+        (
+            page.width_pt,
+            page.height_pt,
+            style.stroke_width_pt * fields.scale / 2.0,
+        ),
+    ) && goodtype_typst::export::shape_cap_marks(path, style).all(|(points, radius)| {
+        let radius = radius * fields.scale;
+        points.into_iter().map(to_page).all(|point| {
+            (radius - 1e-9..=page.width_pt - radius + 1e-9).contains(&point.x)
+                && (radius - 1e-9..=page.height_pt - radius + 1e-9).contains(&point.y)
+        })
+    })
+}
+
+pub(super) fn check_path_reaction(
+    snapshot: &storage::NotebookSnapshot,
+    addon: &str,
+    reply: &Value,
+) -> Result<(), String> {
+    let ops = reply
+        .pointer("/batch/operations")
+        .and_then(Value::as_array)
+        .ok_or(INVALID)?;
+    for op in ops {
+        if let Some(replacement) = op.get("style") {
+            let style = serde_json::from_value(replacement.clone()).map_err(|_| INVALID)?;
+            let id = op["id"].as_str().ok_or(INVALID)?;
+            let Some(PageObject::Shape {
+                fields,
+                geometry,
+                style: old,
+            }) = snapshot
+                .page
+                .objects
+                .iter()
+                .find(|object| object.fields().id == id)
+            else {
+                return Err(FORBIDDEN.into());
+            };
+            if !fields
+                .addon_data
+                .as_ref()
+                .is_some_and(|entries| entries.contains_key(addon))
+                || !legacy_cap_conversion(geometry, old, &style)
+            {
+                return Err(FORBIDDEN.into());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The addon recognizes its historical wing signature. The host only permits filling absent caps.
+fn legacy_cap_conversion(geometry: &ShapeGeometry, old: &ShapeStyle, new: &ShapeStyle) -> bool {
+    let mut caps_only = old.clone();
+    caps_only.start_cap = new.start_cap;
+    caps_only.end_cap = new.end_cap;
+    matches!(geometry, ShapeGeometry::Spline { closed: false, .. })
+        && (old.start_cap.is_none() || old.start_cap == new.start_cap)
+        && (old.end_cap.is_none() || old.end_cap == new.end_cap)
+        && caps_only == *new
+}
+
 /// Build a complete candidate before publishing any changes. Scope is derived from
 /// the pre-invocation page, so a reply cannot grant itself access to another object.
 pub(super) fn apply_owned(
@@ -671,7 +909,7 @@ fn fresh_fields(x: f64, y: f64) -> Result<ObjectFields, String> {
     })
 }
 
-fn preview_item(object: PageObject) -> ProposalItem {
+pub(super) fn preview_item(object: PageObject) -> ProposalItem {
     ProposalItem {
         placement: json!({"x": object.fields().x, "y": object.fields().y}),
         object,

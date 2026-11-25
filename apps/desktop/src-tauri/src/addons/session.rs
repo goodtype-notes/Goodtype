@@ -17,7 +17,8 @@ const MAX_FRAME: usize = 4 * 1024 * 1024;
 /// Room for the JSON-RPC envelope around a captured scope.
 pub(super) const MAX_SCOPE: usize = MAX_FRAME - 1024;
 const STDERR_LIMIT: usize = 16 * 1024;
-const OFFER: [&str; 3] = ["progress", "cancel", "page-batch-v0"];
+const PATH_EDIT: &str = "path-edit-v0";
+const OFFER: [&str; 4] = ["progress", "cancel", "page-batch-v0", PATH_EDIT];
 const POLL: Duration = Duration::from_millis(20);
 /// Per-session scratch cap, checked while the process runs.
 const SCRATCH_LIMIT: u64 = 256 * 1024 * 1024;
@@ -776,6 +777,12 @@ impl Runtime {
                 }
             }
         };
+        if (manifest.path_edit() || addon.id == super::catalog::CONNECTORS.id)
+            && !worker.capabilities.contains(PATH_EDIT)
+        {
+            job.state.lock().unwrap().incompatible_session = Some(version);
+            return Err(Failure::NeedsUpdate);
+        }
         let reply = worker.call(method, params, Duration::from_secs(30), cancelled)?;
         if let Some(context) = context {
             *slot = Some((fingerprint, context.into(), worker));
@@ -828,6 +835,26 @@ fn request_params(
                 .iter()
                 .find(|entry| entry.id == command && entry.surface == other.surface())
                 .ok_or(Failure::Unavailable)?;
+            match &other {
+                Invocation::PathEdit(params) => {
+                    let edit = command.path_edit.as_ref().ok_or(Failure::Unavailable)?;
+                    if !manifest.has(Permission::OwnObjects) {
+                        return Err(Failure::Unavailable);
+                    }
+                    if let Some(value) = params["edit"].get("value")
+                        && !manifest
+                            .settings
+                            .iter()
+                            .any(|field| field.id() == edit.choice && field.accepts(value))
+                    {
+                        return Err(Failure::InvalidForm);
+                    }
+                }
+                Invocation::OwnObjects(_) if command.path_edit.is_some() => {
+                    return Err(Failure::Unavailable);
+                }
+                _ => {}
+            }
             ("command/invoke", other.params(command, settings)?)
         }
     })

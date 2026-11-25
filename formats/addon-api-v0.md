@@ -316,7 +316,7 @@ independently and retain at most 16 KiB locally for explicit diagnostics.
 
 | Method | Direction and payload |
 | --- | --- |
-| `initialize` | Host request. Params and result contain `apiVersion`, `capabilities` and `addon` (`id` and `version`). Both sides MUST match the API and verified identity. The child returns a unique subset of the host's capability offer. |
+| `initialize` | Host request. Params and result contain `apiVersion`, `capabilities` and `addon` (`id` and `version`). Both sides MUST match the API and verified identity. The child returns a unique subset of the host's capability offer (`progress`, `cancel`, `page-batch-v0`, `path-edit-v0`). |
 | `command/invoke` | Host request after initialization. Params contain `command`, `scope` and validated addon `settings` keyed by descriptor ID. The first result has `batch.operations`. Selection commands require `page-batch-v0`. |
 | `command/progress` | Child notification only with negotiated `progress`. Params contain the outstanding `id`, a catalog-defined `phase` and integer `completed` and `total` with `0 ≤ completed ≤ total` and `total > 0`. Host UI updates MUST be coalesced to at most four per second. |
 | `command/cancel` | Host notification with `params.id`, only with negotiated `cancel`. Cancellation precludes publication even if a result races it. The host waits at most 1 s for cooperative shutdown, then terminates the job and ends the session. |
@@ -603,3 +603,34 @@ one undo step.
 For local development, the debug Addons page accepts a catalog-known session
 addon folder containing its manifest and Windows executable. The same
 permission approval and AppContainer session apply to local installs.
+
+### Path edits (ADR 0046 amendment)
+
+A catalog-approved `own-object` command with `own-objects` may declare
+`"pathEdit":{"choice":"routing","snap":"ports"}`. The choice names a declared
+choice setting. The session MUST negotiate `path-edit-v0` before use. The
+minimum Connectors version is 0.2.0 and its session always requires the capability.
+
+On `command/invoke` the host sends `command`, device `settings`, the page ID
+and dimensions (`page.id`, `widthPt`, `heightPt`), and the selected source
+`object`. The source contains `id`, `type`, `x`, `y`, `rotation`,
+`scale`, `geometry`, `style`, and only the calling addon's existing
+`addonData` entry, keyed by addon ID when present. There is no notebook path or
+unrelated page data. `refs` contains scoped part snapshots (ID, type, transform,
+bounds, page-space ports and shape geometry when applicable), limited to the
+source's live references and the newly dropped target. `points` contains two
+ordered page-space points, each with `attach` (null or `{objectId,port}`).
+Only the edited end can have a supplied attachment. The addon resolves the
+unchanged end from the caller's entry and the snapshots. The `edit` is either
+`{kind:"choice",value}` or `{kind:"endpoint",end:"start"|"end"}`. A choice
+does not change device settings.
+
+Return exactly one `updateObject` in `batch.operations` with the captured ID,
+line or open-spline `geometry`, and non-null single-entry `addonData`.
+Refs must be a subset of the grant and include any new dropped target.
+Preserve the source transform, style, order and group membership. A recognized
+legacy conversion may supply the captured full style with missing caps filled
+in on an already-owned spline. Existing explicit caps are preserved.
+
+A displayed port drop commits directly in one undo step. Routing choices and
+free endpoint releases follow proposal review or the two direct-apply opt-ins.
