@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { pagePorts } from "./addonPorts";
+  import { addonPorts, nearbyPorts, type Port } from "./addonPorts";
   import type { Point } from "../geometry/coordinates";
   import { patternDashArray } from "../shape/geometry";
   import type { PageObject, ShapeStyle } from "../model";
@@ -10,9 +10,7 @@
     pointAt: (x: number, y: number) => Point | null; onApply: (points: AddonPoint[]) => void;
   } = $props();
 
-  type Port = Point & { attach: NonNullable<AddonPoint["attach"]> };
-  const ports = $derived(tool.snap !== "ports" ? [] : objects.flatMap((object) =>
-    pagePorts(object).map((point, port): Port => ({ ...point, attach: { objectId: object.id, port } }))));
+  const ports = $derived(tool.snap === "ports" ? addonPorts(objects) : []);
   let start = $state<AddonPoint | null>(null);
   let pointer = $state<AddonPoint | null>(null);
   let nearby = $state<Port[]>([]);
@@ -21,18 +19,9 @@
   function sample(event: PointerEvent) {
     const point = pointAt(event.clientX, event.clientY);
     if (!point) return null;
-    const distance = (p: Point) => Math.hypot(p.x - point.x, p.y - point.y) * zoom;
-    nearby = ports.filter((port) => distance(port) <= 32);
-    let match: Port | undefined;
-    let limit = 12;
-    for (const port of nearby) {
-      const offset = distance(port);
-      if (offset <= limit && (!match || offset < limit)) {
-        match = port;
-        limit = offset;
-      }
-    }
-    return match ?? { ...point, attach: null };
+    const result = nearbyPorts(point, ports, zoom);
+    nearby = result.nearby;
+    return result.snapped ?? { ...point, attach: null };
   }
 
   function down(event: PointerEvent) {

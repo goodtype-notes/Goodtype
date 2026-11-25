@@ -109,6 +109,7 @@
     onScaleImage,
     onSelectShape,
     onChangeShape,
+    shapeEndpointEdit,
     onEditShape,
     onShapesErased,
     onStrokeFinalized,
@@ -192,6 +193,7 @@
     onMoveImage?: (id: string, position: { x: number; y: number }) => void;
     onScaleImage?: (id: string, scale: number) => void;
     onSelectShape?: (id: string) => void;
+    shapeEndpointEdit?: import("svelte").ComponentProps<typeof ShapeObject>["endpointEdit"];
     onChangeShape?: (shape: ShapeView, commit?: ShapeEditCommit) => void;
     onEditShape?: (id: string, editing: boolean) => void;
     onShapesErased?: (replaced: ReadonlyMap<string, ShapeView[]>) => void;
@@ -314,6 +316,7 @@
         {zoom}
         endSnap={shapeEndSnap}
         snapShapes={displayedShapes}
+        endpointEdit={interactive && selectedShapeId === shape.id ? shapeEndpointEdit : undefined}
         {toPageDelta}
         onSelect={interactive ? () => onSelectShape?.(shape.id) : undefined}
         onChange={interactive ? (next, commit) => onChangeShape?.(next, commit) : undefined}

@@ -226,6 +226,7 @@ use serde_json::json;
 pub(super) enum Invocation {
     Selection(Value),
     OwnObjects(Vec<Value>),
+    PathEdit(Value),
     Reaction(Value),
     Tool {
         points: usize,
@@ -248,7 +249,9 @@ impl Invocation {
     pub fn surface(&self) -> Surface {
         match self {
             Self::Selection(_) => Surface::InkSelection,
-            Self::OwnObjects(_) | Self::Tool { .. } | Self::Reaction(_) => Surface::OwnObject,
+            Self::OwnObjects(_) | Self::PathEdit(_) | Self::Tool { .. } | Self::Reaction(_) => {
+                Surface::OwnObject
+            }
             Self::Form { surface, .. } => *surface,
             Self::Export { .. } => Surface::Export,
         }
@@ -257,6 +260,11 @@ impl Invocation {
     pub fn params(self, command: &Command, settings: Values) -> Result<Value, Failure> {
         let id = &command.id;
         match self {
+            Self::PathEdit(mut params) => {
+                params["command"] = json!(id);
+                params["settings"] = json!(settings);
+                Ok(params)
+            }
             Self::OwnObjects(objects) => {
                 Ok(json!({"command": id, "settings": settings, "objects": objects}))
             }

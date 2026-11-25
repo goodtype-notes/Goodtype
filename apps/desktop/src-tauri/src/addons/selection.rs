@@ -19,6 +19,15 @@ pub(crate) struct Name {
     de: String,
 }
 
+impl Name {
+    pub(super) fn of(addon: &Addon) -> Self {
+        Self {
+            en: addon.en.0.into(),
+            de: addon.de.0.into(),
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SelectionCommand {
@@ -408,6 +417,7 @@ pub(super) struct Pending {
     authorization: Authorization,
     direct: bool,
     correction: Option<Operation>,
+    replacement: bool,
 }
 
 #[derive(Default)]
@@ -509,6 +519,7 @@ pub(crate) fn invoke(
                 authorization: original,
                 direct,
                 correction,
+                replacement: false,
             },
         );
         Ok((review, direct))
@@ -624,6 +635,61 @@ pub(super) fn command_problem(code: i32) -> &'static str {
         -32003 => "addon-unsupported",
         _ => "addon-command-failed",
     }
+}
+
+pub(super) fn review_path(
+    app: &tauri::AppHandle,
+    (root, base): (PathBuf, ProposalBase),
+    candidate: NotebookSnapshot,
+    (object_id, kind): (&str, &'static str),
+    (addon, authorization, direct_at_start): (&'static Addon, Authorization, bool),
+) -> Result<(Review, bool), String> {
+    let object = candidate
+        .page
+        .objects
+        .iter()
+        .find(|object| object.fields().id == object_id)
+        .ok_or("addon-invalid-response")?;
+    let id = crate::helper::random_hex(16)?;
+    let review = Review {
+        id: id.clone(),
+        version: 1,
+        root: root.to_string_lossy().into_owned(),
+        page_id: base.page_id.clone(),
+        status: "pending",
+        addon: Name::of(addon),
+        items: vec![super::batch::preview_item(object.clone())],
+        anchor: Value::Null,
+        latex: None,
+        kind,
+    };
+    let proposals = app.state::<Proposals>();
+    let mut pending = proposals.pending.lock().unwrap();
+    if pending.len() >= MAX_PENDING {
+        return Err("addon-too-many-proposals".into());
+    }
+    let direct = direct_at_start && manager::direct_apply(app, addon.id);
+    pending.insert(
+        id,
+        Pending {
+            review: review.clone(),
+            capture: Capture {
+                root,
+                base,
+                geometry: candidate.page.geometry.clone(),
+                ids: vec![],
+                ink_hash: [0; 32],
+                scope: Value::Null,
+                anchor: Value::Null,
+            },
+            addon,
+            authorization,
+            direct,
+            correction: None,
+            replacement: true,
+        },
+    );
+    Ok((review, direct))
 }
 
 impl Proposals {
@@ -810,9 +876,49 @@ impl Proposals {
         {
             return Err(invalid("proposal_changed"));
         }
-        let Some(_guard) = authorize(p)? else {
-            return Ok(None);
+        let _guard = match authorize(p) {
+            Ok(Some(guard)) => guard,
+            Ok(None) => return Ok(None),
+            Err(error) => {
+                if p.replacement {
+                    pending.remove(id);
+                }
+                return Err(error);
+            }
         };
+        if p.replacement {
+            let p = pending.remove(id).expect("proposal held under lock");
+            if !history.observes(page_id) {
+                return Err(invalid("addon-unavailable"));
+            }
+            let mut candidate = storage::open_page(root, page_id)?;
+            if candidate.page.revision != p.capture.base.revision {
+                return Err(StorageError::ProposalStale(vec![
+                    storage::ChangedDependency::Page {
+                        change: storage::DependencyChange::Modified,
+                    },
+                ]));
+            }
+            let object = &p.review.items[0].object;
+            let current = candidate
+                .page
+                .objects
+                .iter_mut()
+                .find(|current| current.fields().id == object.fields().id)
+                .ok_or_else(|| invalid("proposal_changed"))?;
+            *current = object.clone();
+            storage::raise_schema_version(&mut candidate);
+            return storage::commit_notebook_with_precondition(
+                root,
+                history,
+                candidate,
+                Some(storage::ProposalPrecondition {
+                    base: p.capture.base,
+                    require_retained_history: true,
+                }),
+            )
+            .map(Some);
+        }
         let mut candidate = storage::open_page(root, page_id)?;
         let stale = StorageError::ProposalStale(vec![storage::ChangedDependency::Page {
             change: storage::DependencyChange::Modified,

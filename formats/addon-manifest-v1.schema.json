@@ -152,6 +152,8 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
+        "if": { "required": ["pathEdit"] },
+        "then": { "properties": { "surface": { "const": "own-object" } } },
         "required": [
           "id",
           "label",
@@ -173,6 +175,15 @@
               "export",
               "own-object"
             ]
+          },
+          "pathEdit": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["choice", "snap"],
+            "properties": {
+              "choice": { "$ref": "#/$defs/identifier" },
+              "snap": { "const": "ports" }
+            }
           },
           "form": {
             "type": "array",
