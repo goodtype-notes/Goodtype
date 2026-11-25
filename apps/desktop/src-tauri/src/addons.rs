@@ -828,10 +828,13 @@ fn install_with_policy(
         {
             return Err("the package contains reserved host metadata".into());
         }
-        // Recognition addons ship no importer manifest. Record every file from the pinned, verified ZIP locally.
+        // Only importers rely on a shipped importer manifest. For every other addon the host
+        // records each file of the pinned, hash-verified ZIP itself, and its record replaces
+        // any manifest the package ships (math and connectors do), so that file is not listed.
         if !dir.1.imports_notebooks() {
             let files = package_files(&staging)?
                 .into_iter()
+                .filter(|path| !path.eq_ignore_ascii_case(PACKAGE_MANIFEST))
                 .map(|path| {
                     let file = staging.join(&path);
                     Ok(PackageFile {
