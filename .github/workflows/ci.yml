@@ -42,6 +42,10 @@ jobs:
     if: github.event_name != 'push' || github.ref == 'refs/heads/dev'
     runs-on: windows-2025
     timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -49,13 +53,24 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
+      # A dev merge of an up-to-date PR reproduces the tree that PR's CI already verified; only
+      # the package, which carries the release version and commit, has to be built again.
+      - name: Check whether the merged pull request verified this tree
+        id: tested
+        if: github.event_name == 'push'
+        run: node scripts/release.mjs tested
+        env:
+          GH_TOKEN: ${{ github.token }}
       - run: pnpm install --frozen-lockfile
       # Reuse compiled Rust dependencies between runs; every runner otherwise rebuilds them all.
+      # A run without the test build would save a cache that lacks it, which later PRs restore.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-on-failure: true
+          save-if: ${{ steps.tested.outputs.reuse != 'true' }}
       - run: cargo xtask doctor
       - run: cargo xtask verify
+        if: steps.tested.outputs.reuse != 'true'
       - name: Build and test portable Windows package
         shell: pwsh
         env:

@@ -46,6 +46,12 @@ export function promotion(body) {
   return tag;
 }
 
+/** The one pull request into `base` whose merge produced `commit`, or null. */
+export function mergedPullRequest(prs, commit, base) {
+  const merged = prs.filter((pr) => pr.merged_at && pr.merge_commit_sha === commit && pr.base.ref === base);
+  return merged.length === 1 ? merged[0] : null;
+}
+
 export function checkCandidate(release, taggedCommit, expectedCommit) {
   assert.equal(release.isDraft, false, 'Tested candidate must be published.');
   assert.equal(release.isPrerelease, true, 'Tested candidate must be a pre-release.');
@@ -159,10 +165,8 @@ function checkDevCI(commit) {
 
 function promote() {
   const sourceCommit = checkPush('main');
-  const prs = pages(`commits/${sourceCommit}/pulls`)
-    .filter((pr) => pr.merged_at && pr.merge_commit_sha === sourceCommit && pr.base.ref === 'main');
-  assert.equal(prs.length, 1, 'Expected exactly one merged promotion PR for this main commit.');
-  const [pr] = prs;
+  const pr = mergedPullRequest(pages(`commits/${sourceCommit}/pulls`), sourceCommit, 'main');
+  assert.ok(pr, 'Expected exactly one merged promotion PR for this main commit.');
   checkPromotionSource(pr);
   const tag = promotion(pr.body ?? '');
   const commit = taggedCommit(tag);
@@ -177,6 +181,28 @@ function promote() {
   }
   checkDevCI(commit);
   gh('release', 'edit', tag, '--repo', process.env.GITHUB_REPOSITORY, '--prerelease=false', '--latest');
+}
+
+// Dev requires an up-to-date branch, so a merge normally reproduces the tree its pull request
+// already verified. Report whether that is proven: the source tree equals the merged PR head's
+// tree and CI passed for that head. Anything unproven, including a failed lookup, means retest.
+async function tested() {
+  let reuse = false;
+  try {
+    const sourceCommit = checkPush('dev');
+    const pr = mergedPullRequest(pages(`commits/${sourceCommit}/pulls`), sourceCommit, 'dev');
+    if (pr && git('rev-parse', 'HEAD^{tree}') === api(`git/commits/${pr.head.sha}`).tree.sha) {
+      const runs = JSON.parse(gh('run', 'list', '--repo', process.env.GITHUB_REPOSITORY, '--workflow', 'ci.yml',
+        '--commit', pr.head.sha, '--event', 'pull_request', '--status', 'success', '--json', 'databaseId'));
+      reuse = runs.length > 0;
+      console.log(reuse ? `#${pr.number} verified this tree at ${pr.head.sha}.` : `No passing CI run for #${pr.number}.`);
+    } else {
+      console.log('No merged pull request verified this exact tree.');
+    }
+  } catch (error) {
+    console.log(`Retesting: ${error.message}`);
+  }
+  if (process.env.GITHUB_OUTPUT) await writeFile(process.env.GITHUB_OUTPUT, `reuse=${reuse}\n`, { flag: 'a' });
 }
 
 async function publish(directory) {
@@ -229,7 +255,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     else if (command === 'policy') await policy();
     else if (command === 'publish') await publish(resolve(argument));
     else if (command === 'promote') promote();
-    else throw new Error('Usage: node scripts/release.mjs prepare local|dev | manifest | policy | publish DIRECTORY | promote');
+    else if (command === 'tested') await tested();
+    else throw new Error('Usage: node scripts/release.mjs prepare local|dev | manifest | policy | tested | publish DIRECTORY | promote');
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;
