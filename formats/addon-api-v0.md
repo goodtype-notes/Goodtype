@@ -680,6 +680,7 @@ unchanged. Shared manifest conformance inputs and expected outcomes live in
 After a committed change, the host partitions affected owned objects in page order into
 calls of at most 32 objects, capped at 16 chunks (512 objects) across all addons per committed change.
 An addon may receive several calls for the same captured page revision and referenced
-object snapshot. Each reply still has the 32-operation ceiling and may only modify its
+object snapshot. Each call sees only changed snapshots and deleted IDs referenced by its own
+objects (a referenced snapshot carries its ports); unknown dependencies disclose nothing. Each reply still has the 32-operation ceiling and may only modify its
 chunk's owned objects. All replies are validated before one history amendment is published;
 a failed chunk leaves the user's change intact. A late reaction is retried once on idle.

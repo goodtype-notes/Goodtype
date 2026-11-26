@@ -33,9 +33,9 @@ describe("bundled English and German interface", () => {
     const failure = notice("addons.reactionFailed", { addon: "Connectors", count: 1 });
     expect(renderMessage(failure)).toBe("Connectors could not update 1 object. Your change was kept.");
     setLanguage("de");
-    expect(renderMessage(failure)).toBe("Connectors konnte 1 Objekt nicht aktualisieren. Deine ?nderung wurde beibehalten.");
+    expect(renderMessage(failure)).toBe("Connectors konnte 1 Objekt nicht aktualisieren. Deine Änderung wurde beibehalten.");
     expect(renderMessage(notice("addons.reactionFailed", { addon: "Connectors", count: 12 })))
-      .toBe("Connectors konnte 12 Objekte nicht aktualisieren. Deine ?nderung wurde beibehalten.");
+      .toBe("Connectors konnte 12 Objekte nicht aktualisieren. Deine Änderung wurde beibehalten.");
   });
 
   it("ships matching, non-empty messages and interpolation placeholders", () => {

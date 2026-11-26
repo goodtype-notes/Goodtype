@@ -789,7 +789,11 @@ fn reactions(
         }
         if affected {
             ids.insert(fields.id.clone());
-            own.push(own_value(object, addon));
+            let mut value = own_value(object, addon);
+            // Retain deleted dependencies after canonical ref cleanup, for chunk scoping only.
+            value["_reactionRefs"] = json!(entry.refs);
+            value["_reactionDeletedRefs"] = json!(previous_entry.map(|entry| &entry.refs));
+            own.push(value);
         }
     }
     if own.is_empty() {
@@ -816,8 +820,51 @@ fn reaction_chunks(params: Value) -> Result<Vec<(Value, HashSet<String>)>, &'sta
     }
     own.chunks(REACTION_CHUNK_SIZE)
         .map(|objects| {
-            let mut chunk = params.clone();
-            chunk["own"] = json!(objects);
+            let dependencies: HashSet<_> = objects
+                .iter()
+                .filter_map(|object| object["_reactionRefs"].as_array())
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            let deleted_dependencies: HashSet<_> = objects
+                .iter()
+                .filter_map(|object| object["_reactionDeletedRefs"].as_array())
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            let changed: Vec<_> = params["changed"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|object| {
+                    object["id"]
+                        .as_str()
+                        .is_some_and(|id| dependencies.contains(id))
+                })
+                .collect();
+            let deleted: Vec<_> = params["deleted"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|id| {
+                    id.as_str()
+                        .is_some_and(|id| deleted_dependencies.contains(id))
+                })
+                .collect();
+            let own: Vec<_> = objects
+                .iter()
+                .cloned()
+                .map(|mut object| {
+                    object.as_object_mut().unwrap().remove("_reactionRefs");
+                    object
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("_reactionDeletedRefs");
+                    object
+                })
+                .collect();
+            let chunk =
+                json!({"page":params["page"], "own":own, "changed":changed, "deleted":deleted});
             let scope = objects
                 .iter()
                 .filter_map(|object| object["id"].as_str().map(str::to_owned))
@@ -1212,7 +1259,8 @@ mod tests {
         let mut combined = HashSet::new();
         for (chunk, ids) in chunks {
             assert_eq!(chunk["page"], params["page"]);
-            assert_eq!(chunk["changed"], params["changed"]);
+            assert_eq!(chunk["changed"][0]["id"], "left");
+            assert!(chunk["own"][0].get("_reactionRefs").is_none());
             assert!(ids.len() <= 32);
             assert!(combined.is_disjoint(&ids));
             combined.extend(ids);
@@ -1224,6 +1272,59 @@ mod tests {
             reaction_chunks(too_many).unwrap_err(),
             "addon-reaction-over-budget"
         );
+    }
+
+    #[test]
+    fn reaction_chunks_disclose_only_disjoint_dependencies() {
+        let mut before = fixture();
+        let connector = before.page.objects.pop().unwrap();
+        for index in 0..33 {
+            let mut object = connector.clone();
+            object.fields_mut().id = format!("connector-{index}");
+            let refs = if index < 32 {
+                vec!["left", "unrelated"]
+            } else {
+                vec!["right", "removed"]
+            };
+            object.fields_mut().addon_data = Some(
+                serde_json::from_value(json!({
+                    "connectors":{"refs":refs,"data":{}}
+                }))
+                .unwrap(),
+            );
+            before.page.objects.push(object);
+        }
+        let mut removed = before.page.objects[0].clone();
+        removed.fields_mut().id = "removed".into();
+        before.page.objects.push(removed);
+        let mut after = before.clone();
+        after
+            .page
+            .objects
+            .retain(|object| !["unrelated", "removed"].contains(&object.fields().id.as_str()));
+        addon_data::remove_refs(
+            &mut after.page.objects,
+            &HashSet::from(["unrelated", "removed"]),
+        );
+        after.page.objects[0].fields_mut().x += 10.0;
+        after.page.objects[1].fields_mut().x += 20.0;
+        let (params, _) = reactions(&before, &after, "connectors").unwrap();
+        let chunks = reaction_chunks(params).unwrap();
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].0["changed"][0]["id"], "left");
+        assert_eq!(chunks[1].0["changed"][0]["id"], "right");
+        assert_eq!(chunks[0].0["changed"].as_array().unwrap().len(), 1);
+        assert_eq!(chunks[1].0["changed"].as_array().unwrap().len(), 1);
+        assert_eq!(chunks[0].0["deleted"], json!(["unrelated"]));
+        assert_eq!(chunks[1].0["deleted"], json!(["removed"]));
+        let unknown = reaction_chunks(json!({
+            "page": {}, "own": [{"id":"unknown"}],
+            "changed":[{"id":"secret"}], "deleted":["secret"], "extra":"private"
+        }))
+        .unwrap();
+        assert_eq!(unknown[0].0["changed"], json!([]));
+        assert_eq!(unknown[0].0["deleted"], json!([]));
+        assert!(unknown[0].0.get("extra").is_none());
     }
 
     #[test]
@@ -1304,19 +1405,90 @@ mod tests {
 
     #[test]
     fn stale_reaction_retries_new_revision_once_then_reports_failure() {
-        assert_eq!(
-            reaction_gate(10, 11, false, false),
-            Some(("addon-stale-page", true))
-        );
-        assert_eq!(reaction_gate(11, 11, false, true), None);
-        assert_eq!(
-            reaction_gate(11, 12, false, true),
-            Some(("addon-stale-page", false))
-        );
-        assert_eq!(
-            reaction_gate(11, 11, true, true),
-            Some(("addon-timeout", false))
-        );
+        // Exercise the production fan-out and history functions against persisted revisions.
+        for stale_twice in [false, true] {
+            let temporary = tempfile::tempdir().unwrap();
+            let root = temporary.path().join("notebook");
+            let mut initial = fixture();
+            let connector = initial.page.objects.last().unwrap().clone();
+            for index in 0..32 {
+                let mut object = connector.clone();
+                object.fields_mut().id = format!("connector-{index}");
+                initial.page.objects.push(object);
+            }
+            for (index, object) in initial.page.objects.iter_mut().enumerate() {
+                object.fields_mut().reading_order = index as u32;
+            }
+            initial.blocks.retain(|file| file.path == "style.typ");
+            initial.assets.clear();
+            initial.page.ink_layers.clear();
+            initial.ink_layers.clear();
+            initial.page.reading_order = initial
+                .page
+                .objects
+                .iter()
+                .map(|object| object.fields().id.clone())
+                .collect();
+            initial.page.schema_version = 5;
+            initial.manifest.schema_version = 5;
+            storage::create_notebook(&root, &initial).unwrap();
+            let mut history = storage::NotebookHistory::default();
+            let before = storage::observe_page(&root, &initial.page.id, &mut history).unwrap();
+            let base_revision = before.page.revision;
+            let mut edit = before.clone();
+            edit.page.objects[0].fields_mut().x += 10.0;
+            let mut captured = storage::commit_notebook(&root, &mut history, edit)
+                .unwrap()
+                .snapshot;
+            let mut calls = 0;
+            for retry in [false, true] {
+                let (base, _) = history
+                    .amendment_base(captured.page.revision, base_revision)
+                    .unwrap();
+                let (params, _) = reactions(base, &captured, "connectors").unwrap();
+                let expected_x = captured.page.objects[0].fields().x;
+                let candidate = run_reaction_chunks(&root, &captured, "connectors", params, |params| {
+                    calls += 1;
+                    assert_eq!(params["changed"][0]["x"], expected_x);
+                    let operations: Vec<_> = params["own"].as_array().unwrap().iter()
+                        .map(|object| json!({"op":"updateObject","id":object["id"],"x":expected_x + 50.0})).collect();
+                    // An edit lands while the first chunk is in flight.
+                    if (!retry || stale_twice) && calls % 2 == 1 {
+                        let mut edit = storage::open_page(&root, &captured.page.id).unwrap();
+                        edit.page.objects[0].fields_mut().x += 5.0;
+                        storage::commit_notebook(&root, &mut history, edit).unwrap();
+                    }
+                    Ok(json!({"batch":{"operations":operations}}))
+                }).unwrap().unwrap();
+                let current = storage::open_page(&root, &captured.page.id).unwrap();
+                let gate =
+                    reaction_gate(candidate.page.revision, current.page.revision, false, retry);
+                if !retry || stale_twice {
+                    assert_eq!(gate, Some(("addon-stale-page", !retry)));
+                    assert!(
+                        current.page.objects[3..]
+                            .iter()
+                            .all(|object| object.fields().x == 70.0)
+                    );
+                    captured = current;
+                } else {
+                    assert_eq!(gate, None);
+                    let amended = storage::amend_notebook(&root, &mut history, candidate).unwrap();
+                    assert!(
+                        amended.snapshot.page.objects[3..]
+                            .iter()
+                            .all(|object| object.fields().x == expected_x + 50.0)
+                    );
+                    let undone = storage::undo_notebook(&root, &mut history).unwrap();
+                    assert!(
+                        undone.snapshot.page.objects[3..]
+                            .iter()
+                            .all(|object| object.fields().x == 70.0)
+                    );
+                }
+            }
+            assert_eq!(calls, 4);
+        }
     }
 
     #[test]

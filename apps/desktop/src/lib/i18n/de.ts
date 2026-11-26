@@ -44,8 +44,8 @@ export const de = {
     loadFailed: "Goodtype konnte das lokale Inhaltspaket nicht laden.",
   },
   addons: {
-    reactionFailed_one: "{{addon}} konnte {{count}} Objekt nicht aktualisieren. Deine ?nderung wurde beibehalten.",
-    reactionFailed_other: "{{addon}} konnte {{count}} Objekte nicht aktualisieren. Deine ?nderung wurde beibehalten.",
+    reactionFailed_one: "{{addon}} konnte {{count}} Objekt nicht aktualisieren. Deine Änderung wurde beibehalten.",
+    reactionFailed_other: "{{addon}} konnte {{count}} Objekte nicht aktualisieren. Deine Änderung wurde beibehalten.",
     pathEndpoint: "{{addon}} kann diesen Endpunkt verbinden",
     pathChoice: "{{addon}} · {{choice}}",
     pathReview: "Änderung von {{addon}} prüfen",
