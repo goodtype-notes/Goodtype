@@ -11,6 +11,7 @@
     moveShapeAnchor,
     removeSplineNode,
     resizeShape,
+    ROTATE_HANDLE_SCREEN_PX,
     rotateShape,
     rotationHandlePoint,
     selectionAnchors,
@@ -107,7 +108,7 @@
   const label = $derived($t("workspace.readingPosition", { "value1": describeShape(preview.geometry, $t), "value2": preview.readingOrder + 1 }));
   const controlScale = $derived(1 / Math.max(zoom * preview.scale, 0.05));
   const spline = $derived(preview.geometry.kind === "spline" ? preview.geometry : null);
-  const rotationHandle = $derived(rotationHandlePoint(preview.geometry, 28 * controlScale, preview.style));
+  const rotationHandle = $derived(rotationHandlePoint(preview.geometry, ROTATE_HANDLE_SCREEN_PX * controlScale, preview.style));
   /// A line is defined by its two ends, so selecting one goes straight to those handles: dragging
   /// either end fixes a slightly wrong angle or length in one move. The box, rotate and resize
   /// controls only restate what the ends already do.
