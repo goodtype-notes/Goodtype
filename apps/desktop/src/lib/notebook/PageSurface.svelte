@@ -110,6 +110,7 @@
     onScaleImage,
     onSelectShape,
     onChangeShape,
+    onShapeGhost,
     shapeEndpointEdit,
     onEditShape,
     onShapesErased,
@@ -198,6 +199,7 @@
     onSelectShape?: (id: string) => void;
     shapeEndpointEdit?: import("svelte").ComponentProps<typeof ShapeObject>["endpointEdit"];
     onChangeShape?: (shape: ShapeView, commit?: ShapeEditCommit) => void;
+    onShapeGhost?: (phase: "start" | "move" | "end", shape: ShapeView) => void;
     onEditShape?: (id: string, editing: boolean) => void;
     onShapesErased?: (replaced: ReadonlyMap<string, ShapeView[]>) => void;
     onStrokeFinalized?: (stroke: Stroke) => void;
@@ -326,6 +328,7 @@
         {moveSnap}
         onSelect={interactive ? () => onSelectShape?.(shape.id) : undefined}
         onChange={interactive ? (next, commit) => onChangeShape?.(next, commit) : undefined}
+        onGhost={interactive ? onShapeGhost : undefined}
         onEditingChange={interactive ? (editing) => onEditShape?.(shape.id, editing) : undefined}
       />
     </div>

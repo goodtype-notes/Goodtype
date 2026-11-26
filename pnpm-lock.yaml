@@ -25,6 +25,9 @@ importers:
       '@codemirror/lint':
         specifier: ^6.9.7
         version: 6.9.7
+      '@extism/extism':
+        specifier: 1.0.3
+        version: 1.0.3
       '@lezer/highlight':
         specifier: 1.2.3
         version: 1.2.3
@@ -115,6 +118,9 @@ packages:
 
   '@emnapi/wasi-threads@1.2.2':
     resolution: {integrity: sha512-c95qOXkHdydNKhscBTebqEC1CVAZpyqOfVfBzQ1qgzyl3gfeldUjIggDbIZgDKsHLgnsM+igH7TJ/eAasaVuMA==}
+
+  '@extism/extism@1.0.3':
+    resolution: {integrity: sha512-kHwJwNP19c2q6tN2VYez/Bvv/mvx5J+UEyVbHJKAQ8+l9Z+MJ7TTjBw/GwDQcieXlLtPDNphugeH8ChKKfVtQg==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -967,6 +973,8 @@ snapshots:
     dependencies:
       tslib: 2.8.1
     optional: true
+
+  '@extism/extism@1.0.3': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:

@@ -1,4 +1,6 @@
 import { materialItems } from "../helper/crop";
+import { invoke } from "@tauri-apps/api/core";
+import { previewChannel, type Mark } from "./wasmPreview";
 import type { createNavigation } from "./viewportNavigation.svelte";
 
 import { translate, notice, type UiText } from "../i18n";
@@ -268,6 +270,15 @@ export function createSelection(env: SelectionEnvironment) {
   let snapPending = false;
 
   let mixedGesture: { current: () => boolean; objects: Set<string>; strokes: string[] } | null = null;
+  let wasmMarks = $state.raw<Mark[]>([]);
+  let wasmChannel: ReturnType<typeof previewChannel> | null = null;
+  let wasmGesture = 0;
+  let wasmCurrent: (() => boolean) | null = null;
+  let wasmPending: ShapeView[] = [];
+  $effect(() => {
+    void [env.root, env.activePageId, env.activeSnapshot?.page.revision];
+    return () => endWasmPreview();
+  });
   let transformPreview = $state.raw<{
     objects: ReadonlySet<string>; ink: InkPreview; rotation: number;
   } | null>(null);
@@ -299,6 +310,24 @@ export function createSelection(env: SelectionEnvironment) {
     mixedGesture = { current, objects: new Set(lassoObjectIds), strokes: [...selectedStrokeIds] };
     transformPreview = null;
     snapPending = true;
+    startWasmPreview(current);
+  }
+
+  function startWasmPreview(current: () => boolean) {
+    wasmChannel?.stop(); wasmChannel = null; wasmMarks = [];
+    wasmCurrent = current; wasmPending = [];
+    const gesture = ++wasmGesture;
+    const digest = import.meta.env.VITE_WASM_SPIKE_SHA256;
+    if (import.meta.env.DEV && typeof digest === "string" && /^[a-f0-9]{64}$/.test(digest)) {
+      void Promise.all([invoke<number[]>("addon_wasm_bytes", { addonId: "connectors", digest }), import("./wasmPreviewWorker")]).then(([bytes, { createPreviewWorker }]) => {
+        if (wasmGesture !== gesture || !wasmCurrent?.()) return;
+        const worker = createPreviewWorker();
+        wasmChannel = previewChannel(worker, marks => { if (wasmCurrent?.()) wasmMarks = marks; }, () => { wasmMarks = []; });
+        const buffer = new Uint8Array(bytes).buffer;
+        worker.postMessage({ kind: "init", bytes: buffer, digest }, [buffer]);
+        submitWasmPreview(wasmPending);
+      }).catch(() => { wasmMarks = []; });
+    }
   }
 
   /**
@@ -316,9 +345,34 @@ export function createSelection(env: SelectionEnvironment) {
       delta = snapper.adjust(delta, pointer.altKey);
     }
     transformPreview = { objects: mixedGesture.objects, ink: { ids: mixedGesture.strokes, delta, scale, anchor }, rotation };
+    submitWasmPreview(previewShapes.filter(shape => mixedGesture!.objects.has(shape.id)));
+  }
+
+  function submitWasmPreview(shapes: ShapeView[]) {
+    wasmPending = shapes;
+    const page = env.activeSnapshot?.page;
+    if (wasmChannel && page && wasmCurrent?.()) {
+      const changed = shapes.flatMap(shape => {
+        const bounds = combinedBounds([shapeLassoItem(shape)], null);
+        if (!bounds) return [];
+        const canonical = page.objects.find(object => object.id === shape.id);
+        if (!canonical || canonical.type !== "shape") return [];
+        return [{ id: shape.id, bounds: { x: bounds.left, y: bounds.top, width: bounds.right - bounds.left, height: bounds.bottom - bounds.top },
+          ports: pagePorts({ ...canonical, ...shape }) }];
+      });
+      if (previewGroup && mixedGesture && previewGroup.childIds.every(id => mixedGesture!.objects.has(id))) {
+        const bounds = combinedBounds(shapes.map(shapeLassoItem), null);
+        if (bounds) changed.push({ id: previewGroup.id, bounds: { x: bounds.left, y: bounds.top, width: bounds.right - bounds.left, height: bounds.bottom - bounds.top }, ports: pagePorts(previewGroup) });
+      }
+      const ids = new Set(changed.map(object => object.id));
+      const own = page.objects.filter(object => object.addonData?.connectors?.refs.some(id => ids.has(id)));
+      if (own.length) wasmChannel.submit({ gestureId: String(wasmGesture), revision: page.revision, kind: "changed", ports: [], settings: {},
+        local: { page: { widthPt: page.geometry.widthPt, heightPt: page.geometry.heightPt }, changed, own, deleted: [] } });
+    }
   }
 
   function endMixedTransform(cancelled: boolean, debounce = false) {
+    endWasmPreview();
     snapPending = false;
     snapper.end();
     const gesture = mixedGesture;
@@ -341,6 +395,16 @@ export function createSelection(env: SelectionEnvironment) {
     if (preview.ink.ids.length) env.strokes = finishInkPreview(env.strokes, preview.ink);
     if (debounce) env.scheduleInkCommit(notice("workspace.movedSelection"));
     else env.queueCommit(notice("workspace.transformedSelection"));
+  }
+
+  function endWasmPreview() {
+    ++wasmGesture; wasmChannel?.stop(); wasmChannel = null; wasmMarks = []; wasmCurrent = null; wasmPending = [];
+  }
+
+  function previewShapeGhost(phase: "start" | "move" | "end", shape: ShapeView) {
+    if (phase === "start") startWasmPreview(env.editContext().current);
+    if (phase === "end") endWasmPreview();
+    else submitWasmPreview([shape]);
   }
 
   let directObjectInput = $state(false);
@@ -1293,6 +1357,7 @@ export function createSelection(env: SelectionEnvironment) {
     return "png";
   }
   function dispose() {
+    endWasmPreview();
     if (selectionToolbarFrame) cancelAnimationFrame(selectionToolbarFrame);
     selectionToolbarFrame = undefined;
   }
@@ -1361,6 +1426,8 @@ export function createSelection(env: SelectionEnvironment) {
     set lassoObjectIds(value: typeof lassoObjectIds) { lassoObjectIds = value; },
     get mixedStrokePreview() { return mixedStrokePreview; },
     get previewShapes() { return previewShapes; },
+    get wasmMarks() { return wasmMarks; },
+    previewShapeGhost,
     get previewImages() { return previewImages; },
     get previewBlocks() { return previewBlocks; },
     get selectionReturnTo() { return selectionReturnTo; },

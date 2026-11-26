@@ -37,6 +37,8 @@ pub(crate) mod registry;
 pub(crate) mod selection;
 pub(crate) mod session;
 pub(crate) mod update;
+#[cfg(feature = "wasm-spike")]
+pub(crate) mod wasm;
 
 use catalog::CATALOG;
 use import::ImportResult;

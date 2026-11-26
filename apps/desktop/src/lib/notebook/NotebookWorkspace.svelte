@@ -1,4 +1,5 @@
 <script lang="ts">
+  import WasmGhost from "./WasmGhost.svelte";
   import { addonPorts } from "./addonPorts";
   import { cancelAddonCommand, dismissAddonProposal, type AddonReview, type PathEdit } from "../ipc/addons";
   import { refreshPageRaster } from "./refreshPageRaster";
@@ -2993,6 +2994,7 @@
                     onMoveImage={(id, position) => session.changeImage(id, position)}
                     onScaleImage={(id, scale) => session.changeImage(id, { scale })}
                     onSelectShape={selection.selectShape}
+                    onShapeGhost={active ? selection.previewShapeGhost : undefined}
                     onChangeShape={active ? (shape, commit) => {
                       const group = selection.shapeGroupFor(shape.id);
                       if (!group || group.id === selection.enteredGroup?.id) session.changeShape(shape, commit);
@@ -3046,6 +3048,9 @@
                   {#if active && (region || (aiPanelOpen && codexSelection?.share.root === session.root && codexSelection.share.pageId === session.activePageId && !summaryDraft && !editorEntry))}
                     <HelperCrop crop={aiPanelOpen && codexSelection ? codexSelection.share.cropPt : region!} page={session.activeGeometry} {zoom} editable={aiPanelOpen}
                       onCommit={crop => { if (codexSelection) codexSelection = {...codexSelection, share: {...codexSelection.share, cropPt:crop}}; if(region) region=crop; cropVersion++; }} />
+                  {/if}
+                  {#if active && selection.wasmMarks.length}
+                    <WasmGhost marks={selection.wasmMarks} />
                   {/if}
                   {#if active && selection.mixedSelectionBounds}
                     <MixedSelection bounds={selection.mixedSelectionBounds} {zoom}
