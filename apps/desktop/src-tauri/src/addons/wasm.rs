@@ -138,10 +138,9 @@ pub fn validate(bytes: &[u8], digest: &str) -> Result<(), String> {
 type Cache = Mutex<HashMap<String, Arc<extism::CompiledPlugin>>>;
 static CACHE: OnceLock<Cache> = OnceLock::new();
 
+// Release builds have no sideload path at all.
+#[cfg(debug_assertions)]
 pub fn sideload() -> Result<(Vec<u8>, String), String> {
-    if !cfg!(debug_assertions) {
-        return Err("sideload-only".into());
-    }
     let path = std::env::var_os("GOODTYPE_WASM_MODULE").ok_or("no sideload")?;
     let digest = std::env::var("GOODTYPE_WASM_SHA256").map_err(|_| "no pinned digest")?;
     let bytes = crate::store::read_bounded(std::path::Path::new(&path), MODULE_LIMIT)?;

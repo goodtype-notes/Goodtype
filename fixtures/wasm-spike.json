@@ -1,6 +1,6 @@
 {
-  "digest": "970e8f619956017978d502ebea4054b287547a82abf4c149ae967b36fc93463b",
-  "moduleBytes": 403452,
+  "digest": "c1092a124f94fd5c71af2a6085d455d4ba8f62457cf565739c242f1ac35349df",
+  "moduleBytes": 403606,
   "fixtures": [
     {
       "name": "snapping",
@@ -1490,15 +1490,15 @@
       }
     }
   ],
-  "jsColdMs": 3.4607000000000028,
-  "workerColdMs": 78.53279999999995,
+  "jsColdMs": 1.4594000000000023,
+  "workerColdMs": 39.55430000000001,
   "guestMemoryBytes": 1179648,
-  "jsProcessRssDeltaBytes": 3141632,
+  "jsProcessRssDeltaBytes": 2846720,
   "worker": {
     "samples": 600,
     "hz": 60,
-    "p50": 1.0807000000004336,
-    "p95": 30.297099999999773,
-    "p99": 41.49380000000019
+    "p50": 0.7733000000007451,
+    "p95": 1.12460000000101,
+    "p99": 1.3134999999983847
   }
 }

@@ -1,3 +1,4 @@
+// Args: module.wasm native.exe output.json goodtype-addon.json.
 // Run after building the sideload module and the unchanged native Connectors executable.
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -8,7 +9,9 @@ import { once } from 'node:events';
 import { createPlugin } from '@extism/extism';
 import { readMarks } from '../src/lib/notebook/wasmPreview.ts';
 
-const [modulePath, nativePath, outputPath] = process.argv.slice(2);
+const [modulePath, nativePath, outputPath, manifestPath] = process.argv.slice(2);
+// The native session only accepts its own manifest version.
+const addonVersion = JSON.parse(fs.readFileSync(manifestPath, 'utf8')).version;
 const bytes = fs.readFileSync(modulePath);
 const digest = crypto.createHash('sha256').update(bytes).digest('hex');
 const initialMemory = process.memoryUsage();
@@ -27,7 +30,7 @@ const create = { tool: 'connect', settings, page, style: { strokeColor: '#182c39
 let nativeReply;
 function native(method, params) {
   const initialize = { jsonrpc: '2.0', id: '1', method: 'initialize', params: {
-    apiVersion: 'goodtype-api 0.1', capabilities: ['page-batch-v0', 'path-edit-v0'], addon: { id: 'connectors', version: '0.2.0' },
+    apiVersion: 'goodtype-api 0.1', capabilities: ['page-batch-v0', 'path-edit-v0'], addon: { id: 'connectors', version: addonVersion },
   } };
   const request = { jsonrpc: '2.0', id: '2', method, params };
   const lines = execFileSync(nativePath, ['--session'], { input: `${JSON.stringify(initialize)}\n${JSON.stringify(request)}\n`, encoding: 'utf8' }).trim().split('\n');
