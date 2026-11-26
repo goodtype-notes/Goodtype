@@ -4,6 +4,7 @@ import { rotatedVector } from "../geometry/coordinates";
 import type { Bounds } from "../ink/selection";
 import { polylineInLasso } from "../ink/selection";
 import { shapeCaps, splinePolyline } from "../shape/geometry";
+import { ROTATE_HANDLE_SCREEN_PX } from "../shape/edit";
 import { toPagePoint } from "../shape/hit";
 import type { ShapeView } from "./pageView";
 
@@ -86,4 +87,44 @@ export function combinedBounds(items: LassoItem[], ink: Bounds | null): Bounds |
 
 export function transformSelectionPoint(point: Point, delta: Point, scale: number, anchor: Point): Point {
   return { x: anchor.x + (point.x - anchor.x) * scale + delta.x, y: anchor.y + (point.y - anchor.y) * scale + delta.y };
+}
+
+export type SelectionDragKind = "move" | "scale" | "rotate";
+const MIN_SELECTION_SCALE = 0.05;
+
+/**
+ * Where the scale and rotate handles of a selection box sit on the page: the scale handle on the
+ * box's bottom-right corner, the rotate handle a fixed screen distance above its top edge — the
+ * same place an ordinary shape puts them.
+ */
+export function selectionHandles(bounds: Bounds, zoom: number): { scale: Point; rotate: Point } {
+  return {
+    scale: { x: bounds.right, y: bounds.bottom },
+    rotate: { x: (bounds.left + bounds.right) / 2, y: bounds.top - ROTATE_HANDLE_SCREEN_PX / zoom },
+  };
+}
+
+/**
+ * The transform a handle drag asks for, as the delta, uniform scale, anchor and rotation that
+ * `transformSelectionPoint` applies to every selected object. `delta` is the pointer movement in
+ * page points since the grab.
+ *
+ * A move follows the pointer exactly. A scale holds the top-left corner and carries the
+ * bottom-right handle to the pointer's projection on the box diagonal. A rotate turns the
+ * selection about its centre to the pointer's angle from the grabbed rotate handle.
+ */
+export function selectionDragTransform(kind: SelectionDragKind, bounds: Bounds, delta: Point, zoom: number): {
+  delta: Point; scale: number; anchor: Point; rotation: number;
+} {
+  const width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
+  if (kind === "rotate") {
+    const arm = height / 2 + ROTATE_HANDLE_SCREEN_PX / zoom;
+    return { delta: { x: 0, y: 0 }, scale: 1, rotation: Math.atan2(delta.x, arm - delta.y) * 180 / Math.PI,
+      anchor: { x: (bounds.left + bounds.right) / 2, y: (bounds.top + bounds.bottom) / 2 } };
+  }
+  const anchor = { x: bounds.left, y: bounds.top };
+  if (kind === "move") return { delta, scale: 1, anchor, rotation: 0 };
+  const diagonal = width * width + height * height;
+  const scale = diagonal > 0 ? Math.max(MIN_SELECTION_SCALE, 1 + (delta.x * width + delta.y * height) / diagonal) : 1;
+  return { delta: { x: 0, y: 0 }, scale, anchor, rotation: 0 };
 }

@@ -150,6 +150,8 @@ export type AppSettings = {
   shapeConstrain: boolean;
   /** Line ends and rectangle corners meet nearby ends and corners; Alt places freely. */
   shapeEndSnap: boolean;
+  /** Moved objects meet other objects' edges, centres and ports and show guides; Alt moves freely. */
+  snapToObjects: boolean;
   drawAndHoldShapes: boolean;
   heldLineMinimumPt: number;
   /** Where the undo and redo buttons sit; `auto` keeps them clear of the palette on their own. */
@@ -225,6 +227,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   shapePatternSpacing: 1,
   shapeConstrain: false,
   shapeEndSnap: true,
+  snapToObjects: true,
   drawAndHoldShapes: true,
   heldLineMinimumPt: 6,
   historyCorner: "auto",

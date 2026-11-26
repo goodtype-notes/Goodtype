@@ -15,6 +15,23 @@ pnpm tauri dev
 
 Run `cargo xtask verify` before submitting a change. It checks formatting, Clippy, Rust and frontend tests, release tests, types and the production frontend build.
 
+## Run the W1 Wasm spike
+
+The spike is debug-only and requires a locally built, validated Connectors Wasm module.
+Install and enable Connectors first. From the repository root in PowerShell:
+
+```powershell
+$env:GOODTYPE_WASM_MODULE = (Resolve-Path "<connectors>/target/wasm32-unknown-unknown/release/goodtype_connectors.wasm").Path
+$env:GOODTYPE_WASM_SHA256 = (Get-FileHash $env:GOODTYPE_WASM_MODULE -Algorithm SHA256).Hash.ToLowerInvariant()
+$env:VITE_WASM_SPIKE_SHA256 = $env:GOODTYPE_WASM_SHA256
+pnpm tauri dev --features wasm-spike --config src-tauri/tauri.wasm-spike.conf.json
+```
+
+This override starts Vite on port **1435** and enables Wasm compilation and local Workers
+only for that run. Default builds retain the normal CSP and omit the Extism preview Worker
+from production assets. The module has no WASI, file or network capability; failure clears
+the ephemeral marks and keeps the host ghost. Commit still uses the native addon session.
+
 ## Package the app
 
 Run `pnpm tauri build` for the executable. For the portable folder and ZIP, run the packaging script from the repository root.

@@ -238,24 +238,69 @@ mod tests {
     }
     #[test]
     fn rejects_bad_digest_and_size() {
-        assert!(validate(b"bad", "bad").is_err());
-        assert!(validate(&vec![0; MODULE_LIMIT + 1], "bad").is_err());
+        let bytes = guest("i32.const 0");
+        assert_eq!(
+            validate(&bytes, "bad").unwrap_err(),
+            "module size or digest"
+        );
+        // A valid ABI plus an oversized custom section: size is the only violation.
+        let mut large = bytes.clone();
+        large.push(0); // custom section
+        let mut length = MODULE_LIMIT + 1; // empty name plus padding
+        loop {
+            let byte = (length & 0x7f) as u8;
+            length >>= 7;
+            large.push(byte | if length > 0 { 0x80 } else { 0 });
+            if length == 0 {
+                break;
+            }
+        }
+        large.push(0); // empty custom-section name
+        large.resize(large.len() + MODULE_LIMIT, 0);
+        assert_eq!(
+            validate(&large, &hash(&large)).unwrap_err(),
+            "module size or digest"
+        );
     }
 
     #[test]
     fn rejects_effects_memory_tables_and_start() {
-        for text in [
-            "(module (import \"wasi_snapshot_preview1\" \"fd_write\" (func)))",
-            "(module (import \"extism:host/env\" \"config_get\" (func)))",
-            "(module (memory 1 129))",
-            "(module (memory 1))",
-            "(module (table 1 funcref))",
-            "(module (table 1 1025 funcref))",
-            "(module (func $start) (start $start))",
+        let abi = "(func (export \"preview\") (result i32) i32.const 0) (func (export \"commit\") (result i32) i32.const 0)";
+        for (property, memory, reason) in [
+            (
+                "(import \"wasi_snapshot_preview1\" \"fd_write\" (func))",
+                "(memory 1 128)",
+                "denied import",
+            ),
+            (
+                "(import \"extism:host/env\" \"config_get\" (func))",
+                "(memory 1 128)",
+                "denied import",
+            ),
+            ("", "(memory 1 129)", "memory ceiling"),
+            ("", "(memory 1)", "memory ceiling"),
+            ("(table 1 funcref)", "(memory 1 128)", "table ceiling"),
+            ("(table 1 1025 funcref)", "(memory 1 128)", "table ceiling"),
+            (
+                "(table 1 1 funcref) (table 1 1 funcref)",
+                "(memory 1 128)",
+                "table ceiling",
+            ),
+            (
+                "(func $start) (start $start)",
+                "(memory 1 128)",
+                "start section",
+            ),
         ] {
-            let bytes = wat::parse_str(text).unwrap();
-            assert!(validate(&bytes, &hash(&bytes)).is_err(), "{text}");
+            let bytes = wat::parse_str(format!("(module {property} {memory} {abi})")).unwrap();
+            assert_eq!(
+                validate(&bytes, &hash(&bytes)).unwrap_err(),
+                reason,
+                "{property} {memory}"
+            );
         }
+        let bytes = guest("i32.const 0");
+        validate(&bytes, &hash(&bytes)).unwrap();
     }
 
     #[test]

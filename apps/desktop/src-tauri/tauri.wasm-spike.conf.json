@@ -1,0 +1,11 @@
+{
+  "build": {
+    "beforeDevCommand": "pnpm dev --port 1435",
+    "devUrl": "http://localhost:1435"
+  },
+  "app": {
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob:"
+    }
+  }
+}
