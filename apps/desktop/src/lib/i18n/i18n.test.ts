@@ -29,6 +29,15 @@ describe("bundled English and German interface", () => {
       expect(translate("aiEntry.lines", { count: 3, from: 3, to: 5 })).toBe(range);
     }
   });
+  it("localizes retained addon reaction failures with object plurals", () => {
+    const failure = notice("addons.reactionFailed", { addon: "Connectors", count: 1 });
+    expect(renderMessage(failure)).toBe("Connectors could not update 1 object. Your change was kept.");
+    setLanguage("de");
+    expect(renderMessage(failure)).toBe("Connectors konnte 1 Objekt nicht aktualisieren. Deine ?nderung wurde beibehalten.");
+    expect(renderMessage(notice("addons.reactionFailed", { addon: "Connectors", count: 12 })))
+      .toBe("Connectors konnte 12 Objekte nicht aktualisieren. Deine ?nderung wurde beibehalten.");
+  });
+
   it("ships matching, non-empty messages and interpolation placeholders", () => {
     const english = messages(en), german = messages(de);
     expect(Object.keys(german).sort()).toEqual(Object.keys(english).sort());

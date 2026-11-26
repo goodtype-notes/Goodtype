@@ -210,9 +210,9 @@ export const addonObjectAction = (root: string, pageId: string, revision: number
     "addon_object_action", { request: { root, pageId, revision, addonId, action, requestId } });
 
 export const prepareAddonReactions = (root: string, pageId: string, revision: number, baseRevision: number, retry: boolean) =>
-  invoke<{ token: string | null; retry: boolean; failed: AddonName | null }>("addon_react", { root, pageId, revision, baseRevision, retry });
+  invoke<{ token: string | null; retry: boolean; failed: AddonName | null; owner: AddonName | null; count: number }>("addon_react", { root, pageId, revision, baseRevision, retry });
 export const applyAddonReaction = (token: string) =>
-  invoke<[import("./types").HistoryResult | null, boolean]>("addon_apply_reaction", { token });
+  invoke<[import("./types").HistoryResult | null, boolean, AddonName | null, number]>("addon_apply_reaction", { token });
 
 export type AddonContribution = {
   addonId: string;
