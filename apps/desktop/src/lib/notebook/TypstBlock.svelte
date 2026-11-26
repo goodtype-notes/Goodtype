@@ -13,6 +13,7 @@
   import type { CachedTypst } from "../editor/typstCache";
   import { keepOnPage } from "../geometry/placement";
   import { rotatedVector } from "../geometry/coordinates";
+  import type { ObjectMoveSnap } from "../geometry/alignSnap";
   import type { TypstTransform } from "./pageView";
   import { MIN_TYPST_WIDTH_PT, scaleTypstCorner } from "./typstSizing";
 
@@ -42,6 +43,7 @@
     root = null,
     selected = false,
     toPageDelta,
+    moveSnap,
     pageWidthPt,
     pageHeightPt,
     onSelect,
@@ -74,6 +76,8 @@
     root?: string | null;
     selected?: boolean;
     toPageDelta: (screenDx: number, screenDy: number) => { x: number; y: number };
+    /** Pulls a dragged block onto other objects' edges, centres and ports; Alt bypasses it. */
+    moveSnap?: ObjectMoveSnap;
     /** The sheet this block has to stay reachable on. */
     pageWidthPt: number;
     pageHeightPt: number;
@@ -242,6 +246,7 @@
       start: { x, y, layoutWidthPt, scale, rotation },
       heightPt: renderedHeightPt,
     };
+    if (kind === "move") moveSnap?.begin([id]);
     event.preventDefault();
   }
 
@@ -253,10 +258,11 @@
     );
 
     if (gesture.kind === "move") {
+      const moved = moveSnap ? moveSnap.adjust(delta, event.altKey) : delta;
       // Clamped while dragging rather than on drop, so the limit is something you feel rather
       // than something that snaps the block back after you let go.
       const held = keepOnPage(
-        { x: gesture.start.x + delta.x, y: gesture.start.y + delta.y },
+        { x: gesture.start.x + moved.x, y: gesture.start.y + moved.y },
         { widthPt: layoutWidthPt * scale, heightPt: renderedHeightPt * scale },
         { widthPt: pageWidthPt, heightPt: pageHeightPt },
         undefined, rotation,
@@ -277,6 +283,7 @@
   function finishGesture(event: PointerEvent) {
     if (!gesture || event.pointerId !== gesture.pointerId) return;
     if (event.type === "pointerup") moveGesture(event);
+    moveSnap?.end();
     const completed = gesture;
     if (event.type !== "pointerup") {
       ({ x, y, layoutWidthPt, scale } = completed.start);

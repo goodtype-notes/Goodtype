@@ -73,6 +73,7 @@
   import StretchHandles from "./StretchHandles.svelte";
   import type { StretchPreview } from "./stretch";
   import MixedSelection from "./MixedSelection.svelte";
+  import SnapGuides from "./SnapGuides.svelte";
   import { DEFAULT_LASSO_TARGETS } from "./lasso";
   import { addonPaletteId, type PaletteCommand, type PaletteDock } from "./palette";
   import { newInkZIndex } from "./objectOrder";
@@ -1140,7 +1141,7 @@
     if (!groupPointer.moved) return;
     selection.previewMixedTransform(viewportToPage({ x: dx, y: dy }, {
       pageOriginX: 0, pageOriginY: 0, zoom,
-    }), 1, { x: 0, y: 0 });
+    }), 1, { x: 0, y: 0 }, 0, { altKey: event.altKey });
   }
 
   function surroundPointerDown(event: PointerEvent) {
@@ -2957,6 +2958,7 @@
                     selectedImageId={active ? selection.selectedImageId : null}
                     selectedShapeId={active ? selection.selectedShapeId : null}
                     shapesGrabbable={tool !== "eraser"}
+                    moveSnap={active ? selection.moveSnap : undefined}
                     dimmedGroupChildIds={active && selection.enteredGroup
                       ? selection.enteredGroup.childIds.filter(id => id !== selection.selectedShapeId && id !== selection.selectedTypstId)
                       : []}
@@ -3049,6 +3051,9 @@
                     <MixedSelection bounds={selection.mixedSelectionBounds} {zoom}
                       onStart={selection.beginMixedTransform} onPreview={selection.previewMixedTransform} onEnd={selection.endMixedTransform}
                       onEnter={selection.selectedGroup ? enterSelectedGroup : undefined} />
+                  {/if}
+                  {#if active && selection.snapGuides.length}
+                    <SnapGuides guides={selection.snapGuides} {zoom} />
                   {/if}
                   {#if active && keepsSelection(tool) && !shapeStamp && !selectedAddonTool && selection.selectedGroup?.stretch && session.activeSnapshot}
                     {@const group = selection.previewGroup ?? selection.selectedGroup}
@@ -3346,6 +3351,11 @@
               onDelete={selection.fromContext(() => selection.deleteSelection())}
               onTranscribe={canTranscribe() ? selection.fromContext(openTranscription) : undefined}
               addonCommands={selectionAddonCommands().map(command => ({ ...command, onSelect: selection.fromContext(command.onSelect) }))}
+              align={selection.lassoObjectIds.length && selection.alignCount >= 2 ? {
+                count: selection.alignCount,
+                onAlign: (mode) => selection.fromContext(() => selection.alignSelection(mode))(),
+                onDistribute: (axis) => selection.fromContext(() => selection.distributeSelection(axis))(),
+              } : undefined}
             />
           {:else if selection.selectedImageId || selection.selectedTypstId || selection.selectedShapeId}
             <SelectionActions
@@ -3407,6 +3417,9 @@
           onConvert={!selection.lassoObjectIds.length && selection.selectedStrokeIds.length === 1 ? session.convertSelectedInkToShape : undefined}
           onTranscribe={canTranscribe() ? openTranscription : undefined}
           addonCommands={selectionAddonCommands()}
+          align={selection.lassoObjectIds.length && selection.alignCount >= 2 ? {
+            count: selection.alignCount, onAlign: selection.alignSelection, onDistribute: selection.distributeSelection,
+          } : undefined}
           onShare={shareAction}
           onAI={settings.aiHelper.enabled ? codexAction ?? explainAISetup : undefined}
           onCopy={() => void selection.copySelection()}

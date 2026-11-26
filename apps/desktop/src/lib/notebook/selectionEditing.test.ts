@@ -4,6 +4,7 @@ import { DEFAULT_SETTINGS } from "../settings";
 import type { PageObject, Stroke } from "../model";
 import { projectSnapshot } from "./snapshot";
 import type { ClipboardBundle } from "./clipboard";
+import type { ShapeView } from "./pageView";
 
 const store = vi.hoisted(() => vi.fn());
 vi.mock("../ipc/notebook", () => ({ storePastedImage: store }));
@@ -181,6 +182,145 @@ describe("pack shape groups", () => {
     expect(projectedObjects().map(object => [object.id, object.groupId])).toEqual(
       action === "ungroup" ? [["left", null], ["right", null]] : [],
     );
+    expect(env.queueCommit).toHaveBeenCalledOnce();
+  });
+});
+
+function rectangle(id: string, x: number, y: number, widthPt: number, heightPt: number, rotation = 0): ShapeView {
+  return {
+    id, x, y, rotation, scale: 1, zIndex: 0, readingOrder: 0,
+    geometry: { kind: "rectangle" as const, widthPt, heightPt, cornerRadiusPt: 0 },
+    style: { strokeColor: "#000000", strokeWidthPt: 1, fillColor: null, opacity: 1 },
+  };
+}
+
+function board(...shapes: ShapeView[]) {
+  const { env, selection } = workspace();
+  selection.selectedStrokeIds = [];
+  env.shapes = shapes;
+  return { env, selection };
+}
+
+describe("snapping a dragged selection to other objects", () => {
+  const scene = () => board(rectangle("a", 100, 100, 50, 30), rectangle("b", 300, 200, 80, 40));
+
+  it("snaps edges while dragging and commits once, at the end", () => {
+    const { env, selection } = scene();
+    selection.lassoObjectIds = ["b"];
+    selection.beginMixedTransform();
+    selection.previewMixedTransform({ x: -197, y: -96 }, 1, { x: 0, y: 0 }, 0, { altKey: false });
+    expect(selection.previewShapes[1]).toMatchObject({ x: 100, y: 100 });
+    expect(selection.snapGuides.map(guide => guide.axis).sort()).toEqual(["x", "y"]);
+    selection.previewMixedTransform({ x: -198, y: -97 }, 1, { x: 0, y: 0 }, 0, { altKey: false });
+    expect(env.queueCommit).not.toHaveBeenCalled();
+    selection.endMixedTransform(false);
+    expect(env.queueCommit).toHaveBeenCalledOnce();
+    expect(env.shapes[1]).toMatchObject({ x: 100, y: 100 });
+    expect(selection.snapGuides).toEqual([]);
+  });
+
+  it("leaves a drag alone while Alt is held, with the setting off, or without a pointer", () => {
+    for (const [pointer, snap] of [[{ altKey: true }, true], [{ altKey: false }, false], [undefined, true]] as const) {
+      const { env, selection } = scene();
+      env.settings = { ...DEFAULT_SETTINGS, snapToObjects: snap };
+      selection.lassoObjectIds = ["b"];
+      selection.beginMixedTransform();
+      selection.previewMixedTransform({ x: -197, y: -96 }, 1, { x: 0, y: 0 }, 0, pointer);
+      expect(selection.previewShapes[1]).toMatchObject({ x: 103, y: 104 });
+      expect(selection.snapGuides).toEqual([]);
+      selection.endMixedTransform(true);
+    }
+  });
+
+  it("never snaps a scale or a rotation, and never to the dragged objects themselves", () => {
+    const { selection } = scene();
+    selection.lassoObjectIds = ["b"];
+    selection.beginMixedTransform();
+    selection.previewMixedTransform({ x: 0, y: 0 }, 1, { x: 300, y: 200 }, 90, { altKey: false });
+    expect(selection.snapGuides).toEqual([]);
+    selection.endMixedTransform(true);
+    // Dragging "a" near its own old edge does nothing: only "b", far away, is a candidate.
+    selection.lassoObjectIds = ["a"];
+    selection.beginMixedTransform();
+    selection.previewMixedTransform({ x: 3, y: 3 }, 1, { x: 0, y: 0 }, 0, { altKey: false });
+    expect(selection.previewShapes[0]).toMatchObject({ x: 103, y: 103 });
+    selection.endMixedTransform(true);
+  });
+
+  it("snaps a dragged part's port to another part's port", () => {
+    const { selection } = board(
+      { ...rectangle("a", 100, 100, 40, 200), ports: [{ x: 0, y: 25 }] },
+      { ...rectangle("b", 300, 300, 40, 100), ports: [{ x: 0, y: 10 }] },
+    );
+    selection.lassoObjectIds = ["b"];
+    selection.beginMixedTransform();
+    // Only the ports can meet: b's own edges and middle are all further than six points away.
+    selection.previewMixedTransform({ x: 0, y: -188 }, 1, { x: 0, y: 0 }, 0, { altKey: false });
+    expect(selection.previewShapes[1].y).toBe(115);
+    expect(selection.snapGuides).toContainEqual(expect.objectContaining({ axis: "y", at: 125 }));
+    selection.endMixedTransform(true);
+  });
+
+  it("snaps a rotated object by its visible box", () => {
+    // 30 x 40 turned a quarter: it covers x from 200 - 40 = 160 to 200 and y from 100 to 130.
+    const { selection } = board(rectangle("a", 100, 100, 50, 30), rectangle("turned", 200, 300, 30, 40, 90));
+    selection.lassoObjectIds = ["turned"];
+    selection.beginMixedTransform();
+    // Its box left (160) lands on a's right edge (150) after -10 -> within 6 of -8.
+    selection.previewMixedTransform({ x: -7, y: 0 }, 1, { x: 0, y: 0 }, 0, { altKey: false });
+    expect(selection.previewShapes[1].x).toBeCloseTo(190);
+    selection.endMixedTransform(true);
+  });
+});
+
+describe("align and distribute", () => {
+  it("aligns the selection in one commit and keeps the rest of the page", () => {
+    const { env, selection } = board(rectangle("a", 10, 40, 40, 20), rectangle("b", 100, 10, 20, 80), rectangle("c", 60, 70, 20, 60));
+    selection.lassoObjectIds = ["a", "b", "c"];
+    selection.alignSelection("left");
+    expect(env.shapes.map(shape => shape.x)).toEqual([10, 10, 10]);
+    expect(env.shapes.map(shape => shape.y)).toEqual([40, 10, 70]);
+    expect(env.queueCommit).toHaveBeenCalledOnce();
+  });
+
+  it("aligns a rotated shape by its visible box", () => {
+    // Turned a quarter, a 30 x 40 box at (200, 300) covers x 160..200.
+    const { env, selection } = board(rectangle("a", 100, 100, 50, 30), rectangle("turned", 200, 300, 30, 40, 90));
+    selection.lassoObjectIds = ["a", "turned"];
+    selection.alignSelection("left");
+    expect(env.shapes[0].x).toBe(100);
+    expect(env.shapes[1].x).toBeCloseTo(140);
+    expect(env.queueCommit).toHaveBeenCalledOnce();
+  });
+
+  it("distributes three or more with equal gaps in one commit", () => {
+    const { env, selection } = board(rectangle("a", 0, 0, 10, 10), rectangle("b", 12, 0, 30, 10), rectangle("c", 190, 0, 10, 10));
+    selection.lassoObjectIds = ["a", "b", "c"];
+    selection.distributeSelection("horizontal");
+    expect(env.shapes[1].x).toBeCloseTo(85);
+    expect(env.queueCommit).toHaveBeenCalledOnce();
+  });
+
+  it("offers neither with fewer objects than the action needs", () => {
+    const { env, selection } = board(rectangle("a", 0, 0, 10, 10), rectangle("b", 50, 20, 10, 10));
+    selection.lassoObjectIds = ["a"];
+    expect(selection.alignCount).toBe(1);
+    selection.alignSelection("left");
+    selection.lassoObjectIds = ["a", "b"];
+    expect(selection.alignCount).toBe(2);
+    selection.distributeSelection("horizontal");
+    expect(env.queueCommit).not.toHaveBeenCalled();
+  });
+
+  it("moves selected ink with the objects", () => {
+    const { env, selection } = board(rectangle("a", 100, 0, 10, 10));
+    env.strokes = [{ id: "ink", points: [{ x: 0, y: 50, pressure: 1, time: 0 }, { x: 20, y: 60, pressure: 1, time: 1 }],
+      transform: { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1, rotation: 0 } } as unknown as Stroke];
+    selection.lassoObjectIds = ["a"];
+    selection.selectedStrokeIds = ["ink"];
+    selection.alignSelection("left");
+    expect(env.shapes[0].x).toBe(0);
+    expect((env.strokes[0] as unknown as { transform: { translateX: number } }).transform.translateX).toBe(0);
     expect(env.queueCommit).toHaveBeenCalledOnce();
   });
 });

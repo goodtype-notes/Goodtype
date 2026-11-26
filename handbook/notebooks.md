@@ -21,6 +21,15 @@ stays in place while the symbol turns and changes length. Hold Shift to snap to
 15-degree angles. Drag the symbol body to move the whole group, or tap it again
 to edit its parts.
 
+### Line things up
+
+While you drag shapes, symbols, images, Typst blocks or selected ink, thin guide lines appear and the
+object snaps to the edges and centres of other objects, and to their connection points, so wires
+come out straight. Hold **Alt** to move freely, or switch **Snap to other objects** off in
+Settings → Editing. With two or more objects selected, the **Align and distribute** button in the
+selection bar lines them up by their left, centre, right, top, middle or bottom edge, or spaces
+three or more evenly. Rotated objects line up by their visible outline, and each action is one Undo step.
+
 ## Typeset an equation
 
 Choose **New Typst block** to place an equation beside your sketch. Enter ordinary Typst source, such as `$ T = 2 pi sqrt(L / g) $`. Drag a corner to scale the result or a side to change the width and reflow the text. If a source edit fails to compile, the previous rendering stays on the page. Use **Page text** for longer passages that follow the paper ruling.

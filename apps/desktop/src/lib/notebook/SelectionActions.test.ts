@@ -27,6 +27,16 @@ describe("SelectionActions", () => {
     expect(render(SelectionActions, { props: base }).body).not.toContain("Start cap");
   });
 
+  it("offers Align and distribute only with two or more things selected", () => {
+    const items = { ...base, subject: "items" as const, onCopy: noop };
+    const align = (count: number) => ({ count, onAlign: noop, onDistribute: noop });
+    expect(render(SelectionActions, { props: { ...items, align: align(2) } }).body)
+      .toContain('aria-label="Align and distribute"');
+    expect(render(SelectionActions, { props: { ...items, align: align(1) } }).body)
+      .not.toContain("Align and distribute");
+    expect(render(SelectionActions, { props: items }).body).not.toContain("Align and distribute");
+  });
+
   it("shows Paste in the bar when a long press opened it", () => {
     const html = render(SelectionActions, { props: { ...base, onCopy: noop, onPaste: noop } }).body;
     expect(html).toContain('aria-label="Paste here"');

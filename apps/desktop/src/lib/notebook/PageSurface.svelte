@@ -97,6 +97,7 @@
     selectedImageId = null,
     selectedShapeId = null,
     shapesGrabbable = true,
+    moveSnap,
     dimmedGroupChildIds = [],
     editingShapeId = null,
     onCompile,
@@ -179,6 +180,8 @@
     selectedShapeId?: string | null;
     /// False while the eraser is out, so it reaches the ink surface under a shape.
     shapesGrabbable?: boolean;
+    /** Snaps a dragged object to the others on the page and reports the guides. */
+    moveSnap?: import("../geometry/alignSnap").ObjectMoveSnap;
     dimmedGroupChildIds?: string[];
     editingShapeId?: string | null;
     onCompile: (
@@ -266,6 +269,7 @@
         {root}
         selected={interactive && selectedBlockId === block.id}
         {toPageDelta}
+        {moveSnap}
         {pageWidthPt}
         {pageHeightPt}
         {zoom}
@@ -297,6 +301,7 @@
       readingOrder={image.readingOrder}
       selected={interactive && selectedImageId === image.id}
       {toPageDelta}
+      {moveSnap}
       {pageWidthPt}
       {pageHeightPt}
       onSelect={interactive ? () => onSelectImage?.(image.id) : undefined}
@@ -318,6 +323,7 @@
         snapShapes={displayedShapes}
         endpointEdit={interactive && selectedShapeId === shape.id ? shapeEndpointEdit : undefined}
         {toPageDelta}
+        {moveSnap}
         onSelect={interactive ? () => onSelectShape?.(shape.id) : undefined}
         onChange={interactive ? (next, commit) => onChangeShape?.(next, commit) : undefined}
         onEditingChange={interactive ? (editing) => onEditShape?.(shape.id, editing) : undefined}
@@ -359,6 +365,7 @@
     {shapeStyle}
     {shapeConstrain}
     {shapeEndSnap}
+    {moveSnap}
     {drawAndHoldShapes}
     {heldLineMinimumPt}
     {eraseRadiusPt}

@@ -7,20 +7,20 @@
   import { onDestroy } from "svelte";
   let { bounds, zoom, onStart, onPreview, onEnd, onEnter }: {
     bounds: Bounds; zoom: number; onStart: () => void;
-    onPreview: (delta: Point, scale: number, anchor: Point, rotation?: number) => void;
+    onPreview: (delta: Point, scale: number, anchor: Point, rotation?: number, pointer?: { altKey: boolean }) => void;
     onEnter?: (event?: PointerEvent) => void;
     onEnd: (cancelled: boolean) => void;
   } = $props();
   const handles = $derived(selectionHandles(bounds, zoom));
   let drag: { id: number; x: number; y: number; bounds: Bounds; kind: "move" | "scale" | "rotate"; moved: boolean } | null = null;
   let previewFrame = 0;
-  let pending: { delta: Point; scale: number; anchor: Point; rotation: number } | null = null;
+  let pending: { delta: Point; scale: number; anchor: Point; rotation: number; pointer?: { altKey: boolean } } | null = null;
   function flushPreview() {
     if (previewFrame) cancelAnimationFrame(previewFrame);
     previewFrame = 0;
     const preview = pending;
     pending = null;
-    if (preview) onPreview(preview.delta, preview.scale, preview.anchor, preview.rotation);
+    if (preview) onPreview(preview.delta, preview.scale, preview.anchor, preview.rotation, preview.pointer);
   }
   onDestroy(() => {
     if (previewFrame) cancelAnimationFrame(previewFrame);
@@ -42,7 +42,9 @@
     if (onEnter && !drag.moved) return;
     const { x: dx, y: dy } = viewportToPage({ x: event.clientX - drag.x, y: event.clientY - drag.y },
       { pageOriginX: 0, pageOriginY: 0, zoom });
-    pending = selectionDragTransform(drag.kind, drag.bounds, { x: dx, y: dy }, zoom);
+    // Only a plain move snaps to other objects; Alt held at this sample turns it off.
+    pending = { ...selectionDragTransform(drag.kind, drag.bounds, { x: dx, y: dy }, zoom),
+      ...(drag.kind === "move" ? { pointer: { altKey: event.altKey } } : {}) };
 
     if (!previewFrame) previewFrame = requestAnimationFrame(flushPreview);
   }
