@@ -56,6 +56,8 @@ export type ManagedAddon = {
   repository: string;
   /** Older catalogs supply kind through addon_catalog. */
   kind?: string;
+  needsNewerApp?: boolean;
+  minGoodtype?: string | null;
   missingFeatures?: string | null;
   problem?: "missingFeatures" | "download" | "verify" | "probe" | "policy" | "unavailable" | null;
   installed: string | null;
@@ -104,7 +106,7 @@ export const installAddon = (id: string, approved: AddonPermission[]) =>
 export const updateAddon = (id: string, approved: AddonPermission[]) =>
   invoke<void>("addon_update", { id, approved });
 
-export type RegistryProblem = "offline" | "status" | "signature" | "expired" | "rollback" | "invalid";
+export type RegistryProblem = "notFound" | "offline" | "status" | "signature" | "expired" | "rollback" | "invalid";
 export type RegistryCheck = { lastCheck: number | null; checking: boolean; problem: RegistryProblem | null; expired: boolean };
 export type AddonManager = {
   allowDirectApply: boolean;

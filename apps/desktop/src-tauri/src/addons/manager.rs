@@ -461,6 +461,16 @@ pub async fn addon_rollback(app: tauri::AppHandle, id: String) -> Result<(), Str
         let result = (|| {
             let dir = install_dir(&app, addon)?;
             let (version, path) = dir.previous().ok_or("no previous addon release")?;
+            // `minGoodtype` lives only in the registry, so the manifest check below cannot see it.
+            if let Some(minimum) = registry::current(&app)
+                .ok()
+                .and_then(|registry| registry.unrunnable(addon, &version))
+            {
+                return Err(format!(
+                    "needs-newer-goodtype:{}",
+                    minimum.unwrap_or_default()
+                ));
+            }
             let declaration = installed(addon, &path, &version, true).map_err(manifest_problem)?;
             shutdown(&app, addon);
             let active = dir.active();
@@ -591,6 +601,8 @@ struct ManagedAddon {
     approval: Option<Approval>,
     problem: Option<InstallProblem>,
     missing_features: Option<String>,
+    needs_newer_app: bool,
+    min_goodtype: Option<String>,
     summary: Option<registry::Summary>,
     repository: &'static str,
 }
@@ -618,6 +630,9 @@ pub async fn addon_list(
         let active = dir.active();
         let preference = policy.addons.get(addon.id).copied().unwrap_or_default();
         let active_version = active.as_ref().map(|(version, _)| version.as_str());
+        let blocked = registry
+            .as_ref()
+            .and_then(|registry| registry.blocked(addon, active_version));
         let update = active_version
             .and_then(|_| select_release(registry.as_ref(), addon, active_version, true))
             .map(SelectedRelease::view);
@@ -735,6 +750,8 @@ pub async fn addon_list(
                 Some(Activity::InstallFailed { problem, .. }) => Some(*problem),
                 _ => None,
             },
+            needs_newer_app: blocked.is_some(),
+            min_goodtype: blocked.flatten(),
             summary: registry
                 .as_ref()
                 .and_then(|registry| registry.docs(addon))

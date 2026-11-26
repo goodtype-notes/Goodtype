@@ -203,6 +203,10 @@ pub(super) enum Error {
     MissingFeatures(Vec<String>),
 }
 
+pub(super) fn supported_feature(feature: &str) -> bool {
+    ["end-caps", "group-stretch", "path-edit-v0"].contains(&feature)
+}
+
 pub(super) fn release_version(version: &str) -> bool {
     version.len() <= 32
         && version.split('.').count() == 3
@@ -567,9 +571,7 @@ pub(super) fn parse(bytes: &[u8], addon: &Addon, version: &str) -> Result<Manife
     let mut missing: Vec<String> = manifest
         .requires
         .iter()
-        .filter(|feature| {
-            !["end-caps", "group-stretch", "path-edit-v0"].contains(&feature.as_str())
-        })
+        .filter(|feature| !supported_feature(feature))
         .cloned()
         .collect();
     if addon.id == catalog::CONNECTORS.id

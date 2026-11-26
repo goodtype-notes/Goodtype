@@ -354,7 +354,7 @@
               {/if}
               {@render setting(item)}
             {/each}
-            {#if group.id === "updates"}{#key settings.includeBetaReleases}<AppUpdates restart={actions.restartForUpdate} beta={settings.includeBetaReleases} />{/key}{/if}
+            {#if group.id === "updates"}{#key settings.includeBetaReleases}<AppUpdates autoCheck={initialGroup === "updates"} restart={actions.restartForUpdate} beta={settings.includeBetaReleases} />{/key}{/if}
             {#if group.id === "aiHelper" && settings.aiHelper.enabled}<CodexSettings {settings} {onChange} /><HelperSetup />{/if}
           </div>
         {/if}
