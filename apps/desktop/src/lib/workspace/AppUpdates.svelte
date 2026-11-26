@@ -3,11 +3,12 @@
   import { getVersion } from "@tauri-apps/api/app";
   import { invoke } from "@tauri-apps/api/core";
   import { formatNumber, t } from "../i18n";
-  let { beta, restart }: { beta: boolean; restart?: () => Promise<void> } = $props();
+  let { beta, restart, autoCheck = false }: { beta: boolean; autoCheck?: boolean; restart?: () => Promise<void> } = $props();
   let status = $state<"idle" | "checking" | "current" | "local" | "failed" | "staging" | "ready" | "stageFailed">("idle");
   let offer = $state<{ version: string; size: number; beta: boolean } | null>(null);
   let installed = $state("");
   onMount(() => { if ("__TAURI_INTERNALS__" in window) void getVersion().then(v => { installed = v; }).catch(() => {}); });
+  onMount(() => { if (autoCheck) void check(); });
   async function check() {
     status = "checking";
     offer = null;

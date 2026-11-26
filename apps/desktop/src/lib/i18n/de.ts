@@ -83,6 +83,12 @@ export const de = {
       exportFailed: "Das Add-on konnte diese Seiten nicht exportieren.",
     },
     store: {
+      skippedUpdate: "Ein Addon-Update benötigt eine neuere Goodtype-Version. Die installierte Version bleibt erhalten.",
+      minimumApp: "Benötigt Goodtype {{version}} oder neuer",
+      newerApp: "Benötigt eine neuere Goodtype-Version",
+      minimumBeta: "Diese Version ist möglicherweise nur als Beta verfügbar.",
+      updateApp: "Goodtype aktualisieren",
+
       browse: "Erweiterungen entdecken",
       back: "Zurück",
       search: "Erweiterungen suchen",
@@ -166,6 +172,7 @@ export const de = {
       "checkFailed": "Goodtype konnte kein Update verifizieren.",
       "noCompatibleRelease": "Es ist keine kompatible Version verfügbar.",
       "registryProblem": {
+        notFound: "Die Registry-Datei wurde nicht gefunden.",
         "offline": "Goodtype konnte keine Verbindung zu GitHub herstellen.",
         "status": "GitHub hat bei der Anfrage nach der Addon-Liste einen Fehler gemeldet.",
         "signature": "Die Signatur der Addon-Liste konnte nicht verifiziert werden.",
