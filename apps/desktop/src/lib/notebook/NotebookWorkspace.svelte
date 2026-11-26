@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { addonPorts } from "./addonPorts";
+  import { cancelAddonCommand, dismissAddonProposal, type AddonReview, type PathEdit } from "../ipc/addons";
   import { refreshPageRaster } from "./refreshPageRaster";
   import { createWindowCloseHandler } from "./windowClose";
   import { cellGrant, registerCellApply, type CellEntry } from "../calculation/cellIntent";
@@ -27,12 +29,12 @@
   import { listRecentNotebooks, recordNotebookPage, recordNotebookSession, resumeNotebookSession, writeMetrics } from "../ipc/workspace";
   import { placeFloatingToolbar } from "../geometry/placement";
   import { dismissable } from "../workspace/dismiss";
-  import { type PageDefaults, type PagePosition, type ShapeStyle, type PageTemplate, type StrokePattern } from "../model";
+  import { type PageDefaults, type PagePosition, type ShapeStyle, type ShapeCap, type PageTemplate, type StrokePattern } from "../model";
   import { TYPST_IDLE_DEBOUNCE_MS, type TypstCompileResult } from "../editor/typst";
   import { createTypstPreset, installPageTypstPreset, listenPresetChanges, readTypstPreset, pickTypstPreset, setDefaultTypstPreset } from "../ipc/presets";
   import { presetHeader, presetTargetCurrent, DEFAULT_PRESET_PATH, withPagePreset, type PresetChoice, type PresetTarget } from "../page/presets";
   import { summarizeMetric, type StrokePerformance } from "../ink/metrics";
-  import { DEFAULT_POINTER_MAPPING, type InkTool, type PointerMapping } from "../ink/pipeline";
+  import { DEFAULT_POINTER_MAPPING, pointerRole, type InkTool, type PointerMapping } from "../ink/pipeline";
   import { keepsSelection, shared, type Bounds } from "../ink/selection";
   import ColorPanel from "./ColorPanel.svelte";
   import WidthPanel from "./WidthPanel.svelte";
@@ -64,9 +66,12 @@
   import PaletteTools from "./PaletteTools.svelte";
   import PalettePocket from "./PalettePocket.svelte";
   import { blockViewsFromSnapshot, imageViewsFromSnapshot, pageTypstViewFromSnapshot, shapeViewsFromSnapshot, type BlockView, type ImageView, type PageTypstView, type ShapeView } from "./pageView";
-  import type { ShapeDraft } from "../shape/geometry";
+  import { supportsShapeCaps, type ShapeDraft } from "../shape/geometry";
   import LassoPanel from "./LassoPanel.svelte";
   import HelperCrop from "../helper/HelperCrop.svelte";
+  import { viewportToPage } from "../geometry/coordinates";
+  import StretchHandles from "./StretchHandles.svelte";
+  import type { StretchPreview } from "./stretch";
   import MixedSelection from "./MixedSelection.svelte";
   import { DEFAULT_LASSO_TARGETS } from "./lasso";
   import { addonPaletteId, type PaletteCommand, type PaletteDock } from "./palette";
@@ -496,7 +501,7 @@
   // The page being edited renders through the same surface as its neighbours, so its state is
   // projected into the same view model they use.
   const activeBlockViews: BlockView[] = $derived(
-    session.typstBlocks.map(({ transform, result: _result, ...block }) => ({ ...block, ...transform })),
+    selection.previewBlocks.map(({ transform, result: _result, ...block }) => ({ ...block, ...transform })),
   );
   const activePageTypstView: PageTypstView | null = $derived(session.pageTypst);
   const activeResults: Record<string, TypstCompileResult | null> = $derived(
@@ -505,7 +510,7 @@
       ...(session.pageTypst ? [[session.pageTypst.id, session.pageTypst.result] as const] : []),
     ]),
   );
-  const activeImageViews: ImageView[] = $derived(session.images);
+  const activeImageViews: ImageView[] = $derived(selection.previewImages);
 
   // Full-height source view beside the canvas. It is a sibling of the canvas region rather than
   // an overlay, so the canvas genuinely narrows — and the palette, which is positioned inside
@@ -882,6 +887,20 @@
   /// Whether the pocket edits a selection rather than the pen (specs/qol-wave.md section 2).
   const selectedInk = $derived(session.strokes.filter((stroke) => selection.selectedStrokeIds.includes(stroke.id)));
   const selectedShape = $derived(session.shapes.find((shape) => shape.id === selection.selectedShapeId) ?? null);
+  const selectedShapeCaps = $derived(selectedShape && supportsShapeCaps(selectedShape.geometry) ? {
+    startCap: selectedShape.style.startCap,
+    endCap: selectedShape.style.endCap,
+    onChange: changeSelectedShapeCap,
+  } : undefined);
+
+  function changeSelectedShapeCap(end: "startCap" | "endCap", cap: ShapeCap) {
+    if (!selectedShape || !supportsShapeCaps(selectedShape.geometry)) return;
+    const style = { ...selectedShape.style };
+    if (cap === "none") delete style[end];
+    else style[end] = cap;
+    session.changeShape({ ...selectedShape, style });
+  }
+
   const selectedShapes = $derived(session.shapes.filter(shape => shape.id === selection.selectedShapeId || selection.lassoObjectIds.includes(shape.id)));
   const restyling = $derived(!activeAddonTool && (selectedInk.length > 0 || selectedShapes.length > 0));
   const paletteContext = $derived<"ink" | "eraser" | null>(
@@ -1084,8 +1103,54 @@
   }
   const stampTaps = createTapTracker();
   let stampPointer: number | null = null;
+  let stretchPreview = $state.raw<StretchPreview | null>(null);
+  const presentedShapes = $derived.by(() => {
+    if (!stretchPreview || stretchPreview.group.id !== selection.selectedGroup?.id) return selection.previewShapes;
+    const parts = new Map(stretchPreview.shapes.map(shape => [shape.id, shape]));
+    return selection.previewShapes.map(shape => parts.get(shape.id) ?? shape);
+  });
+  let groupPointer: { id: number; x: number; y: number; frame: number; moved: boolean; selected: boolean } | null = null;
+
+  function groupChildAt(event: PointerEvent) {
+    const hit = document.elementsFromPoint(event.clientX, event.clientY)
+      .map(element => element.closest<HTMLElement | SVGElement>(".active-page .shape-hit, .active-page .typst-block, .active-page .image-object"))
+      .find(Boolean);
+    return hit?.closest<HTMLElement | SVGElement>("[data-object-id]")?.dataset.objectId ??
+      hit?.querySelector<HTMLElement>("[data-object-id]")?.dataset.objectId ?? null;
+  }
+
+  function enterSelectedGroup(event?: PointerEvent) {
+    const group = selection.selectedGroup;
+    if (!group) return false;
+    const hit = event ? groupChildAt(event) : group.childIds[0];
+    const id = hit && group.childIds.includes(hit) ? hit : undefined;
+    if (!selection.enterGroup(id)) return false;
+    if (id) void tick().then(() => {
+      workspaceElement?.querySelector<SVGElement>(
+        `.active-page [data-object-id="${CSS.escape(id)}"] .shape-hit, .active-page .typst-block[data-object-id="${CSS.escape(id)}"] .preview`,
+      )?.focus({ preventScroll: true });
+    });
+    return true;
+  }
+
+  function previewGroupPointer(event: PointerEvent) {
+    if (!groupPointer) return;
+    const dx = event.clientX - groupPointer.x, dy = event.clientY - groupPointer.y;
+    if (Math.hypot(dx, dy) >= 4) groupPointer.moved = true;
+    if (!groupPointer.moved) return;
+    selection.previewMixedTransform(viewportToPage({ x: dx, y: dy }, {
+      pageOriginX: 0, pageOriginY: 0, zoom,
+    }), 1, { x: 0, y: 0 });
+  }
 
   function surroundPointerDown(event: PointerEvent) {
+    if (event.target instanceof Element && event.target.closest(".stretch-handles")) return;
+    selection.noteCanvasPointer(event);
+    if (groupPointer) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const pageId = shapeStamp ? stampPage(event.target) : null;
     if (pageId && (event.pointerType !== "mouse" || event.button === 0)) {
       stampTaps.down(event.pointerId, event.clientX, event.clientY, event.timeStamp, pageId);
@@ -1098,10 +1163,37 @@
         return;
       }
     } else if (shapeStamp && event.pointerType === "touch") stampTaps.cancel();
+    const role = pointerRole(event, tool, pointerMapping);
+    if (!shapeStamp && !selectedAddonTool && !session.pageInputLocked && event.button === 0 &&
+      event.target instanceof Element && event.target.closest(".active-page") &&
+      !event.target.closest(".mixed-selection, .control-hit, .helper-crop, .addon-tool-surface") &&
+      tool !== "shape" && tool !== "eraser" && tool !== "lasso" &&
+      role !== "lasso" && role !== "erase" && (role !== "ignore" || event.pointerType === "touch") &&
+      ((event.pointerType !== "pen" && !navigation.fingerDraws(event)) || keepsSelection(tool))) {
+      const group = selection.shapeGroupFor(groupChildAt(event));
+      if (group && group.id !== selection.enteredGroup?.id) {
+        event.preventDefault();
+        event.stopPropagation();
+        const selected = selection.selectedGroup?.id === group.id;
+        navigation.stopTouchInertia();
+        selection.selectGroup(group);
+        selection.beginMixedTransform();
+        (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+        groupPointer = { id: event.pointerId, x: event.clientX, y: event.clientY, frame: 0, moved: false, selected };
+        return;
+      }
+    }
     navigation.workspacePointerDown(event);
   }
 
   function surroundPointerMove(event: PointerEvent) {
+    if (event.target instanceof Element && event.target.closest(".stretch-handles")) return;
+    if (groupPointer?.id === event.pointerId) {
+      event.stopPropagation();
+      cancelAnimationFrame(groupPointer.frame);
+      groupPointer.frame = requestAnimationFrame(() => previewGroupPointer(event));
+      return;
+    }
     if (shapeStamp) {
       stampTaps.move(event.pointerId, event.clientX, event.clientY);
       if (!shapeDragging) {
@@ -1114,6 +1206,18 @@
   }
 
   function surroundPointerEnd(event: PointerEvent) {
+    if (event.target instanceof Element && event.target.closest(".stretch-handles")) return;
+    if (groupPointer?.id === event.pointerId) {
+      event.stopPropagation();
+      cancelAnimationFrame(groupPointer.frame);
+      const cancelled = event.type !== "pointerup";
+      if (!cancelled) previewGroupPointer(event);
+      const enter = !cancelled && !groupPointer.moved && groupPointer.selected;
+      groupPointer = null;
+      selection.endMixedTransform(cancelled);
+      if (enter) enterSelectedGroup(event);
+      return;
+    }
     if (stampTaps.owns(event.pointerId)) {
       const tap = stampTaps.up(event.pointerId, event.clientX, event.clientY, event.timeStamp, event.type !== "pointerup");
       if (tap && shapeStamp) void placePackShape(shapeStamp, tap, false);
@@ -1249,6 +1353,7 @@
     }
   });
   onDestroy(() => {
+    dismissPath();
     destroyed = true;
     clearTimeout(settingsSaveTimer);
     calculations.dispose();
@@ -1601,6 +1706,7 @@
     // the tool that acted on it is.
     if (!keepsSelection(next)) {
       region = null;
+      selection.exitGroup();
       selection.lassoObjectIds = [];
       selection.updateInkSelection([]);
       selection.selectedTypstId = null;
@@ -1959,6 +2065,8 @@
       opacity: 1,
       pattern: tool === "shape" ? settings.shapePattern : tool === "pen" ? inkPattern() : "solid",
       patternSpacing: tool === "shape" ? settings.shapePatternSpacing : inkPatternSpacing(),
+      ...(tool === "shape" && settings.shapeKind === "line" && settings.shapeEndCap !== "none"
+        ? { endCap: settings.shapeEndCap } : {}),
     };
   }
 
@@ -1999,6 +2107,130 @@
     transcribing = { pageId: session.activePageId, polylines, bounds };
   }
 
+  let pathRequest = $state<{ id: string; pageId: string; objectId: string; root: string } | null>(null);
+  let pathReview = $state<AddonReview | null>(null);
+  let pathUndo = $state<{ root: string; pageId: string; revision: number; addon: string } | null>(null);
+  let pathAccepting = $state(false);
+  const pathObject = $derived(
+    session.activeSnapshot?.page.objects.find((object) => object.id === selectedShape?.id)
+  );
+  const pathChoices = $derived.by(() => {
+    if (!tauriAvailable || !pathObject || pathObject.type !== "shape" || selection.lassoObjectIds.length ||
+      selection.selectedStrokeIds.length || selection.selectedImageId || selection.selectedTypstId ||
+      !(pathObject.geometry.kind === "line" || pathObject.geometry.kind === "spline" && !pathObject.geometry.closed)) return [];
+    const owners = Object.keys(pathObject.addonData ?? {});
+    const capped = [pathObject.style.startCap, pathObject.style.endCap].some((cap) => cap && cap !== "none");
+    return contributions.filter((addon) => addon.enabled && (owners.length ? owners.includes(addon.addonId) : capped))
+      .flatMap((addon) => addon.commands.flatMap((command) => {
+        if (command.surface !== "own-object" || !command.pathEdit) return [];
+        const field = addon.settings.find((field) => field.id === command.pathEdit?.choice);
+        return field?.type === "choice" ? [{ addon, command, field }] : [];
+      }));
+  });
+  const endpointEdit = $derived.by(() => {
+    if (pathChoices.length !== 1 || !pathObject || pathRequest || pathReview) return undefined;
+    const choice = pathChoices[0];
+    const { addon } = choice;
+    const objectId = pathObject.id;
+    const revision = session.activeSnapshot?.page.revision;
+    return {
+      name: contributionText(addon, "name", $locale),
+      owned: Boolean(pathObject.addonData?.[addon.addonId]),
+      ports: addonPorts(session.activeSnapshot?.page.objects ?? [], objectId),
+      pointAt: navigation.pagePointAt,
+      apply: (edit: PathEdit) => {
+        if (revision !== session.activeSnapshot?.page.revision || !pathChoices.some((current) =>
+          current.addon.addonId === choice.addon.addonId && current.command.id === choice.command.id)) {
+          pathFailed(contributionText(addon, "name", $locale), "addon-stale-page");
+          return;
+        }
+        void runPathEdit(choice, objectId, edit);
+      },
+    };
+  });
+  const pathPreviewShapes = $derived(presentedShapes.map((shape) => {
+    const replacement = pathReview?.items[0]?.object;
+    return replacement?.type === "shape" && replacement.id === shape.id ? { ...shape, ...replacement } : shape;
+  }));
+
+  function dismissPath() {
+    if (pathRequest) void cancelAddonCommand(pathRequest.id).catch(() => {});
+    pathRequest = null;
+    if (pathReview) void dismissAddonProposal(pathReview.id).catch(() => {});
+    pathReview = null;
+  }
+
+  $effect(() => {
+    if (pathRequest && (pathRequest.root !== session.root || pathRequest.pageId !== session.activePageId ||
+        pathRequest.objectId !== selection.selectedShapeId)) dismissPath();
+  });
+
+  function pathFailed(addon: string, error: unknown) {
+    const field = (key: string) => typeof error === "object" && error && key in error
+      ? String((error as Record<string, unknown>)[key]) : undefined;
+    // Rust wraps host refusals raised under the notebook lock as "invalid notebook: <code>".
+    const problem = (field("message") ?? field("details") ?? String(error)).replace(/^invalid notebook: /, "");
+    if (problem === "addon-needs-update") window.dispatchEvent(new Event(ADDON_AVAILABILITY_CHANGED));
+    const code = field("code");
+    const reason = problem === "addon-needs-update" ? "addons.pathNeedsUpdate"
+      : problem === "addon-stale-page" || problem === "proposal_changed" || code === "proposal_stale" ||
+        code === "revision_conflict" || problem.startsWith("proposal dependencies changed") ||
+        problem.startsWith("revision conflict") ? "addons.pathStale"
+      : problem === "addon-timeout" ? "addons.pathTimeout"
+      : problem === "Legacy connector upgrade requires review" ? "addons.pathLegacyReview"
+      : problem === "addon-does-not-fit" || problem === "The connector does not fit the page" ||
+        problem === "The connector caps do not fit the page" ? "addons.pathDoesNotFit" : "addons.pathRejected";
+    session.status = notice("addons.pathFailed", { addon, reason: notice(reason) });
+  }
+
+  function pathApplied(addon: string) {
+    if (!session.root || !session.activeSnapshot) return;
+    pathUndo = { root: session.root, pageId: session.activePageId, revision: session.activeSnapshot.page.revision, addon };
+    session.status = notice("addons.objectActionApplied", { label: addon });
+  }
+
+  async function runPathEdit(choice: (typeof pathChoices)[number], objectId: string, edit: PathEdit) {
+    if (pathRequest || !session.root || !choice) return;
+    const { addon, command } = choice;
+    const name = contributionText(addon, "name", $locale);
+    const id = crypto.randomUUID();
+    pathRequest = { id, objectId, pageId: session.activePageId, root: session.root };
+    const current = () => pathRequest?.id === id;
+    try {
+      const result = await session.runAddonPathEdit(addon.addonId,
+        { kind: "pathEdit", id: command.id, objectId, edit }, id, current);
+      if (!current()) {
+        if (result && "review" in result) await dismissAddonProposal(result.review.id);
+        return;
+      }
+      if (!result) return;
+      if ("review" in result) {
+        if (result.direct && await session.insertAddonProposal(result.review, true)) pathApplied(name);
+        else if (current()) pathReview = result.review;
+        else await dismissAddonProposal(result.review.id);
+      } else pathApplied(name);
+    } catch (error) {
+      if (current()) pathFailed(name, error);
+    } finally {
+      if (current() && !pathReview) pathRequest = null;
+    }
+  }
+
+  async function acceptPath() {
+    const review = pathReview;
+    if (!review || pathAccepting) return;
+    const addon = addonText(review.addon, $locale);
+    pathAccepting = true;
+    try {
+      if (await session.insertAddonProposal(review, false)) pathApplied(addon);
+    } catch (error) {
+      pathFailed(addon, error);
+    } finally {
+      pathAccepting = false;
+      dismissPath();
+    }
+  }
+
   /** Ink-only selections on a canvas page; lassoed objects are never sent to an addon. */
   function selectionAddonCommands() {
     if (!tauriAvailable || session.activeCalculation) return [];
@@ -2010,17 +2242,29 @@
     const owners = new Set(session.activeSnapshot?.page.objects
       .filter((object) => selected.has(object.id))
       .flatMap((object) => Object.keys(object.addonData ?? {})));
-    if (owners.size) return [...contributions.filter((addon) => addon.enabled && owners.has(addon.addonId))
-      .flatMap((addon) => addon.commands.filter((command) => command.surface === "own-object").map((command) => {
+    const routing = pathChoices.flatMap((choice) => choice.field.choices.map((option) => {
+      const addon = contributionText(choice.addon, "name", $locale);
+      const label = contributionText(choice.addon, option.label, $locale);
+      return { id: `${choice.addon.addonId}-${choice.command.id}-${option.value}`,
+        label: $t("addons.pathChoice", { addon, choice: label }), icon: option.icon?.paths.join(" "),
+        onSelect: () => pathObject && void runPathEdit(choice, pathObject.id, { kind: "choice", value: option.value }) };
+    }));
+    if (owners.size || routing.length) return [...routing, ...contributions.filter((addon) => addon.enabled && owners.has(addon.addonId))
+      .flatMap((addon) => addon.commands.filter((command) => command.surface === "own-object" && !command.pathEdit).map((command) => {
         const label = contributionText(addon, command.label, $locale);
         return { id: `${addon.addonId}-${command.id}`, label,
           onSelect: () => void session.applyAddonObjectAction(addon.addonId,
             { kind: "command", id: command.id, selected: ids }, label) };
-      })), ...[...owners].map((addon) => ({
-      id: `detach-${addon}`,
-      label: $t("addons.detach", { addon }),
-      onSelect: () => void session.detachAddon(addon, ids),
-    }))];
+      })), ...[...owners].map((addon) => {
+      const contribution = contributions.find((item) => item.addonId === addon);
+      const name = contribution ? contributionText(contribution, "name", $locale)
+        : addon === "connectors" ? $t("addons.connectors.label") : addon;
+      return {
+        id: `detach-${addon}`,
+        label: $t("addons.detach", { addon: name }),
+        onSelect: () => void session.detachAddon(addon, ids, name),
+      };
+    })];
     if (!selection.selectedStrokeIds.length || ids.length) return [];
     return addonCommands.map(command => ({
       id: `${command.addonId}-${command.command}`,
@@ -2110,9 +2354,18 @@
     }
     const editingText =
       event.target instanceof Element &&
-      event.target.closest(".cm-editor, input, textarea, [contenteditable=true]");
+      event.target.closest(".cm-editor, input, textarea, select, [contenteditable=true]");
     if (editingText) return;
     if (event.key === "Escape") {
+      if (groupPointer) {
+        cancelAnimationFrame(groupPointer.frame);
+        groupPointer = null;
+        selection.endMixedTransform(true);
+      }
+      if (selection.exitGroup(true)) {
+        event.preventDefault();
+        return;
+      }
       region = null;
       selection.lassoObjectIds = [];
       selection.updateInkSelection([]);
@@ -2152,6 +2405,10 @@
       return;
     }
     if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (event.key === "Enter" && enterSelectedGroup()) {
+        event.preventDefault();
+        return;
+      }
       if (event.key === "Enter" && selection.selectedShapeId) {
         event.preventDefault();
         selection.editingShapeId = selection.editingShapeId === selection.selectedShapeId ? null : selection.selectedShapeId;
@@ -2344,8 +2601,27 @@
 {/snippet}
 
 <main bind:this={workspaceElement} inert={addonsOpen} tabindex="-1" class="workspace-app" class:ai-open={aiPanelOpen} onpointerdowncapture={event => {
+    if (event.target instanceof Element && event.target.closest(".stretch-handles")) return;
     if (event.target instanceof Element && event.target.closest(".active-page") && !event.target.closest(".helper-crop, .selection-actions") && tool !== "lasso") region = null;
+    if (groupPointer) return;
+    const group = selection.enteredGroup ?? selection.selectedGroup;
+    if (group && event.target instanceof Element && event.target.closest(".page-frame")) {
+      const part = event.target.closest<HTMLElement | SVGElement>("[data-object-id]")?.dataset.objectId ?? groupChildAt(event);
+      if (part && group.childIds.includes(part)) return;
+      if (selection.enteredGroup) selection.exitGroup();
+    }
     selection.closeObjectSelection(event);
+  }} onkeydowncapture={event => {
+    if (event.key === "Escape" && (pathRequest || pathReview) && !pathAccepting) {
+      dismissPath();
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (event.key === "Escape" && event.target instanceof Element && event.target.closest(".shape-object") && selection.exitGroup(true)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
   }} onfocusout={() => session.scheduleFocus()} onwheel={navigation.wheelZoom}>
 <HelperWorkspace pages={helperPages} {session} bind:activityOpen bind:panelOpen={aiPanelOpen} bind:waiting={aiWaiting} hasConversation={Boolean(codexSelection && $codexStatus)} available={tauriAvailable} onError={helperError}>
 {#snippet conversation(review)}
@@ -2557,7 +2833,10 @@
       onpointerupcapture={surroundPointerEnd}
       onpointercancelcapture={surroundPointerEnd}
       onpointerleave={() => { if (!shapeDragging) hideShapeGhost(); }}
-      onlostpointercapture={navigation.releasePagePointer}
+      onlostpointercapture={event => {
+        if (groupPointer?.id === event.pointerId) surroundPointerEnd(event);
+        navigation.releasePagePointer(event);
+      }}
     >
       <div class="page-scroll-content" bind:this={pageViewport} onscroll={() => { session.lastScrollAt = performance.now(); selection.scheduleSelectionToolbar(); session.scheduleFocus(session.FOCUS_SETTLE_MS); }}>
         <div
@@ -2621,7 +2900,8 @@
                       ? activePageTypstView
                       : pageTypstViewFromSnapshot(entry.snapshot!)}
                     images={active ? activeImageViews : imageViewsFromSnapshot(entry.snapshot!, session.assetUrls(entry.id))}
-                    shapes={active ? session.shapes : shapeViewsFromSnapshot(entry.snapshot!)}
+                    shapes={active ? pathPreviewShapes : shapeViewsFromSnapshot(entry.snapshot!)}
+                    shapeEndpointEdit={active ? endpointEdit : undefined}
                     results={active ? activeResults : (session.neighborResults[entry.id] ?? {})}
                     strokes={active ? session.strokes : session.neighborStrokesFor(entry)}
                     newStrokeZIndex={newInkZIndex(
@@ -2677,14 +2957,25 @@
                     selectedImageId={active ? selection.selectedImageId : null}
                     selectedShapeId={active ? selection.selectedShapeId : null}
                     shapesGrabbable={tool !== "eraser"}
+                    dimmedGroupChildIds={active && selection.enteredGroup
+                      ? selection.enteredGroup.childIds.filter(id => id !== selection.selectedShapeId && id !== selection.selectedTypstId)
+                      : []}
                     editingShapeId={active ? selection.editingShapeId : null}
                     onCompile={(id, request) =>
                       active
                         ? compileTypst(id, request)
                         : session.compileNeighborTypst(entry.id, id, request)}
                     onSourceChange={(id, source) => session.updateTypstSource(id, source)}
-                    onTransform={(id, transform) => session.updateTypstTransform(id, transform)}
+                    onTransform={(id, transform) => {
+                      const group = selection.shapeGroupFor(id);
+                      if (!group || group.id === selection.enteredGroup?.id) session.updateTypstTransform(id, transform);
+                    }}
                     onSelectBlock={(id) => {
+                      const group = selection.shapeGroupFor(id);
+                      if (group && group.id !== selection.enteredGroup?.id) {
+                        selection.selectGroup(group);
+                        return;
+                      }
                       selection.selectedTypstId = id;
                       selection.selectedImageId = null;
                       selection.selectedShapeId = null;
@@ -2699,15 +2990,17 @@
                     }}
                     onMoveImage={(id, position) => session.changeImage(id, position)}
                     onScaleImage={(id, scale) => session.changeImage(id, { scale })}
-                    onSelectShape={(id) => {
-                      selection.selectedShapeId = id;
-                      selection.selectedImageId = null;
-                      selection.selectedTypstId = null;
-                      selection.updateInkSelection([]);
-                    }}
-                    onChangeShape={active ? session.changeShape : undefined}
+                    onSelectShape={selection.selectShape}
+                    onChangeShape={active ? (shape, commit) => {
+                      const group = selection.shapeGroupFor(shape.id);
+                      if (!group || group.id === selection.enteredGroup?.id) session.changeShape(shape, commit);
+                    } : undefined}
                     onEditShape={(id, editing) => {
-                      selection.selectedShapeId = id;
+                      selection.selectShape(id);
+                      if (selection.selectedGroup) {
+                        enterSelectedGroup();
+                        return;
+                      }
                       selection.editingShapeId = editing ? id : null;
                       session.status = editing ? $t("workspace.editingShapeAnchorPoints") : $t("workspace.shapeSelected");
                     }}
@@ -2754,7 +3047,17 @@
                   {/if}
                   {#if active && selection.mixedSelectionBounds}
                     <MixedSelection bounds={selection.mixedSelectionBounds} {zoom}
-                      onStart={selection.beginMixedTransform} onPreview={selection.previewMixedTransform} onEnd={selection.endMixedTransform} />
+                      onStart={selection.beginMixedTransform} onPreview={selection.previewMixedTransform} onEnd={selection.endMixedTransform}
+                      onEnter={selection.selectedGroup ? enterSelectedGroup : undefined} />
+                  {/if}
+                  {#if active && keepsSelection(tool) && !shapeStamp && !selectedAddonTool && selection.selectedGroup?.stretch && session.activeSnapshot}
+                    {@const group = selection.previewGroup ?? selection.selectedGroup}
+                    {@const page = session.activeSnapshot.page}
+                    {#key `${session.root}/${page.id}/${group.id}`}
+                      <StretchHandles {group} {zoom} shapes={selection.previewShapes} pageId={page.id} revision={page.revision}
+                        disabled={Boolean(selection.mixedStrokePreview)}
+                        onPreview={value => stretchPreview = value} onCommit={session.stretchGroup} />
+                    {/key}
                   {/if}
                 {:else}
                   <span class="page-loading">{$t("workspace.loadingPage")}</span>
@@ -2915,6 +3218,8 @@
               onMinimumLineLengthChange={(heldLineMinimumPt) => changeSettings({ ...settings, heldLineMinimumPt })}
               strokeColor={currentShapeStyle().strokeColor}
               strokeWidthPt={currentShapeStyle().strokeWidthPt}
+              endCap={settings.shapeEndCap}
+              onEndCapChange={(shapeEndCap) => changeSettings({ ...settings, shapeEndCap })}
               pattern={settings.shapePattern}
               onPatternChange={(shapePattern) => changeSettings({ ...settings, shapePattern })}
               spacing={settings.shapePatternSpacing}
@@ -3046,6 +3351,7 @@
             <SelectionActions
               bind:element={selection.contextBarElement}
               subject={selection.selectedImageId ? "image" : selection.selectedShapeId ? "shape" : "Typst block"}
+              shapeCaps={selectedShapeCaps}
               left={selection.contextBarPosition.left}
               top={selection.contextBarPosition.top}
               ready={selection.contextBarPosition.ready}
@@ -3092,8 +3398,8 @@
           canMoveBack={selection.canMoveInkVisual(-1)}
           canMoveForward={selection.canMoveInkVisual(1)}
           onMove={selection.changeInkVisualOrder}
-          grouped={selection.groupedStrokeIds.length > 0}
-          onGroup={selection.lassoObjectIds.length ? undefined : selection.groupedStrokeIds.length > 0
+          grouped={Boolean(selection.selectedGroup) || selection.groupedStrokeIds.length > 0}
+          onGroup={selection.selectedGroup ? selection.ungroupShapes : selection.lassoObjectIds.length ? undefined : selection.groupedStrokeIds.length > 0
             ? selection.ungroupInk
             : selection.selectedTypstId
               ? selection.groupSelectedInk
@@ -3111,6 +3417,7 @@
         <SelectionActions
           bind:element={selection.selectionToolbarElement}
           subject={selection.selectedImageId ? "image" : selection.selectedShapeId ? "shape" : "Typst block"}
+          shapeCaps={selectedShapeCaps}
           left={selection.selectionToolbarPosition.left}
           top={selection.selectionToolbarPosition.top}
           ready={selection.selectionToolbarPosition.ready}
@@ -3145,6 +3452,20 @@
     </section>
   {/if}
 
+  {#if pathReview}
+    <div class="path-review" role="group" aria-label={$t("addons.pathReview", { addon: addonText(pathReview.addon, $locale) })}>
+      <span>{$t("addons.pathReview", { addon: addonText(pathReview.addon, $locale) })}
+        {$t(pathReview.kind === "pathStart" ? "addons.pathStart" : pathReview.kind === "pathEnd" ? "addons.pathEnd" : "addons.pathBoth")}</span>
+      <button type="button" disabled={pathAccepting} onclick={() => void acceptPath()}>{$t("addons.pathAccept")}</button>
+      <button type="button" disabled={pathAccepting} onclick={dismissPath}>{$t("addons.pathDismiss")}</button>
+    </div>
+  {:else if pathUndo && pathUndo.root === session.root && pathUndo.pageId === session.activePageId &&
+    pathUndo.revision === session.activeSnapshot?.page.revision && session.canUndo}
+    <div class="path-review" role="status">
+      <span>{$t("addons.objectActionApplied", { label: pathUndo.addon })}</span>
+      <button type="button" disabled={session.pendingTransactions > 0} onclick={() => { pathUndo = null; void session.undo(); }}>{$t("addons.pathUndo")}</button>
+    </div>
+  {/if}
   <WorkspaceStatus toolLabel={currentToolLabel()} toolDetail={currentToolDetail()} status={session.status} transactionFailed={session.transactionFailed}
     pageNumber={session.activePageNumber()} pageCount={session.notebookManifest?.pages.length ?? 1} {zoom}
     {saveNeedsAttention} {savePending} onZoom={navigation.changeZoom}
@@ -3287,6 +3608,7 @@
 {/if}
 
 <style>
+  .path-review { position: absolute; z-index: 10; inset-inline-end: 1rem; bottom: 3rem; display: flex; gap: 0.5rem; align-items: center; background: var(--paper); color: var(--ink); border: 1px solid var(--blueprint); padding: 0.5rem; }
   :global(*) { box-sizing: border-box; }
   :global(button), :global(input), :global(textarea) { font: inherit; }
 

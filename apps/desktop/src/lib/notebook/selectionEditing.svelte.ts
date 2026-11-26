@@ -8,10 +8,10 @@ import { storePastedImage } from "../ipc/notebook";
 import { finishInkPreview, inkPreviewBounds, type InkPreview } from "../ink/preview";
 import type { NotebookSnapshot } from "../ipc/types";
 
-import { pageToScreen, type Point } from "../geometry/coordinates";
+import { pageToScreen, rotatedVector, type Point } from "../geometry/coordinates";
 import { placeFloatingToolbar, type ViewRect } from "../geometry/placement";
 
-import { type Stroke } from "../model";
+import { type PageObject, type Stroke } from "../model";
 
 import { pointerRole, type InkTool, type PointerMapping } from "../ink/pipeline";
 import { keepsSelection, moveSelected, restyleStrokes, selectionBounds, toolAfterSelection, type StylePatch } from "../ink/selection";
@@ -28,6 +28,9 @@ import { moveReadingObject, moveVisualItems, type VisualMove } from "./objectOrd
 import { clipboardMarker, completeSelectedGroups, isEmptyBundle, pasteOffset, pastedAddonData, pastedShapes, pastedStrokes, shiftTo, type ClipboardBundle } from "./clipboard";
 
 import { type AppSettings } from "../settings";
+
+type ShapeGroup = Extract<PageObject, { type: "group" }>;
+type GroupTransform = Pick<ShapeGroup, "x" | "y" | "scale" | "rotation">;
 
 export type SelectionEnvironment = {
   activeInkLayerId: string;
@@ -79,70 +82,193 @@ export function createSelection(env: SelectionEnvironment) {
 
   let mixedGroup = $state<ManagedMixedGroup | null>(null);
 
+  let enteredGroupId = $state<string | null>(null);
+  let groupEdits = $state.raw<ReadonlyMap<string, GroupTransform | null>>(new Map());
+
+  const groupCandidates = $derived.by(() => {
+    const objects = new Map(env.activeSnapshot?.page.objects.map(object => [object.id, object]));
+    return [...objects.values()].flatMap(object => {
+      if (object.type !== "group" || object.id === mixedGroup?.groupId) return [];
+      const edit = groupEdits.get(object.id);
+      if (edit === null || !object.childIds.every(id => {
+        const child = objects.get(id);
+        return child?.groupId === object.id && (child.type === "shape" || child.type === "typst");
+      })) return [];
+      return [{ ...object, ...edit }];
+    });
+  });
+  const shapeGroups = $derived.by(() => {
+    const live = new Set([...env.shapes, ...env.typstBlocks].map(object => object.id));
+    return groupCandidates.flatMap(group => {
+      const childIds = group.childIds.filter(id => live.has(id));
+      return childIds.length ? [{ ...group, childIds }] : [];
+    });
+  });
+  const selectedGroup = $derived(shapeGroups.find(group =>
+    group.childIds.length === lassoObjectIds.length && !selectedStrokeIds.length &&
+    group.childIds.every(id => lassoObjectIds.includes(id)),
+  ));
+  const enteredGroup = $derived(shapeGroups.find(group => group.id === enteredGroupId));
+
+  function shapeGroupFor(id: string | null) {
+    return shapeGroups.find(group => id !== null && group.childIds.includes(id));
+  }
+
+  function selectGroup(group: ShapeGroup) {
+    enteredGroupId = null;
+    selectedTypstId = selectedImageId = selectedShapeId = editingShapeId = null;
+    lassoObjectIds = [...group.childIds];
+    updateInkSelection([]);
+  }
+
+  function selectShape(id: string) {
+    const group = shapeGroupFor(id);
+    if (group && group.id !== enteredGroupId) {
+      selectGroup(group);
+      return;
+    }
+    lassoObjectIds = [];
+    if (selectedShapeId !== id) editingShapeId = null;
+    selectedShapeId = id;
+    selectedTypstId = selectedImageId = null;
+    updateInkSelection([]);
+  }
+
+  function enterGroup(id?: string) {
+    const group = selectedGroup;
+    if (!group) return false;
+    enteredGroupId = group.id;
+    lassoObjectIds = [];
+    if (id && group.childIds.includes(id)) {
+      if (env.typstBlocks.some(block => block.id === id)) selectedTypstId = id;
+      else selectedShapeId = id;
+    }
+    updateInkSelection([]);
+    env.status = notice("workspace.editingShapeGroup");
+    return true;
+  }
+
+  function exitGroup(reselect = false) {
+    if (!enteredGroupId) return false;
+    if (reselect && enteredGroup) selectGroup(enteredGroup);
+    else enteredGroupId = null;
+    selectedShapeId = editingShapeId = selectedTypstId = null;
+    updateInkSelection([]);
+    return true;
+  }
+
+  function ungroupShapes() {
+    if (!selectedGroup) return;
+    const { id, childIds } = selectedGroup;
+    groupEdits = new Map(groupEdits).set(id, null);
+    env.shapes = env.shapes.map(shape => childIds.includes(shape.id) ? { ...shape, groupId: null } : shape);
+    env.typstBlocks = env.typstBlocks.map(block => childIds.includes(block.id) ? { ...block, groupId: null } : block);
+    env.queueCommit(notice("workspace.ungroupedShapes"));
+  }
+
   let selectedTypstId = $state<string | null>(null);
 
   let lassoObjectIds = $state<string[]>([]);
 
-  let mixedStrokePreview = $state.raw<InkPreview | null>(null);
+
 
   function lassoItems(): LassoItem[] {
+    const measured = new Map((env.activeSnapshot?.page.objects ?? []).flatMap(object =>
+      object.type === "typst" ? [[object.id, object] as const] : []));
     return [
       ...materialItems(env.activeSnapshot?.page.objects ?? []),
-      ...env.shapes.map(shapeLassoItem),
-      ...env.images.map(image => ({ id: image.id, kind: "images" as const, closed: true,
+      ...previewShapes.map(shapeLassoItem),
+      ...previewImages.map(image => ({ id: image.id, kind: "images" as const, closed: true,
         outline: boxOutline(image.x, image.y, image.widthPt * image.scale, image.heightPt * image.scale, image.rotation) })),
-      ...env.typstBlocks.map(block => ({ id: block.id, kind: "text" as const, closed: true,
+      ...previewBlocks.map(block => ({ id: block.id, kind: "text" as const, closed: true,
         outline: boxOutline(block.transform.x, block.transform.y,
-          (block.result?.widthPt ?? block.transform.layoutWidthPt) * block.transform.scale,
-          (block.result?.heightPt ?? 64) * block.transform.scale, block.transform.rotation) })),
+          (block.result?.widthPt ?? measured.get(block.id)?.measuredWidthPt ?? block.transform.layoutWidthPt) * block.transform.scale,
+          (block.result?.heightPt ?? measured.get(block.id)?.measuredHeightPt ?? 64) * block.transform.scale, block.transform.rotation) })),
     ];
   }
 
-  const mixedSelectionBounds = $derived(lassoObjectIds.length ? combinedBounds(
-    lassoItems().filter(item => lassoObjectIds.includes(item.id)), inkPreviewBounds(env.strokes, selectedStrokeIds, mixedStrokePreview)) : null);
+  const mixedSelectionBounds = $derived.by(() => {
+    if (!lassoObjectIds.length) return null;
+    const bounds = combinedBounds(lassoItems().filter(item => lassoObjectIds.includes(item.id)),
+      inkPreviewBounds(env.strokes, selectedStrokeIds, mixedStrokePreview));
+    if (!bounds || !selectedGroup) return bounds;
+    const padding = 5 / env.zoom;
+    return { left: bounds.left - padding, top: bounds.top - padding,
+      right: bounds.right + padding, bottom: bounds.bottom + padding };
+  });
 
   function lassoSelection(polygon: Point[], inkIds: string[]) {
+    exitGroup();
     selectedTypstId = null; selectedImageId = null; selectedShapeId = null; editingShapeId = null;
     lassoObjectIds = selectLassoObjects(lassoItems(), polygon, env.settings.lassoTargets ?? DEFAULT_LASSO_TARGETS);
+    const hits = new Set(lassoObjectIds);
+    for (const group of shapeGroups) {
+      if (group.childIds.some(id => hits.has(id))) group.childIds.forEach(id => hits.add(id));
+    }
+    lassoObjectIds = [...hits];
     updateInkSelection(inkIds);
     env.status = notice("workspace.selectedItems", { "value1": inkIds.length + lassoObjectIds.length });
   }
 
-  let mixedTransformBase: { blocks: typeof env.typstBlocks; images: typeof env.images; shapes: typeof env.shapes; strokes: Stroke[] } | null = null;
+  let mixedGesture: { current: () => boolean; objects: Set<string>; strokes: string[] } | null = null;
+  let transformPreview = $state.raw<{
+    objects: ReadonlySet<string>; ink: InkPreview; rotation: number;
+  } | null>(null);
+  const mixedStrokePreview = $derived(transformPreview?.ink ?? null);
 
-  let mixedTransformChanged = false;
+  function transformed<T extends Point & { scale: number; rotation?: number }>(
+    object: T, { ink: { delta, scale, anchor }, rotation }: NonNullable<typeof transformPreview>,
+  ): T {
+    const offset = rotatedVector({ x: object.x - anchor.x, y: object.y - anchor.y }, rotation);
+    const point = transformSelectionPoint({ x: anchor.x + offset.x, y: anchor.y + offset.y }, delta, scale, anchor);
+    return { ...object, ...point, scale: object.scale * scale, rotation: (object.rotation ?? 0) + rotation };
+  }
+
+  const previewGroup = $derived(selectedGroup && transformPreview
+    ? transformed(selectedGroup, transformPreview) : selectedGroup);
+
+  const previewShapes = $derived(env.shapes.map(shape =>
+    transformPreview?.objects.has(shape.id) ? transformed(shape, transformPreview) : shape,
+  ));
+  const previewImages = $derived(env.images.map(image =>
+    transformPreview?.objects.has(image.id) ? transformed(image, transformPreview) : image,
+  ));
+  const previewBlocks = $derived(env.typstBlocks.map(block =>
+    transformPreview?.objects.has(block.id) ? { ...block, transform: transformed(block.transform, transformPreview) } : block,
+  ));
 
   function beginMixedTransform() {
-    mixedTransformBase = { blocks: env.typstBlocks, images: env.images, shapes: env.shapes, strokes: env.strokes };
-    mixedTransformChanged = false;
-    mixedStrokePreview = null;
+    const { current } = env.editContext();
+    mixedGesture = { current, objects: new Set(lassoObjectIds), strokes: [...selectedStrokeIds] };
+    transformPreview = null;
   }
 
-  function previewMixedTransform(delta: Point, scale: number, anchor: Point) {
-    if (!mixedTransformBase) return;
-    const base = mixedTransformBase;
-    const selected = new Set(lassoObjectIds);
-    env.typstBlocks = base.blocks.map(block => selected.has(block.id) ? { ...block, transform: {
-      ...block.transform, ...transformSelectionPoint(block.transform, delta, scale, anchor), scale: block.transform.scale * scale,
-    } } : block);
-    env.images = base.images.map(image => selected.has(image.id) ? { ...image,
-      ...transformSelectionPoint(image, delta, scale, anchor), scale: image.scale * scale } : image);
-    env.shapes = base.shapes.map(shape => selected.has(shape.id) ? { ...shape,
-      ...transformSelectionPoint(shape, delta, scale, anchor), scale: shape.scale * scale } : shape);
-    mixedStrokePreview = { ids: selectedStrokeIds, delta, scale, anchor };
-    mixedTransformChanged = delta.x !== 0 || delta.y !== 0 || scale !== 1;
+  function previewMixedTransform(delta: Point, scale: number, anchor: Point, rotation = 0) {
+    if (!mixedGesture?.current()) return;
+    transformPreview = { objects: mixedGesture.objects, ink: { ids: mixedGesture.strokes, delta, scale, anchor }, rotation };
   }
 
-  function endMixedTransform(cancelled: boolean) {
-    const base = mixedTransformBase;
-    mixedTransformBase = null;
-    if (!base) return;
-    if (cancelled) { env.typstBlocks = base.blocks; env.images = base.images; env.shapes = base.shapes; env.strokes = base.strokes; }
-    else if (mixedTransformChanged) {
-      if (mixedStrokePreview) env.strokes = finishInkPreview(base.strokes, mixedStrokePreview);
-      env.queueCommit(notice("workspace.transformedSelection"));
+  function endMixedTransform(cancelled: boolean, debounce = false) {
+    const gesture = mixedGesture;
+    const preview = transformPreview;
+    const nextShapes = previewShapes, nextImages = previewImages, nextBlocks = previewBlocks;
+    mixedGesture = null;
+    transformPreview = null;
+    if (cancelled || !gesture?.current() || !preview) return;
+    const { delta, scale } = preview.ink;
+    if (delta.x === 0 && delta.y === 0 && scale === 1 && preview.rotation === 0) return;
+
+    for (const group of shapeGroups) {
+      if (!group.childIds.every(id => gesture.objects.has(id))) continue;
+      const { x, y, scale, rotation } = transformed(group, preview);
+      groupEdits = new Map(groupEdits).set(group.id, { x, y, scale, rotation });
     }
-    mixedStrokePreview = null;
+    env.shapes = nextShapes;
+    env.images = nextImages;
+    env.typstBlocks = nextBlocks;
+    if (preview.ink.ids.length) env.strokes = finishInkPreview(env.strokes, preview.ink);
+    if (debounce) env.scheduleInkCommit(notice("workspace.movedSelection"));
+    else env.queueCommit(notice("workspace.transformedSelection"));
   }
 
   let directObjectInput = $state(false);
@@ -219,7 +345,7 @@ export function createSelection(env: SelectionEnvironment) {
    */
   function updateInkSelection(ids: string[]) {
     selectedStrokeIds = ids;
-    const next = toolAfterSelection(env.tool, ids.length + lassoObjectIds.length, selectionReturnTo);
+    const next = toolAfterSelection(env.tool, ids.length + lassoObjectIds.length + Number(enteredGroupId !== null), selectionReturnTo);
     env.tool = next.tool;
     selectionReturnTo = next.returnTo;
   }
@@ -289,11 +415,12 @@ export function createSelection(env: SelectionEnvironment) {
       .find((element) => element && env.workspace?.contains(element));
     directObjectInput = Boolean(object);
     if (event.type !== "pointerdown") return;
-    lassoObjectIds = [];
     const objectId =
       object?.dataset.objectId ??
       object?.querySelector<HTMLElement>("[data-object-id]")?.dataset.objectId ??
       null;
+    if (enteredGroupId && shapeGroupFor(objectId)?.id !== enteredGroupId) exitGroup();
+    lassoObjectIds = [];
     selectedTypstId = object?.classList.contains("typst-block")
       ? objectId
       : null;
@@ -332,6 +459,7 @@ export function createSelection(env: SelectionEnvironment) {
     ) {
       return;
     }
+    exitGroup();
     if (lassoObjectIds.length) { lassoObjectIds = []; updateInkSelection([]); }
     selectedTypstId = null;
     selectedImageId = null;
@@ -350,7 +478,9 @@ export function createSelection(env: SelectionEnvironment) {
     const ids = new Set(selection.objects);
     const inkIds = new Set(selection.strokes);
     if (!ids.size && !inkIds.size) return false;
-    if (env.activeSnapshot?.page.objects.some(object => ids.has(object.id) && object.groupId && object.groupId !== mixedGroup?.groupId) ||
+    const wholeGroups = shapeGroups.filter(group => group.childIds.every(id => ids.has(id)));
+    const allowed = new Set([...wholeGroups.map(group => group.id), enteredGroupId, mixedGroup?.groupId]);
+    if (env.activeSnapshot?.page.objects.some(object => ids.has(object.id) && object.groupId && groupEdits.get(object.groupId) !== null && !allowed.has(object.groupId)) ||
       env.strokes.some(stroke => inkIds.has(stroke.id) && stroke.groupId && stroke.groupId !== mixedGroup?.inkGroupId)) {
       env.status = notice("workspace.ungroupThisSelectionBeforeDeletingIt");
       return false;
@@ -359,6 +489,11 @@ export function createSelection(env: SelectionEnvironment) {
       mixedGroup = { ...mixedGroup, active: false };
       env.strokes = env.strokes.map(stroke => groupedStrokeIds.includes(stroke.id) ? { ...stroke, groupId: null } : stroke);
       groupedStrokeIds = [];
+    }
+    if (wholeGroups.length) {
+      const edits = new Map(groupEdits);
+      for (const group of wholeGroups) edits.set(group.id, null);
+      groupEdits = edits;
     }
     env.typstBlocks = env.typstBlocks.filter(block => !ids.has(block.id));
     for (const image of env.images) if (ids.has(image.id) && image.url.startsWith("blob:")) URL.revokeObjectURL(image.url);
@@ -379,10 +514,10 @@ export function createSelection(env: SelectionEnvironment) {
   /// Arrow-key movement for the current selection; batched through the ink debounce so
   /// holding a key produces one committed action.
   function nudgeSelection(dx: number, dy: number): boolean {
+    if (mixedGesture) return true;
     if (lassoObjectIds.length) {
       beginMixedTransform(); previewMixedTransform({ x: dx, y: dy }, 1, { x: 0, y: 0 });
-      mixedTransformBase = null;
-      env.scheduleInkCommit(notice("workspace.movedSelection"));
+      endMixedTransform(false, true);
       return true;
     }
     if (selectedTypstId) {
@@ -475,7 +610,8 @@ export function createSelection(env: SelectionEnvironment) {
     const ids = new Set(selection.strokes);
     const objectIds = new Set(selection.objects);
     const selectedImages = env.images.filter(image => objectIds.has(image.id));
-    const canonicalObjects = env.activeSnapshot?.page.objects ?? [];
+    const canonicalObjects = (env.activeSnapshot?.page.objects ?? []).filter(object => groupEdits.get(object.id) !== null)
+      .map(object => object.type === "group" ? { ...object, ...groupEdits.get(object.id) } : object);
     // Capture every value before fetching bytes; selection and page state may change meanwhile.
     const bundle: ClipboardBundle = {
       token: crypto.randomUUID(),
@@ -665,6 +801,9 @@ export function createSelection(env: SelectionEnvironment) {
     const now = new Date().toISOString();
     if (groups.length) env.addCopiedGroups?.(groups.map((group) => ({
       ...group, id: copies.get(group.id)!, childIds: group.childIds.map((id) => copies.get(id)!),
+      ...(group.stretch ? { stretch: { ...group.stretch, parts: group.stretch.parts.map(part => ({
+        ...part, childId: copies.get(part.childId)!,
+      })) } } : {}),
       x: group.x + shift.dx, y: group.y + shift.dy, zIndex: zIndex++, readingOrder: readingOrder++,
       groupId: parents.get(group.id) ?? null, createdAt: now, modifiedAt: now,
       addonData: pastedAddonData(group.addonData, copies, destination),
@@ -696,7 +835,13 @@ export function createSelection(env: SelectionEnvironment) {
     contextMenu = { x: clientX, y: clientY, at: env.navigation.pagePointAt(clientX, clientY) };
   }
 
-  function canvasContextMenu(event: MouseEvent) {
+  let lastCanvasPointer: { type: string; time: number } | undefined;
+
+  function noteCanvasPointer(event: PointerEvent) {
+    lastCanvasPointer = { type: event.pointerType, time: event.timeStamp };
+  }
+
+  function canvasContextMenu(event: MouseEvent & { pointerType?: string }) {
     // A pen's barrel press is a tool, handled on the ink surface, which cancels the menu there.
     if (event.defaultPrevented) return;
     const target = event.target instanceof Element ? event.target : null;
@@ -705,6 +850,9 @@ export function createSelection(env: SelectionEnvironment) {
     event.preventDefault();
     // Windows/browser touch right-taps can arrive even after the long-press timer was cancelled.
     if (!nativeContextMenuAllowed(event)) return;
+    // A Windows pen hold can also arrive as a compatibility mouse event.
+    if (lastCanvasPointer && (lastCanvasPointer.type === "pen" || lastCanvasPointer.type === "touch") &&
+      event.timeStamp - lastCanvasPointer.time < 1500) return;
     openContextMenu(event.clientX, event.clientY);
   }
 
@@ -880,9 +1028,18 @@ export function createSelection(env: SelectionEnvironment) {
     let anchor: ViewRect | null = null;
     const objectId = selectedObjectId();
     if (objectId) {
-      anchor = env.workspace
-        .querySelector<HTMLElement>(`.active-page [data-object-id="${CSS.escape(objectId)}"]`)
-        ?.getBoundingClientRect() ?? null;
+      // A selected shape draws its handles in a second layer under the same id; the rotate handle
+      // sits above the outline, so placing the bar against the outline alone covered it.
+      const rects = [...env.workspace
+        .querySelectorAll<Element>(`.active-page [data-object-id="${CSS.escape(objectId)}"]`)]
+        .map((element) => element.getBoundingClientRect());
+      if (rects.length) {
+        const left = Math.min(...rects.map((rect) => rect.left));
+        const top = Math.min(...rects.map((rect) => rect.top));
+        const right = Math.max(...rects.map((rect) => rect.right));
+        const bottom = Math.max(...rects.map((rect) => rect.bottom));
+        anchor = { left, top, right, bottom, width: right - left, height: bottom - top };
+      }
     } else {
       const bounds = env.regionBounds ?? mixedSelectionBounds ?? selectionBounds(env.strokes, inkActionIds());
       const frame = env.pageFrame?.getBoundingClientRect();
@@ -891,8 +1048,8 @@ export function createSelection(env: SelectionEnvironment) {
         const topLeft = pageToScreen({ x: bounds.left, y: bounds.top }, frame, view);
         const bottomRight = pageToScreen({ x: bounds.right, y: bounds.bottom }, frame, view);
         anchor = {
-          left: topLeft.x, top: topLeft.y, right: bottomRight.x, bottom: bottomRight.y,
-          width: bottomRight.x - topLeft.x, height: bottomRight.y - topLeft.y,
+          left: topLeft.x, top: topLeft.y - (selectedGroup ? 48 : 0), right: bottomRight.x, bottom: bottomRight.y,
+          width: bottomRight.x - topLeft.x, height: bottomRight.y - topLeft.y + (selectedGroup ? 48 : 0),
         };
       }
     }
@@ -989,6 +1146,17 @@ export function createSelection(env: SelectionEnvironment) {
   }
   return {
     dispose,
+    selectGroup,
+    selectShape,
+    enterGroup,
+    exitGroup,
+    ungroupShapes,
+    shapeGroupFor,
+    get selectedGroup() { return selectedGroup; },
+    get previewGroup() { return previewGroup; },
+    get enteredGroup() { return enteredGroup; },
+    get groupEdits() { return groupEdits; },
+    set groupEdits(value: typeof groupEdits) { groupEdits = value; },
     lassoSelection,
     beginMixedTransform,
     previewMixedTransform,
@@ -1007,6 +1175,7 @@ export function createSelection(env: SelectionEnvironment) {
     pasteBundle,
     openContextMenu,
     canvasContextMenu,
+    noteCanvasPointer,
     fromContext,
     handlePaste,
     selectedObjectId,
@@ -1034,6 +1203,9 @@ export function createSelection(env: SelectionEnvironment) {
     get lassoObjectIds() { return lassoObjectIds; },
     set lassoObjectIds(value: typeof lassoObjectIds) { lassoObjectIds = value; },
     get mixedStrokePreview() { return mixedStrokePreview; },
+    get previewShapes() { return previewShapes; },
+    get previewImages() { return previewImages; },
+    get previewBlocks() { return previewBlocks; },
     get selectionReturnTo() { return selectionReturnTo; },
     set selectionReturnTo(value: typeof selectionReturnTo) { selectionReturnTo = value; },
     get directObjectInput() { return directObjectInput; },

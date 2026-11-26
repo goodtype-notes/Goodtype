@@ -93,6 +93,7 @@ pub struct AppSettings {
     pub shape_fill: bool,
     /// Line pattern for the Shapes tool: "solid", "dashed" or "dotted".
     pub shape_pattern: String,
+    pub shape_end_cap: goodtype_core::ShapeCap,
     /// Gap factor for the Shapes tool's pattern.
     pub shape_pattern_spacing: f64,
     pub shape_constrain: bool,
@@ -291,6 +292,7 @@ impl Default for AppSettings {
             shape_kind: "line".into(),
             shape_fill: false,
             shape_pattern: default_pen_pattern(),
+            shape_end_cap: goodtype_core::ShapeCap::None,
             shape_pattern_spacing: 1.0,
             shape_constrain: false,
             shape_end_snap: true,

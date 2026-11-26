@@ -81,6 +81,7 @@ fn stage(
             },
             direct: false,
             correction,
+            replacement: false,
         },
     );
     id
@@ -414,4 +415,77 @@ fn post_run_compiles_honor_cancel() {
         items(reply, &capture, "a", || true).err().as_deref(),
         Some("addon-cancelled")
     );
+}
+
+#[test]
+fn path_review_replaces_one_object_and_restores_the_absent_entry_on_undo() {
+    use super::super::batch;
+    let mut book = book();
+    let mut before = storage::open_page(&book.root, PAGE).unwrap();
+    let object: PageObject = serde_json::from_value(json!({
+        "id":"arrow","type":"shape","x":80,"y":100,"rotation":0,"scale":1,"zIndex":20,
+        "readingOrder":before.page.reading_order.len(),
+        "createdAt":"2026-11-25T01:01:01Z","modifiedAt":"2026-11-25T01:01:01Z",
+        "geometry":{"kind":"line","start":{"x":0,"y":0},"end":{"x":40,"y":0}},
+        "style":{"strokeColor":"#182c39","strokeWidthPt":2,"fillColor":null,"opacity":1,"endCap":"arrow"}
+    })).unwrap();
+    before.page.reading_order.push("arrow".into());
+    before.page.objects.push(object);
+    storage::raise_schema_version(&mut before);
+    let before = storage::commit_notebook(&book.root, &mut book.history, before)
+        .unwrap()
+        .snapshot;
+    let grant = batch::PathGrant {
+        id: "arrow".into(),
+        refs: HashSet::new(),
+        attached: None,
+    };
+    let candidate = batch::apply_path_edit(
+        before.clone(),
+        "connectors",
+        &grant,
+        json!({
+            "batch":{"operations":[{"op":"updateObject","id":"arrow",
+                "geometry":{"kind":"line","start":{"x":0,"y":0},"end":{"x":60,"y":10}},
+                "addonData":{"refs":[],"data":{"version":2}}}]}
+        }),
+    )
+    .unwrap();
+    let mut capture = captured(&book);
+    capture.base = storage::proposal_base(&book.root, &before, &["arrow".into()]).unwrap();
+    let proposals = Proposals::default();
+    let next = candidate.page.objects.last().unwrap();
+    let id = stage(
+        &proposals,
+        capture,
+        vec![batch::preview_item(next.clone())],
+        None,
+    );
+    {
+        let mut pending = proposals.pending.lock().unwrap();
+        let review = pending.get_mut(&id).unwrap();
+        review.replacement = true;
+        review.review.kind = "pathChoice";
+    }
+    assert!(
+        proposals
+            .commit(&book.root, PAGE, &mut book.history, &id, 1, |_| Ok(
+                None::<()>
+            ))
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        v(&storage::open_page(&book.root, PAGE).unwrap().page.objects),
+        v(&before.page.objects)
+    );
+    let result = proposals
+        .commit(&book.root, PAGE, &mut book.history, &id, 1, granted)
+        .unwrap()
+        .unwrap();
+    assert_eq!(v(&result.snapshot.page.objects), v(&candidate.page.objects));
+    let undo = storage::undo_notebook(&book.root, &mut book.history).unwrap();
+    assert_eq!(v(&undo.snapshot.page.objects), v(&before.page.objects));
+    let redo = storage::redo_notebook(&book.root, &mut book.history).unwrap();
+    assert_eq!(v(&redo.snapshot.page.objects), v(&candidate.page.objects));
 }

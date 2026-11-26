@@ -17,6 +17,16 @@ describe("SelectionActions", () => {
     expect(html).not.toContain("Send to back");
   });
 
+  it("offers both cap choices with accessible labels for eligible shapes", () => {
+    const html = render(SelectionActions, {
+      props: { ...base, subject: "shape", shapeCaps: { endCap: "arrow", onChange: noop } },
+    }).body;
+    expect(html).toContain('aria-label="Start cap"');
+    expect(html).toContain('aria-label="End cap"');
+    expect(html).toContain('value="arrow" selected');
+    expect(render(SelectionActions, { props: base }).body).not.toContain("Start cap");
+  });
+
   it("shows Paste in the bar when a long press opened it", () => {
     const html = render(SelectionActions, { props: { ...base, onCopy: noop, onPaste: noop } }).body;
     expect(html).toContain('aria-label="Paste here"');

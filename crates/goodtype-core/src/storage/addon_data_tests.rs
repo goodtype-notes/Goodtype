@@ -25,6 +25,8 @@ fn shape(id: &str, order: u32) -> PageObject {
             pattern: StrokePattern::Solid,
             pattern_spacing: 1.0,
             pattern_offset_pt: 0.0,
+            start_cap: Default::default(),
+            end_cap: Default::default(),
         },
     }
 }

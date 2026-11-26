@@ -10,10 +10,11 @@ pub mod paths;
 pub mod pattern;
 pub mod shape;
 pub mod storage;
+pub mod stretch;
 pub mod template;
 
 pub use object::{IdRemap, ObjectFields, PageObject, SourceRef, SourceRole};
-pub use shape::{BezierNode, ShapeGeometry, ShapePoint, ShapeStyle};
+pub use shape::{BezierNode, ShapeCap, ShapeGeometry, ShapePoint, ShapeStyle};
 
 /// The oldest notebook this build still reads and writes.
 pub const MIN_SUPPORTED_SCHEMA_VERSION: u32 = 1;

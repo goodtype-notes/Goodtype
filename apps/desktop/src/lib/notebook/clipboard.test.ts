@@ -63,9 +63,11 @@ describe("clipboard bundles", () => {
   });
 
   it("gives pasted shapes fresh ids and moves them", () => {
-    const [copy] = pastedShapes([shape], { dx: 12, dy: 12 }, 9, 7, () => "shape-new");
+    const capped = { ...shape, style: { ...shape.style, startCap: "bar" as const, endCap: "arrow" as const } };
+    const [copy] = pastedShapes([capped], { dx: 12, dy: 12 }, 9, 7, () => "shape-new");
     expect(copy).toMatchObject({ id: "shape-new", x: 62, y: 72, zIndex: 9, readingOrder: 7 });
     expect(copy.geometry).toEqual(shape.geometry);
+    expect(copy.style).toEqual(capped.style);
   });
 
   it("remaps copied refs and retains external refs only when the original is on the destination", () => {

@@ -154,7 +154,11 @@ export type ShapeGeometry =
   | { kind: "ellipse"; widthPt: number; heightPt: number }
   | { kind: "spline"; nodes: BezierNode[]; closed: boolean };
 
+export type ShapeCap = "none" | "arrow" | "open" | "dot" | "bar";
+
 export type ShapeStyle = {
+  startCap?: ShapeCap;
+  endCap?: ShapeCap;
   strokeColor: string;
   strokeWidthPt: number;
   fillColor: string | null;
@@ -208,7 +212,15 @@ export type PageObject =
       geometry: ShapeGeometry;
       style: ShapeStyle;
     })
-  | (ObjectFields & { type: "group"; childIds: string[] });
+  | (ObjectFields & { type: "group"; childIds: string[]; stretch?: StretchRule });
+
+export type StretchRule = {
+  axis: [number, number];
+  parts: { childId: string; role: "body" | "startLead" | "endLead" | "throughLine" | "span" }[];
+  limits:
+    | { mode: "fixedBody"; socketSeparation: number; leadFloors: [number, number]; startShare: number }
+    | { mode: "span"; minimumLength: number };
+};
 
 export type InkLayer = {
   schemaVersion: number;

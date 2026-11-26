@@ -316,7 +316,7 @@ independently and retain at most 16 KiB locally for explicit diagnostics.
 
 | Method | Direction and payload |
 | --- | --- |
-| `initialize` | Host request. Params and result contain `apiVersion`, `capabilities` and `addon` (`id` and `version`). Both sides MUST match the API and verified identity. The child returns a unique subset of the host's capability offer. |
+| `initialize` | Host request. Params and result contain `apiVersion`, `capabilities` and `addon` (`id` and `version`). Both sides MUST match the API and verified identity. The child returns a unique subset of the host's capability offer (`progress`, `cancel`, `page-batch-v0`, `path-edit-v0`). |
 | `command/invoke` | Host request after initialization. Params contain `command`, `scope` and validated addon `settings` keyed by descriptor ID. The first result has `batch.operations`. Selection commands require `page-batch-v0`. |
 | `command/progress` | Child notification only with negotiated `progress`. Params contain the outstanding `id`, a catalog-defined `phase` and integer `completed` and `total` with `0 ≤ completed ≤ total` and `total > 0`. Host UI updates MUST be coalesced to at most four per second. |
 | `command/cancel` | Host notification with `params.id`, only with negotiated `cancel`. Cancellation precludes publication even if a result races it. The host waits at most 1 s for cooperative shutdown, then terminates the job and ends the session. |
@@ -508,6 +508,18 @@ manifest's English and German string tables.
   `rgb(r g b / a%)` values. The host checks text, muted and quiet contrast
   on the panel and surround, and on-accent contrast on blueprint, at 4.5:1.
   A pack may contain up to 8 themes. Missing themes return to Default.
+- A shape item with two explicit ports can declare `stretch` (ADR 0049).
+  `axis` lists the port indices in left-to-right order on a horizontal axis.
+  `roles` lists one role per object in order. A `fixedBody` rule uses one or
+  more `body` parts, a `startLead` and an `endLead`, and optionally a
+  `throughLine`. A body with a through-line and no leads requires
+  `virtualSockets`, two distances from the start port. Optional `leadFloors`
+  default to 4 pack points per end. A `span` rule uses only `span` parts
+  made from lines, open splines or square-corner rectangles and stops at
+  half the authored span or 4 pack points, whichever is larger. At least
+  one span part must meet both ports. The host stores the resolved rule on
+  a Group even for a single shape. Publish these packs after the host
+  supports the declaration.
 - Typst package directories must be `content/typst/preview/<name>/<version>`
   with matching `typst.toml`. A pack may contain up to 16. Goodtype resolves
   regular local Typst packages first, then app-owned offline copies, then
@@ -603,3 +615,62 @@ one undo step.
 For local development, the debug Addons page accepts a catalog-known session
 addon folder containing its manifest and Windows executable. The same
 permission approval and AppContainer session apply to local installs.
+
+### Path edits (ADR 0046 amendment)
+
+A catalog-approved `own-object` command with `own-objects` may declare
+`"pathEdit":{"choice":"routing","snap":"ports"}`. The choice names a declared
+choice setting. The session MUST negotiate `path-edit-v0` before use. The
+minimum Connectors version is 0.2.0 and its session always requires the capability.
+
+On `command/invoke` the host sends `command`, device `settings`, the page ID
+and dimensions (`page.id`, `widthPt`, `heightPt`), and the selected source
+`object`. The source contains `id`, `type`, `x`, `y`, `rotation`,
+`scale`, `geometry`, `style`, and only the calling addon's existing
+`addonData` entry, keyed by addon ID when present. There is no notebook path or
+unrelated page data. `refs` contains scoped part snapshots (ID, type, transform,
+bounds, page-space ports and shape geometry when applicable), limited to the
+source's live references and the newly dropped target. `points` contains two
+ordered page-space points, each with `attach` (null or `{objectId,port}`).
+Only the edited end can have a supplied attachment. The addon resolves the
+unchanged end from the caller's entry and the snapshots. The `edit` is either
+`{kind:"choice",value}` or `{kind:"endpoint",end:"start"|"end"}`. A choice
+does not change device settings.
+
+Return exactly one `updateObject` in `batch.operations` with the captured ID,
+line or open-spline `geometry`, and non-null single-entry `addonData`.
+Refs must be a subset of the grant and include any new dropped target.
+Preserve the source transform, style, order and group membership. A recognized
+legacy conversion may supply the captured full style with missing caps filled
+in on an already-owned spline. Existing explicit caps are preserved.
+
+A displayed port drop commits directly in one undo step. Routing choices and
+free endpoint releases follow proposal review or the two direct-apply opt-ins.
+
+## Minimum host features
+
+Manifests may declare `requires: ["end-caps", "group-stretch", "path-edit-v0"]`.
+The field is optional and omitted when empty. The host accepts at most 16 unique
+identifier-safe feature names (lowercase ASCII letters/digits separated by hyphens,
+using the same bounded identifier validation as contribution IDs). Unknown requirements
+refuse installation and enablement with "Needs a newer Goodtype" and the feature names.
+An installed incompatible package stays on disk but contributes nothing and cannot launch.
+Content packs use the same gate. `wasm-v0` is not supported.
+
+This host implements caps through core ShapeStyle and shared frontend/export cap geometry,
+stretch through core stretch rules and frontend stretch gestures, and path edits through
+Rust revision-bound connector grants and batch validation. Connectors must explicitly
+require `path-edit-v0`; command access remains restricted to `change-routing`. Version
+numbers no longer grant path-edit access. Existing pre-0.2 packages without this declaration
+remain refused; an explicitly declaring package is judged by its contract rather than version.
+
+Released v0.3 hosts deserialize Manifest with `deny_unknown_fields`, so even `requires: []`
+is refused there with their existing generic manifest error. Keep the field absent for packages
+that need no new feature and should work on those hosts.
+
+The signed registry index and its releases use `deny_unknown_fields`; adding requirements
+there would break released stores. The signed update descriptor tolerates extra fields, but
+has no requirement producer or pre-download selection contract today. Neither format changes
+here: the downloaded package manifest is the installation gate. Handshake negotiation stays
+unchanged. Shared manifest conformance inputs and expected outcomes live in
+`fixtures/addon-requires`; sibling repositories can copy or fetch them at a pinned commit.

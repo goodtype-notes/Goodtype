@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use goodtype_core::{
-    PageBackground, PageGeometry, ShapeGeometry, ShapePoint, ShapeStyle, StrokePattern, StrokeTool,
-    StrokeTrim,
+    PageBackground, PageGeometry, ShapeCap, ShapeGeometry, ShapePoint, ShapeStyle, StrokePattern,
+    StrokeTool, StrokeTrim,
     outline::{OutlineOptions, OutlinePoint, OutlineTrim},
     pattern::patterned_outline_points,
     template::{Area, Edge, TemplateElement, TemplateShape, resolve},
@@ -1162,7 +1162,252 @@ fn shape_dash_array(style: &ShapeStyle) -> Option<[f64; 2]> {
     }
 }
 
+struct EndCap {
+    kind: ShapeCap,
+    points: Vec<ShapePoint>,
+    radius: f64,
+}
+
+/// Cap marks with the radius of their outline, in the shape's local coordinates.
+pub fn shape_cap_marks(
+    geometry: &ShapeGeometry,
+    style: &ShapeStyle,
+) -> impl Iterator<Item = (Vec<ShapePoint>, f64)> {
+    shape_caps(geometry, style)
+        .0
+        .into_iter()
+        .map(|cap| (cap.points, cap.radius))
+}
+
+// Mirrors shapeCaps in the desktop geometry module.
+fn shape_caps(
+    geometry: &ShapeGeometry,
+    style: &ShapeStyle,
+) -> (Vec<EndCap>, Option<ShapeGeometry>) {
+    use goodtype_core::BezierNode;
+    let nodes = match geometry {
+        ShapeGeometry::Line { start, end } => vec![
+            BezierNode {
+                point: *start,
+                handle_in: None,
+                handle_out: None,
+            },
+            BezierNode {
+                point: *end,
+                handle_in: None,
+                handle_out: None,
+            },
+        ],
+        ShapeGeometry::Spline {
+            nodes,
+            closed: false,
+        } => nodes.clone(),
+        _ => return (Vec::new(), Some(geometry.clone())),
+    };
+    if nodes.len() < 2 {
+        return (Vec::new(), Some(geometry.clone()));
+    }
+    let width = style.stroke_width_pt;
+    let mut caps = Vec::new();
+    for (start, kind) in [(true, style.start_cap), (false, style.end_cap)] {
+        if kind == ShapeCap::None {
+            continue;
+        }
+        let last = nodes.len() - 1;
+        let (node, neighbour) = if start {
+            (&nodes[0], &nodes[1])
+        } else {
+            (&nodes[last], &nodes[last - 1])
+        };
+        let tip = node.point;
+        let handle = if start {
+            node.handle_out
+        } else {
+            node.handle_in
+        };
+        let direction = handle
+            .filter(|h| h.x.hypot(h.y) > 0.0)
+            .unwrap_or_else(|| vector(tip, neighbour.point));
+        let length = direction.x.hypot(direction.y);
+        let (x, y) = if length > 0.0 {
+            (direction.x / length, direction.y / length)
+        } else {
+            (if start { 1.0 } else { -1.0 }, 0.0)
+        };
+        let depth = if kind == ShapeCap::Bar {
+            0.0
+        } else {
+            4.0 * width
+        };
+        let half = if kind == ShapeCap::Open {
+            1.75 * width
+        } else {
+            2.0 * width
+        };
+        let wing = |side| ShapePoint {
+            x: tip.x + depth * x - side * half * y,
+            y: tip.y + depth * y + side * half * x,
+        };
+        let points = match kind {
+            ShapeCap::Dot => vec![tip],
+            ShapeCap::Bar => vec![wing(1.0), wing(-1.0)],
+            _ => vec![wing(1.0), tip, wing(-1.0)],
+        };
+        let radius = match kind {
+            ShapeCap::Dot => 1.5 * width,
+            ShapeCap::Arrow => 0.0,
+            _ => width / 2.0,
+        };
+        caps.push(EndCap {
+            kind,
+            points,
+            radius,
+        });
+    }
+    let trim = |cap| {
+        if cap == ShapeCap::Arrow {
+            arrow_trim(width)
+        } else {
+            0.0
+        }
+    };
+    let start_trim = trim(style.start_cap);
+    let end_trim = trim(style.end_cap);
+    let shaft = if start_trim == 0.0 && end_trim == 0.0 {
+        Some(geometry.clone())
+    } else if let ShapeGeometry::Line { start, end } = geometry {
+        let delta = vector(*start, *end);
+        let length = delta.x.hypot(delta.y);
+        (length > start_trim + end_trim).then(|| ShapeGeometry::Line {
+            start: interpolate(*start, *end, start_trim / length),
+            end: interpolate(*end, *start, end_trim / length),
+        })
+    } else {
+        let mut nodes = nodes;
+        trim_spline_start(&mut nodes, start_trim);
+        reverse_nodes(&mut nodes);
+        trim_spline_start(&mut nodes, end_trim);
+        reverse_nodes(&mut nodes);
+        (nodes.len() >= 2).then_some(ShapeGeometry::Spline {
+            nodes,
+            closed: false,
+        })
+    };
+    (caps, shaft)
+}
+
+fn arrow_trim(width: f64) -> f64 {
+    3.5 * width
+}
+
+fn vector(from: ShapePoint, to: ShapePoint) -> ShapePoint {
+    ShapePoint {
+        x: to.x - from.x,
+        y: to.y - from.y,
+    }
+}
+
+fn interpolate(a: ShapePoint, b: ShapePoint, t: f64) -> ShapePoint {
+    let delta = vector(a, b);
+    ShapePoint {
+        x: a.x + delta.x * t,
+        y: a.y + delta.y * t,
+    }
+}
+
+fn reverse_nodes(nodes: &mut [goodtype_core::BezierNode]) {
+    nodes.reverse();
+    for node in nodes {
+        std::mem::swap(&mut node.handle_in, &mut node.handle_out);
+    }
+}
+
+fn trim_spline_start(nodes: &mut Vec<goodtype_core::BezierNode>, mut remaining: f64) {
+    if remaining == 0.0 {
+        return;
+    }
+    for i in 0..nodes.len().saturating_sub(1) {
+        let from = &nodes[i];
+        let to = &nodes[i + 1];
+        let (a, d) = (from.point, to.point);
+        let b = offset_point(a, from.handle_out);
+        let c = offset_point(d, to.handle_in);
+        let split = |t| {
+            let ab = interpolate(a, b, t);
+            let bc = interpolate(b, c, t);
+            let cd = interpolate(c, d, t);
+            let abc = interpolate(ab, bc, t);
+            let bcd = interpolate(bc, cd, t);
+            (interpolate(abc, bcd, t), bcd, cd)
+        };
+        let mut previous = a;
+        for step in 1..=32 {
+            let next = split(f64::from(step) / 32.0).0;
+            let delta = vector(previous, next);
+            let length = delta.x.hypot(delta.y);
+            if remaining < length {
+                let (point, bcd, cd) = split((f64::from(step - 1) + remaining / length) / 32.0);
+                nodes[i + 1].handle_in = Some(vector(d, cd));
+                nodes.splice(
+                    ..=i,
+                    [goodtype_core::BezierNode {
+                        point,
+                        handle_in: None,
+                        handle_out: Some(vector(point, bcd)),
+                    }],
+                );
+                return;
+            }
+            remaining -= length;
+            previous = next;
+        }
+    }
+    nodes.clear();
+}
+
+fn cap_element(cap: &EndCap, style: &ShapeStyle) -> String {
+    let color = &style.stroke_color;
+    let width = style.stroke_width_pt;
+    let first = cap.points[0];
+    if cap.kind == ShapeCap::Dot {
+        return format!(
+            r#"<circle cx="{}" cy="{}" r="{}" fill="{color}"/>"#,
+            first.x, first.y, cap.radius
+        );
+    }
+    let mut path = format!("M {} {}", first.x, first.y);
+    for point in &cap.points[1..] {
+        path.push_str(&format!(" L {} {}", point.x, point.y));
+    }
+    if cap.kind == ShapeCap::Arrow {
+        format!(r#"<path d="{path} Z" fill="{color}"/>"#)
+    } else {
+        format!(
+            r#"<path d="{path}" fill="none" stroke="{color}" stroke-width="{width}" stroke-linecap="round" stroke-linejoin="round"/>"#
+        )
+    }
+}
+
 fn shape_element(shape: &ExportShape) -> String {
+    if shape.style.start_cap.is_none() && shape.style.end_cap.is_none() {
+        return shape_shaft_element(shape, &shape.geometry, false);
+    }
+    let (caps, shaft) = shape_caps(&shape.geometry, &shape.style);
+    let mut svg = format!(
+        r#"<g transform="translate({} {}) rotate({}) scale({})" opacity="{}">"#,
+        shape.x, shape.y, shape.rotation_degrees, shape.scale, shape.style.opacity
+    );
+    if let Some(shaft) = shaft {
+        svg.push_str(&shape_shaft_element(shape, &shaft, true));
+    }
+    for cap in &caps {
+        svg.push_str(&cap_element(cap, &shape.style));
+    }
+    svg.push_str("</g>");
+    svg
+}
+
+fn shape_shaft_element(shape: &ExportShape, geometry: &ShapeGeometry, grouped: bool) -> String {
     let fill = shape.style.fill_color.as_deref().unwrap_or("none");
     let transform = format!(
         "translate({} {}) rotate({}) scale({})",
@@ -1172,11 +1417,14 @@ fn shape_element(shape: &ExportShape) -> String {
         .map(|[dash, gap]| {
             let tidy = |value: f64| (value * 1000.0).round() / 1000.0;
             // A piece cut by the precise eraser continues its original's dashes (ADR 0037).
-            let offset = if shape.style.pattern_offset_pt > 0.0 {
-                format!(
-                    r#" stroke-dashoffset="{}""#,
-                    tidy(shape.style.pattern_offset_pt)
-                )
+            let start_trim = if grouped && shape.style.start_cap == ShapeCap::Arrow {
+                arrow_trim(shape.style.stroke_width_pt)
+            } else {
+                0.0
+            };
+            let offset = shape.style.pattern_offset_pt + start_trim;
+            let offset = if offset > 0.0 {
+                format!(r#" stroke-dashoffset="{}""#, tidy(offset))
             } else {
                 String::new()
             };
@@ -1187,11 +1435,19 @@ fn shape_element(shape: &ExportShape) -> String {
             )
         })
         .unwrap_or_default();
+    let placement = if grouped {
+        String::new()
+    } else {
+        format!(
+            r#" opacity="{}" transform="{transform}""#,
+            shape.style.opacity
+        )
+    };
     let common = format!(
-        r#"stroke="{}" stroke-width="{}"{dash} stroke-linecap="round" stroke-linejoin="round" opacity="{}" transform="{}""#,
-        shape.style.stroke_color, shape.style.stroke_width_pt, shape.style.opacity, transform,
+        r#"stroke="{}" stroke-width="{}"{dash} stroke-linecap="round" stroke-linejoin="round"{placement}"#,
+        shape.style.stroke_color, shape.style.stroke_width_pt,
     );
-    match &shape.geometry {
+    match geometry {
         ShapeGeometry::Line { start, end } => format!(
             r#"<line x1="{}" y1="{}" x2="{}" y2="{}" fill="none" {common}/>"#,
             start.x, start.y, end.x, end.y,
@@ -1274,6 +1530,60 @@ fn transformed_point(point: ExportPoint, transform: ExportTransform) -> ExportPo
 #[cfg(test)]
 mod tests {
     use std::fs;
+
+    #[test]
+    fn exports_solid_caps_and_trimmed_shafts_from_shared_fixture() {
+        let fixtures: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../../../fixtures/shape-end-caps.json")).unwrap();
+        for fixture in fixtures {
+            let geometry = serde_json::from_value(fixture["geometry"].clone()).unwrap();
+            let style = serde_json::from_value(fixture["style"].clone()).unwrap();
+            let (caps, shaft) = shape_caps(&geometry, &style);
+            let expected = fixture["caps"].as_array().unwrap();
+            assert_eq!(caps.len(), expected.len());
+            for (actual, expected) in caps.iter().zip(expected) {
+                assert_eq!(serde_json::to_value(actual.kind).unwrap(), expected["kind"]);
+                assert!((actual.radius - expected["radius"].as_f64().unwrap()).abs() < 1e-9);
+                let points: Vec<ShapePoint> =
+                    serde_json::from_value(expected["points"].clone()).unwrap();
+                assert_eq!(actual.points.len(), points.len());
+                for (actual, expected) in actual.points.iter().zip(points) {
+                    assert!((actual.x - expected.x).hypot(actual.y - expected.y) < 1e-9);
+                }
+                assert!(!cap_element(actual, &style).contains("dash"));
+            }
+            let expected: ShapeGeometry = serde_json::from_value(fixture["shaft"].clone()).unwrap();
+            let near = |actual: ShapePoint, expected: ShapePoint| {
+                assert!((actual.x - expected.x).hypot(actual.y - expected.y) < 1e-9);
+            };
+            match (shaft.unwrap(), expected) {
+                (ShapeGeometry::Line { start, end }, ShapeGeometry::Line { start: a, end: b }) => {
+                    near(start, a);
+                    near(end, b);
+                }
+                (
+                    ShapeGeometry::Spline { nodes, .. },
+                    ShapeGeometry::Spline {
+                        nodes: expected, ..
+                    },
+                ) => {
+                    assert_eq!(nodes.len(), expected.len());
+                    for (actual, expected) in nodes.iter().zip(expected) {
+                        near(actual.point, expected.point);
+                        near(
+                            offset_point(actual.point, actual.handle_in),
+                            offset_point(expected.point, expected.handle_in),
+                        );
+                        near(
+                            offset_point(actual.point, actual.handle_out),
+                            offset_point(expected.point, expected.handle_out),
+                        );
+                    }
+                }
+                _ => panic!("shaft geometry changed kind"),
+            }
+        }
+    }
 
     use super::*;
 
@@ -1580,6 +1890,8 @@ mod tests {
                 pattern: StrokePattern::Solid,
                 pattern_spacing: 1.0,
                 pattern_offset_pt: 0.0,
+                start_cap: Default::default(),
+                end_cap: Default::default(),
             },
         });
         p.images.push(ExportImage {
@@ -1729,6 +2041,8 @@ mod tests {
                 pattern: StrokePattern::Solid,
                 pattern_spacing: 1.0,
                 pattern_offset_pt: 0.0,
+                start_cap: Default::default(),
+                end_cap: Default::default(),
             },
         });
         let bytes = render_page_pdf(root.path(), &mixed).unwrap();
@@ -1853,6 +2167,8 @@ mod tests {
                 pattern: StrokePattern::Solid,
                 pattern_spacing: 1.0,
                 pattern_offset_pt: 0.0,
+                start_cap: Default::default(),
+                end_cap: Default::default(),
             },
         });
 
@@ -1917,6 +2233,8 @@ mod tests {
                 pattern: StrokePattern::Solid,
                 pattern_spacing: 1.0,
                 pattern_offset_pt: 0.0,
+                start_cap: Default::default(),
+                end_cap: Default::default(),
             },
         };
 

@@ -44,6 +44,7 @@ type Projection = {
   pageTypst: EditablePageTypst | null;
   images: EditableImage[];
   shapes: ShapeView[];
+  groupEdits?: ReadonlyMap<string, Pick<PageObject, "x" | "y" | "scale" | "rotation"> | null>;
   copiedGroups?: Extract<PageObject, { type: "group" }>[];
   sharedStyle: { path: string; source: string } | null;
   mixedGroup: ManagedMixedGroup | null;
@@ -75,6 +76,11 @@ export function projectSnapshot(input: Projection): NotebookSnapshot {
   };
 
   for (const object of oldObjects) {
+    if (object.type === "group" && input.groupEdits?.has(object.id)) {
+      const group = input.groupEdits.get(object.id);
+      if (group) objects.push(touched(object, { ...object, ...group }, input.now));
+      continue;
+    }
     if (input.mixedGroup && object.id === input.mixedGroup.inkGroupId) continue;
     if (input.mixedGroup && object.id === input.mixedGroup.groupId) continue;
 
@@ -183,7 +189,7 @@ export function projectSnapshot(input: Projection): NotebookSnapshot {
   }
   reconcileGroups(objects, input.mixedGroup?.groupId, input.now);
 
-  moveGroupPorts(objects, oldById, input.now);
+  moveGroupPorts(objects, oldById, input.now, input.groupEdits !== undefined);
 
   const present = new Set(objects.map((object) => object.id));
   const deleted = new Set(oldObjects.filter((object) => !present.has(object.id)).map((object) => object.id));
@@ -315,7 +321,7 @@ function patchTypst(
       ? mixedGroup.active
         ? mixedGroup.groupId
         : null
-      : object.groupId;
+      : block.groupId === undefined ? object.groupId : block.groupId;
   return {
     ...object,
     x: block.x,
@@ -387,6 +393,7 @@ function patchShape(
     zIndex: shape.zIndex,
     readingOrder: shape.readingOrder,
     modifiedAt: now,
+    groupId: shape.groupId === undefined ? object.groupId : shape.groupId,
     geometry: shape.geometry,
     style: shape.style,
   };
@@ -484,10 +491,16 @@ function reconcileGroups(objects: PageObject[], managedGroupId: string | undefin
  * A pack's children render in page coordinates. When they all move by the same transform,
  * carry the group's local port origin with them.
  */
-function moveGroupPorts(objects: PageObject[], previous: ReadonlyMap<string, PageObject>, now: string) {
+function moveGroupPorts(objects: PageObject[], previous: ReadonlyMap<string, PageObject>, now: string, packTransformsAreExplicit: boolean) {
   const next = new Map(objects.map((object) => [object.id, object]));
   for (const [index, group] of objects.entries()) {
     if (group.type !== "group" || group.ports === undefined) continue;
+    // The canvas records pack transforms explicitly. A part edit may produce the same delta
+    // as a group move, especially when erasing has left only one child.
+    if (packTransformsAreExplicit && group.childIds.every(id => {
+      const kind = next.get(id)?.type;
+      return kind === "shape" || kind === "typst";
+    })) continue;
     const childId = group.childIds[0];
     const before = previous.get(childId);
     const after = next.get(childId);

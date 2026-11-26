@@ -171,6 +171,8 @@ pub enum PageObject {
         #[serde(flatten)]
         fields: ObjectFields,
         child_ids: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stretch: Option<crate::stretch::StretchRule>,
     },
 }
 
@@ -289,7 +291,7 @@ impl PageObject {
                 geometry, style, ..
             } => {
                 geometry.validate()?;
-                style.validate()?;
+                style.validate_for(geometry)?;
             }
             Self::InkGroup { .. } | Self::Group { .. } => {}
         }
@@ -380,7 +382,19 @@ impl PageObject {
                 geometry: geometry.clone(),
                 style: style.clone(),
             },
-            Self::Group { child_ids, .. } => Self::Group {
+            Self::Group {
+                child_ids, stretch, ..
+            } => Self::Group {
+                stretch: stretch
+                    .as_ref()
+                    .map(|rule| {
+                        let mut rule = rule.clone();
+                        for part in &mut rule.parts {
+                            part.child_id = remap.object(&part.child_id)?;
+                        }
+                        Ok(rule)
+                    })
+                    .transpose()?,
                 fields,
                 child_ids: child_ids
                     .iter()

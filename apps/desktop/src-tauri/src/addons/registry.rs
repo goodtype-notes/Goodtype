@@ -151,7 +151,7 @@ fn digits(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-fn numeric_version(version: &str) -> Option<[u128; 3]> {
+pub(super) fn numeric_version(version: &str) -> Option<[u128; 3]> {
     if !manifest::release_version(version) {
         return None;
     }

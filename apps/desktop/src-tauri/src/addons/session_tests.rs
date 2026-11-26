@@ -883,3 +883,319 @@ fn tool_kinds_negotiate_their_point_count_and_snap_mode() {
         );
     }
 }
+
+#[test]
+fn fixture_connector_path_edits_exchange_scoped_requests_and_reject_broader_batches() {
+    use super::super::{batch, catalog, contributions::defaults, manifest, objects};
+    use goodtype_core::storage;
+    let mut declaration = serde_json::to_value(catalog::CONNECTORS.declaration("0.2.0")).unwrap();
+    declaration["commands"] = json!([{"id":"change-routing","label":"run","surface":"own-object",
+        "pathEdit":{"choice":"routing","snap":"ports"}}]);
+    declaration["settings"] = json!([{"id":"routing","type":"choice","label":"run","default":"straight",
+        "choices":[{"value":"straight","label":"run"},{"value":"curved","label":"run"},{"value":"orthogonal","label":"run"}]}]);
+    let parse = |value: &Value, version| {
+        manifest::parse(
+            &serde_json::to_vec(value).unwrap(),
+            &catalog::CONNECTORS,
+            version,
+        )
+    };
+    let fixture = parse(&declaration, "0.2.0").unwrap();
+    assert!(fixture.path_edit());
+    let mut invalid = declaration.clone();
+    invalid["commands"][0]["pathEdit"]["choice"] = json!("missing");
+    assert!(parse(&invalid, "0.2.0").is_err());
+    invalid = declaration.clone();
+    invalid["version"] = json!("0.1.0");
+    assert!(parse(&invalid, "0.1.0").is_ok());
+    invalid["requires"] = json!([]);
+    assert!(matches!(
+        parse(&invalid, "0.1.0"),
+        Err(manifest::Error::MissingFeatures(_))
+    ));
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/notebooks/minimal");
+    let mut snapshot = storage::open_notebook(&root).unwrap();
+    let geometry = json!({"kind":"line","start":{"x":0,"y":0},"end":{"x":40,"y":0}});
+    let shape = |id, x, scale, rotation, cap| {
+        serde_json::from_value::<goodtype_core::PageObject>(json!({
+        "id":id,"type":"shape","x":x,"y":60,"rotation":rotation,"scale":scale,"zIndex":1,"readingOrder":0,
+        "createdAt":"2026-11-25T01:01:01Z","modifiedAt":"2026-11-25T01:01:01Z",
+        "geometry":geometry,"style":{"strokeColor":"#182c39","strokeWidthPt":2,"fillColor":null,"opacity":1,"endCap":cap}
+    })).unwrap()
+    };
+    let source = shape("arrow", 50, 1.5, 90, "arrow");
+    let mut part = shape("part", 125, 2.0, 0, "none");
+    part.fields_mut().ports = Some(vec![goodtype_core::ShapePoint { x: 4.0, y: 5.0 }]);
+    snapshot.page.objects = vec![
+        source.clone(),
+        part,
+        shape("unrelated", 350, 1.0, 0, "none"),
+    ];
+    let mut worker = spawn_for(
+        "connectors",
+        |mut addon| {
+            addon.initialize(&["page-batch-v0", "path-edit-v0"]);
+            for expected in [
+                "straight",
+                "curved",
+                "orthogonal",
+                "attach",
+                "free",
+                "reattach",
+            ] {
+                let request = addon.read();
+                assert_eq!(request["method"], "command/invoke");
+                let params = &request["params"];
+                assert_eq!(params["settings"]["routing"], "straight");
+                assert_eq!(params["object"]["id"], "arrow");
+                assert_eq!(params["object"]["scale"], 1.5);
+                assert_eq!(params["object"]["style"]["endCap"], "arrow");
+                assert!(params["object"].get("createdAt").is_none());
+                assert!(!params.to_string().contains("unrelated"));
+                let mut refs = vec![];
+                let mut geometry = params["object"]["geometry"].clone();
+                match expected {
+                    "attach" | "reattach" => {
+                        assert_eq!(
+                            params["points"][1]["attach"],
+                            json!({"objectId":"part","port":0})
+                        );
+                        assert_eq!(params["points"][1]["x"], 133.0);
+                        assert_eq!(params["points"][1]["y"], 70.0);
+                        refs.push("part");
+                        geometry["end"] = json!({"x":10.0/1.5,"y":-83.0/1.5});
+                    }
+                    "free" => {
+                        assert_eq!(params["points"][1]["attach"], Value::Null);
+                        assert!(params["object"]["addonData"]["connectors"].is_object());
+                        assert_eq!(params["refs"][0]["id"], "part");
+                    }
+                    choice => {
+                        assert_eq!(params["edit"]["value"], choice);
+                        assert_eq!(params["refs"], json!([]));
+                    }
+                }
+                addon.reply(
+                    &request["id"],
+                    json!({"batch":{"operations":[{
+                        "op":"updateObject", "id":"arrow", "geometry":geometry,
+                        "addonData":{"refs":refs,"data":{"version":2}}
+                    }]}}),
+                );
+            }
+        },
+        || false,
+    )
+    .unwrap();
+    assert!(worker.capabilities.contains(PATH_EDIT));
+    let attach = || serde_json::from_value(json!({"objectId":"part","port":0})).unwrap();
+    let endpoint = |attach| objects::Edit::Endpoint {
+        end: objects::End::End,
+        point: goodtype_core::ShapePoint { x: 50.0, y: 80.0 },
+        attach,
+    };
+    for (index, edit) in [
+        objects::Edit::Choice {
+            value: "straight".into(),
+        },
+        objects::Edit::Choice {
+            value: "curved".into(),
+        },
+        objects::Edit::Choice {
+            value: "orthogonal".into(),
+        },
+        endpoint(Some(attach())),
+        endpoint(None),
+        endpoint(Some(attach())),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (invocation, grant, drop) =
+            objects::capture_path(&snapshot, "connectors", "arrow".into(), edit).unwrap();
+        assert_eq!(drop, index == 3 || index == 5);
+        let (method, params) = request_params(
+            &fixture,
+            "change-routing",
+            invocation,
+            defaults(&fixture.settings),
+        )
+        .unwrap();
+        let reply = worker
+            .call(method, params, Duration::from_secs(2), || false)
+            .unwrap()
+            .unwrap();
+        for (field, value) in [
+            ("id", json!("part")),
+            ("x", Value::Null),
+            ("ports", json!([])),
+            ("addonData", json!({"refs":["unrelated"],"data":{}})),
+        ] {
+            let mut invalid = reply.clone();
+            invalid["batch"]["operations"][0][field] = value;
+            assert!(
+                batch::apply_path_edit(snapshot.clone(), "connectors", &grant, invalid).is_err()
+            );
+        }
+        let mut invalid = reply.clone();
+        invalid["batch"]["operations"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"op":"deleteObject","id":"part"}));
+        assert!(batch::apply_path_edit(snapshot.clone(), "connectors", &grant, invalid).is_err());
+        let changed =
+            batch::apply_path_edit(snapshot.clone(), "connectors", &grant, reply).unwrap();
+        let object = &changed.page.objects[0];
+        assert!(
+            object
+                .fields()
+                .addon_data
+                .as_ref()
+                .unwrap()
+                .contains_key("connectors")
+        );
+        assert_eq!(object.fields().x, source.fields().x);
+        assert_eq!(object.fields().rotation, source.fields().rotation);
+        assert_eq!(
+            serde_json::to_value(object).unwrap()["style"],
+            serde_json::to_value(&source).unwrap()["style"]
+        );
+        if index >= 3 {
+            snapshot = changed;
+        }
+    }
+    let bad = serde_json::from_value(json!({"objectId":"part","port":1})).unwrap();
+    assert!(
+        objects::capture_path(&snapshot, "connectors", "arrow".into(), endpoint(Some(bad)))
+            .is_err()
+    );
+    assert!(
+        objects::capture_path(
+            &snapshot,
+            "foreign",
+            "arrow".into(),
+            endpoint(Some(attach()))
+        )
+        .is_err()
+    );
+}
+
+/// The released Connectors build through the host's framing, capture, request and admission
+/// paths: adopt by routing pick, attach by port drop, release to a free point, and adopt a plain
+/// arrow by port drop.
+#[test]
+#[ignore = "needs a built Connectors repository in GOODTYPE_CONNECTORS_REPO"]
+fn real_connectors_session_round_trips_path_edits() {
+    use super::super::{batch, catalog, contributions::defaults, manifest, objects};
+    use goodtype_core::storage;
+    let repo = std::path::PathBuf::from(std::env::var("GOODTYPE_CONNECTORS_REPO").unwrap());
+    let fixture = manifest::parse(
+        &std::fs::read(repo.join("goodtype-addon.json")).unwrap(),
+        &catalog::CONNECTORS,
+        "0.2.0",
+    )
+    .unwrap();
+    assert!(fixture.path_edit());
+    let mut child = std::process::Command::new(repo.join("target/release/goodtype-connectors.exe"))
+        .arg("--session")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut worker = Session::connect(
+        child.stdin.take().unwrap(),
+        child.stdout.take().unwrap(),
+        child.stderr.take().unwrap(),
+        None,
+        "connectors",
+        "0.2.0",
+        || false,
+    )
+    .unwrap();
+    assert!(worker.capabilities.contains(PATH_EDIT));
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/notebooks/minimal");
+    let mut snapshot = storage::open_notebook(&root).unwrap();
+    let shape = |id: &str, x: f64, rotation: f64, cap: &str| {
+        serde_json::from_value::<goodtype_core::PageObject>(json!({
+            "id":id,"type":"shape","x":x,"y":200,"rotation":rotation,"scale":1.5,"zIndex":1,"readingOrder":0,
+            "createdAt":"2026-11-25T01:01:01Z","modifiedAt":"2026-11-25T01:01:01Z",
+            "geometry":{"kind":"line","start":{"x":0,"y":0},"end":{"x":60,"y":0}},
+            "style":{"strokeColor":"#182c39","strokeWidthPt":1.6,"fillColor":null,"opacity":1,"endCap":cap}
+        }))
+        .unwrap()
+    };
+    let mut part = shape("part", 300.0, 0.0, "none");
+    part.fields_mut().ports = Some(vec![goodtype_core::ShapePoint { x: 0.0, y: 20.0 }]);
+    let plain = snapshot.clone();
+    snapshot.page.objects = vec![shape("arrow", 100.0, 15.0, "arrow"), part.clone()];
+    let mut run = |snapshot: &storage::NotebookSnapshot, edit| {
+        let (invocation, grant, _) =
+            objects::capture_path(snapshot, "connectors", "arrow".into(), edit).unwrap();
+        let (method, params) = request_params(
+            &fixture,
+            "change-routing",
+            invocation,
+            defaults(&fixture.settings),
+        )
+        .unwrap();
+        let sent = params.to_string();
+        let reply = worker
+            .call(method, params, Duration::from_secs(5), || false)
+            .unwrap()
+            .unwrap_or_else(|error| panic!("{error:?} for {sent}"));
+        batch::apply_path_edit(snapshot.clone(), "connectors", &grant, reply).unwrap()
+    };
+    let entry = |snapshot: &storage::NotebookSnapshot| {
+        snapshot.page.objects[0]
+            .fields()
+            .addon_data
+            .as_ref()
+            .unwrap()["connectors"]
+            .clone()
+    };
+    let style = |snapshot: &storage::NotebookSnapshot| {
+        serde_json::to_value(&snapshot.page.objects[0]).unwrap()["style"].clone()
+    };
+    let original_style = style(&snapshot);
+    let attach = || serde_json::from_value(json!({"objectId":"part","port":0})).unwrap();
+    let endpoint = |attach| objects::Edit::Endpoint {
+        end: objects::End::End,
+        point: goodtype_core::ShapePoint { x: 250.0, y: 320.0 },
+        attach,
+    };
+
+    for routing in ["straight", "curved", "orthogonal"] {
+        let routed = run(
+            &snapshot,
+            objects::Edit::Choice {
+                value: routing.into(),
+            },
+        );
+        assert!(entry(&routed).refs.is_empty(), "{routing}");
+        assert_eq!(style(&routed), original_style, "{routing}");
+    }
+    let adopted = run(
+        &snapshot,
+        objects::Edit::Choice {
+            value: "orthogonal".into(),
+        },
+    );
+    let attached = run(&adopted, endpoint(Some(attach())));
+    assert_eq!(entry(&attached).refs, ["part"]);
+    assert_eq!(style(&attached), original_style);
+    let released = run(&attached, endpoint(None));
+    assert!(entry(&released).refs.is_empty());
+    let reattached = run(&released, endpoint(Some(attach())));
+    assert_eq!(entry(&reattached).refs, ["part"]);
+
+    let mut plain = plain;
+    plain.page.objects = vec![shape("arrow", 100.0, 0.0, "arrow"), part];
+    let dropped = run(&plain, endpoint(Some(attach())));
+    assert_eq!(entry(&dropped).refs, ["part"]);
+    drop(worker);
+    let _ = child.kill();
+    let _ = child.wait();
+}

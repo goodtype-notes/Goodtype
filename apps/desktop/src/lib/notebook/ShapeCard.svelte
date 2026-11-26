@@ -1,7 +1,8 @@
 <script lang="ts">
   import { t, formatNumber, displayLocale } from "../i18n";
   import { centredDash } from "./dash";
-  import type { StrokePattern } from "../model";
+  import ShapeCapSelect from "./ShapeCapSelect.svelte";
+  import type { ShapeCap, StrokePattern } from "../model";
   import { MAX_PATTERN_SPACING, MIN_PATTERN_SPACING } from "../ink/pattern";
   import { colorName, MM_PER_PT } from "../settings";
   import { patternDashArray } from "../shape/geometry";
@@ -22,6 +23,8 @@
     strokeWidthPt,
     pattern,
     spacing,
+    endCap,
+    onEndCapChange,
     onKindChange,
     onFillChange,
     onConstrainChange,
@@ -43,6 +46,8 @@
     strokeWidthPt: number;
     pattern: StrokePattern;
     spacing: number;
+    endCap?: ShapeCap;
+    onEndCapChange: (cap: ShapeCap) => void;
     onKindChange: (kind: ShapeKind) => void;
     onFillChange: (fill: boolean) => void;
     onConstrainChange: (constrain: boolean) => void;
@@ -197,6 +202,12 @@
         () => onFillChange(!fill),
       )}
     </section>
+
+    {#if kind === "line"}
+      <section>
+        <ShapeCapSelect end="end" value={endCap} onChange={onEndCapChange} />
+      </section>
+    {/if}
 
     <h3 class="group-heading behaviour">{$t("workspace.shapeGroupBehaviour")}</h3>
     <section class="rows">

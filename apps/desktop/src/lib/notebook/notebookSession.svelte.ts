@@ -13,7 +13,7 @@ import { notebookFailureCode } from "../ipc/errors";
 import { tick } from "svelte";
 import { get } from "svelte/store";
 
-import { commitNotebook, createNotebook, createPage, deletePage, deletePages as deletePagesIpc, duplicatePage, focusPage, importPdfPages, openNotebook, openPage, pickPdfReference, reorderPages, runHistory, runStructureHistory } from "../ipc/notebook";
+import { commitGroupStretch, type StretchRequest, commitNotebook, createNotebook, createPage, deletePage, deletePages as deletePagesIpc, duplicatePage, focusPage, importPdfPages, openNotebook, openPage, pickPdfReference, reorderPages, runHistory, runStructureHistory } from "../ipc/notebook";
 import { discardRecoveryCandidate, listRecoveryCandidates, restoreRecoveryCandidate } from "../ipc/recovery";
 import { moveLibraryEntries } from "../ipc/library";
 import { type TypstCompileRequest } from "../ipc/typst";
@@ -85,7 +85,7 @@ export type SessionEnvironment = {
   readonly calculationHistory?: (undo: boolean, pageScope: boolean) => Promise<boolean>;
   readonly calculationHistoryFlags?: () => { canUndo: boolean; canRedo: boolean };
   searchOpen: boolean;
-  readonly selection: Pick<ReturnType<typeof createSelection>, "editingShapeId" | "groupedStrokeIds" | "lassoObjectIds" | "mixedGroup" | "selectedImageId" | "selectedShapeId" | "selectedStrokeIds" | "selectedTypstId" | "updateInkSelection">;
+  readonly selection: Pick<ReturnType<typeof createSelection>, "editingShapeId" | "endMixedTransform" | "enteredGroup" | "exitGroup" | "groupEdits" | "groupedStrokeIds" | "lassoObjectIds" | "mixedGroup" | "selectedImageId" | "selectedShapeId" | "selectedStrokeIds" | "selectedTypstId" | "updateInkSelection">;
   readonly settings: AppSettings;
   readonly shapeView: (draft: ShapeDraft, overrides?: Partial<ShapeView>) => ShapeView;
   readonly sideEditor: { focus: () => void } | undefined;
@@ -529,6 +529,7 @@ export function createSession(env: SessionEnvironment) {
       images,
       shapes,
       copiedGroups,
+      groupEdits: env.selection.groupEdits,
       sharedStyle: manifest.sharedStylePath
         ? { path: manifest.sharedStylePath, source: sharedStyleSource }
         : null,
@@ -540,6 +541,9 @@ export function createSession(env: SessionEnvironment) {
 
   function applySnapshot(snapshot: NotebookSnapshot) {
     copiedGroups = [];
+    env.selection.endMixedTransform(true);
+    env.selection.exitGroup();
+    env.selection.groupEdits = new Map();
     pageSession += 1;
     if (activeSnapshot) notePageSaved(activeSnapshot, snapshot);
     const previousEntry = pageEntries.find(entry => entry.id === snapshot.page.id);
@@ -1118,6 +1122,7 @@ export function createSession(env: SessionEnvironment) {
     pageTypst = null;
     strokes = [];
     shapes = [];
+    env.selection.exitGroup();
     env.selection.lassoObjectIds = [];
     env.selection.selectedStrokeIds = [];
     env.selection.groupedStrokeIds = [];
@@ -1639,7 +1644,7 @@ export function createSession(env: SessionEnvironment) {
       if (root !== requestRoot || pageId !== activePageId || generation !== notebookGeneration || transactionFailed) return;
       try {
         const result = await addonObjectAction(requestRoot, pageId, revision, addonId, action);
-        if (!result || root !== requestRoot || generation !== notebookGeneration) return;
+        if (!result || "review" in result || root !== requestRoot || generation !== notebookGeneration) return;
         recordNotebookAction(pageId);
         editGeneration += 1;
         if (activePageId !== pageId) return;
@@ -1663,11 +1668,81 @@ export function createSession(env: SessionEnvironment) {
     await transactionQueue;
   }
 
-  async function detachAddon(addon: string, ids: string[]) {
+  async function stretchGroup(request: StretchRequest) {
+    const requestRoot = root, generation = notebookGeneration;
+    const current = () => root === requestRoot && notebookGeneration === generation && activePageId === request.pageId;
+    if (!requestRoot || !current() || !await persist() || !current() || transactionFailed) return;
+    replacingPageCount += 1;
+    pendingTransactions += 1;
+    transactionQueue = transactionQueue.then(async () => {
+      if (!current() || transactionFailed) return;
+      try {
+        const result = await commitGroupStretch(requestRoot, request);
+        if (!current() || result.snapshot.page.revision === request.revision) return;
+        applySnapshot(result.snapshot);
+        revision = result.snapshot.page.revision;
+        canUndo = result.canUndo;
+        canRedo = result.canRedo;
+        const group = result.snapshot.page.objects.find(object => object.id === request.groupId);
+        if (group?.type === "group") env.selection.lassoObjectIds = [...group.childIds];
+        status = notice("workspace.savedRevision", { label: notice("workspace.stretchedShapeGroup"), revision });
+        editGeneration += 1;
+        recordNotebookAction(request.pageId);
+      } catch (error) {
+        if (current()) reportCommitFailure(notice("workspace.stretchedShapeGroup"), error);
+      }
+    }).finally(() => {
+      replacingPageCount -= 1;
+      pendingTransactions -= 1;
+    });
+    await transactionQueue;
+  }
+
+  /** One path-edit request. Page input waits for the reply, as for own-object commands, so no
+   *  local snapshot built before it can overwrite the addon's committed path. */
+  async function runAddonPathEdit(addonId: string, action: AddonObjectAction, requestId: string,
+    current: () => boolean): Promise<Awaited<ReturnType<typeof addonObjectAction>>> {
+    const requestRoot = root, pageId = activePageId, generation = notebookGeneration;
+    if (!requestRoot || !await persist() || !current()) return null;
+    // Assigned inside the queued callback, so it must not narrow to its initial null.
+    let outcome = null as Awaited<ReturnType<typeof addonObjectAction>>;
+    let failure: unknown;
+    replacingPageCount += 1;
+    pendingTransactions += 1;
+    transactionQueue = transactionQueue.then(async () => {
+      if (root !== requestRoot || activePageId !== pageId || generation !== notebookGeneration || transactionFailed
+        || !current()) return;
+      try {
+        const result = await addonObjectAction(requestRoot, pageId, revision, addonId, action, requestId);
+        outcome = result;
+        if (!result || "review" in result || root !== requestRoot || generation !== notebookGeneration) return;
+        recordNotebookAction(pageId);
+        editGeneration += 1;
+        if (activePageId !== pageId) return;
+        applySnapshot(result.snapshot);
+        // The edited path stays selected so its routing and Detach controls remain at hand.
+        if (action.kind === "pathEdit" && shapes.some((shape) => shape.id === action.objectId)) {
+          env.selection.selectedShapeId = action.objectId;
+        }
+        revision = result.snapshot.page.revision;
+        canUndo = result.canUndo;
+        canRedo = result.canRedo;
+        scheduleAddonReactions(pageId);
+      } catch (error) { failure = error; }
+    }).finally(() => {
+      pendingTransactions -= 1;
+      replacingPageCount -= 1;
+    });
+    await transactionQueue;
+    if (failure) throw failure;
+    return outcome;
+  }
+
+  async function detachAddon(addon: string, ids: string[], name = addon) {
     const requestRoot = root, pageId = activePageId, generation = notebookGeneration;
     if (!requestRoot || !await persist()) return;
     const selected = new Set(ids);
-    const label = notice("addons.detached", { addon });
+    const label = notice("addons.detached", { addon: name });
     replacingPageCount += 1;
     pendingTransactions += 1;
     transactionQueue = transactionQueue.then(async () => {
@@ -1870,6 +1945,7 @@ export function createSession(env: SessionEnvironment) {
   function enqueueSnapshot(label: UiText, snapshot: NotebookSnapshot) {
     const requestRoot = root;
     const generation = notebookGeneration;
+    const groupEdits = env.selection.groupEdits;
     pendingTransactions += 1;
     transactionQueue = transactionQueue
       .then(async () => {
@@ -1879,6 +1955,13 @@ export function createSession(env: SessionEnvironment) {
           const result = await commitNotebook(requestRoot, snapshot, activeSnapshot);
           if (root !== requestRoot || notebookGeneration !== generation) return;
           activeSnapshot = result.snapshot;
+          if (groupEdits?.size) {
+            const pending = new Map(env.selection.groupEdits);
+            for (const [id, edit] of groupEdits) {
+              if (pending.get(id) === edit) pending.delete(id);
+            }
+            env.selection.groupEdits = pending;
+          }
           if (copiedGroups.length) {
             const savedIds = new Set(result.snapshot.page.objects.map(({ id }) => id));
             copiedGroups = copiedGroups.filter(({ id }) => !savedIds.has(id));
@@ -1943,6 +2026,7 @@ export function createSession(env: SessionEnvironment) {
         const prepared = await prepareAddonReactions(context.root, pageId, committedRevision, baseRevision, retry);
         if (!isCurrent() || pendingTransactions > 0) return;
         let retryNeeded = prepared.retry;
+        if (prepared.failed) status = notice("addons.reactionFailed", { addon: addonText(prepared.failed, get(locale)) });
         if (prepared.token) {
           const token = prepared.token;
           replacingPageCount += 1;
@@ -2107,6 +2191,8 @@ export function createSession(env: SessionEnvironment) {
       env.selection.selectedShapeId = null;
       env.selection.editingShapeId = null;
     }
+    env.selection.lassoObjectIds = env.selection.lassoObjectIds.filter(id => !replaced.has(id));
+    if (!env.selection.enteredGroup) env.selection.exitGroup();
     const taken = [...replaced.values()].every((pieces) => pieces.length === 0);
     scheduleInkCommit(notice(taken ? "workspace.erasedShape" : "workspace.erasedInk"));
     if (taken) status = notice("workspace.erasedTheShape");
@@ -2576,6 +2662,8 @@ export function createSession(env: SessionEnvironment) {
     addCopiedGroups: (groups: typeof copiedGroups) => { copiedGroups = [...copiedGroups, ...groups]; },
     detachAddon,
     applyAddonObjectAction,
+    stretchGroup,
+    runAddonPathEdit,
     changeStrokes,
     addStroke,
     addShape,

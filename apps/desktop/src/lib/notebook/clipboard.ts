@@ -119,7 +119,10 @@ export function bundleCenter(bundle: ClipboardBundle): Point | null {
   const points: Point[] = [];
   const ink = selectionBounds(bundle.strokes, bundle.strokes.map(stroke => stroke.id));
   if (ink) points.push({ x: ink.left, y: ink.top }, { x: ink.right, y: ink.bottom });
-  for (const shape of bundle.shapes) points.push(...shapeLassoItem(shape).outline);
+  for (const shape of bundle.shapes) {
+    const item = shapeLassoItem(shape);
+    points.push(...item.outline, ...(item.caps ?? []).flatMap((cap) => cap.outline));
+  }
   for (const block of bundle.blocks) points.push(...boxOutline(block.x, block.y,
     block.layoutWidthPt * block.scale, block.heightPt * block.scale, block.rotation));
   for (const image of bundle.images) points.push(...boxOutline(image.x, image.y,

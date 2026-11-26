@@ -176,3 +176,9 @@ pub(super) static STUDY: Addon = Addon {
     contribution_surfaces: &[],
     kind: Kind::Content,
 };
+
+impl Addon {
+    pub(super) fn allows_path_edit(&self, command: &str) -> bool {
+        self.id == CONNECTORS.id && command == "change-routing"
+    }
+}

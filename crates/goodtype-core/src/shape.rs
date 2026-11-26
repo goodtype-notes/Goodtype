@@ -112,9 +112,31 @@ impl ShapeGeometry {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ShapeCap {
+    #[default]
+    None,
+    Arrow,
+    Open,
+    Dot,
+    Bar,
+}
+
+impl ShapeCap {
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    pub fn is_none(&self) -> bool {
+        *self == Self::None
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShapeStyle {
+    #[serde(default, skip_serializing_if = "ShapeCap::is_none")]
+    pub start_cap: ShapeCap,
+    #[serde(default, skip_serializing_if = "ShapeCap::is_none")]
+    pub end_cap: ShapeCap,
     pub stroke_color: String,
     pub stroke_width_pt: f64,
     pub fill_color: Option<String>,
@@ -141,6 +163,19 @@ fn is_zero(value: &f64) -> bool {
 }
 
 impl ShapeStyle {
+    pub fn validate_for(&self, geometry: &ShapeGeometry) -> Result<(), &'static str> {
+        self.validate()?;
+        if !(self.start_cap.is_none() && self.end_cap.is_none())
+            && !matches!(
+                geometry,
+                ShapeGeometry::Line { .. } | ShapeGeometry::Spline { closed: false, .. }
+            )
+        {
+            return Err("shape caps require a line or an open spline");
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), &'static str> {
         if !valid_hex_color(&self.stroke_color)
             || self
@@ -169,6 +204,63 @@ impl ShapeStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caps_round_trip_and_default_to_omitted_none() {
+        let legacy = serde_json::json!({
+            "strokeColor": "#16212b", "strokeWidthPt": 2.0, "fillColor": null, "opacity": 1.0
+        });
+        let plain: ShapeStyle = serde_json::from_value(legacy.clone()).unwrap();
+        assert_eq!(
+            (plain.start_cap, plain.end_cap),
+            (ShapeCap::None, ShapeCap::None)
+        );
+        assert_eq!(serde_json::to_value(&plain).unwrap(), legacy);
+        for value in ["none", "arrow", "open", "dot", "bar"] {
+            let mut json = legacy.clone();
+            json["startCap"] = value.into();
+            json["endCap"] = value.into();
+            let style: ShapeStyle = serde_json::from_value(json.clone()).unwrap();
+            let encoded = serde_json::to_value(&style).unwrap();
+            assert_eq!(
+                encoded,
+                if value == "none" {
+                    legacy.clone()
+                } else {
+                    json
+                }
+            );
+        }
+        let mut unknown = legacy;
+        unknown["endCap"] = "custom".into();
+        assert!(serde_json::from_value::<ShapeStyle>(unknown).is_err());
+    }
+
+    #[test]
+    fn caps_are_rejected_on_closed_geometry() {
+        let style: ShapeStyle = serde_json::from_value(serde_json::json!({
+            "strokeColor": "#16212b", "strokeWidthPt": 2, "fillColor": null, "opacity": 1,
+            "endCap": "arrow"
+        }))
+        .unwrap();
+        for geometry in [
+            ShapeGeometry::Rectangle {
+                width_pt: 10.0,
+                height_pt: 10.0,
+                corner_radius_pt: 0.0,
+            },
+            ShapeGeometry::Ellipse {
+                width_pt: 10.0,
+                height_pt: 10.0,
+            },
+            ShapeGeometry::Spline {
+                nodes: vec![],
+                closed: true,
+            },
+        ] {
+            assert!(style.validate_for(&geometry).is_err());
+        }
+    }
 
     #[test]
     fn rejects_degenerate_and_unbounded_geometry() {
@@ -225,6 +317,8 @@ mod tests {
             pattern: StrokePattern::Solid,
             pattern_spacing: 1.0,
             pattern_offset_pt: 0.0,
+            start_cap: Default::default(),
+            end_cap: Default::default(),
         };
         assert!(geometry.validate().is_ok());
         assert!(style.validate().is_ok());

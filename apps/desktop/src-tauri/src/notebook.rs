@@ -554,11 +554,13 @@ pub async fn commit_notebook(
     root: String,
     snapshot: Option<NotebookSnapshot>,
     delta: Option<storage::PageDelta>,
+    stretch: Option<goodtype_core::stretch::StretchRequest>,
 ) -> Result<CommitResult, NotebookError> {
-    let page_id = match (&snapshot, &delta) {
-        (Some(snapshot), None) => snapshot.page.id.clone(),
-        (None, Some(delta)) => delta.page.id.clone(),
-        _ => return Err("Supply exactly one snapshot or page delta".into()),
+    let page_id = match (&snapshot, &delta, &stretch) {
+        (Some(snapshot), None, None) => snapshot.page.id.clone(),
+        (None, Some(delta), None) => delta.page.id.clone(),
+        (None, None, Some(request)) => request.page_id.clone(),
+        _ => return Err("Supply exactly one notebook edit".into()),
     };
     // ponytail: one lock is enough for one open notebook; use per-root locks with multi-window work.
     on_page(
@@ -567,7 +569,12 @@ pub async fn commit_notebook(
         root,
         page_id,
         move |root, _, history| {
-            let (result, asset_paths) = if let Some(delta) = delta {
+            let (result, asset_paths) = if let Some(request) = stretch {
+                (
+                    storage::commit_group_stretch(root, history, &request)?,
+                    None,
+                )
+            } else if let Some(delta) = delta {
                 let known = delta.known_assets.clone();
                 let mut result = storage::commit_page_delta(root, history, delta)?;
                 let paths = result

@@ -97,6 +97,7 @@
     selectedImageId = null,
     selectedShapeId = null,
     shapesGrabbable = true,
+    dimmedGroupChildIds = [],
     editingShapeId = null,
     onCompile,
     onSourceChange,
@@ -108,6 +109,7 @@
     onScaleImage,
     onSelectShape,
     onChangeShape,
+    shapeEndpointEdit,
     onEditShape,
     onShapesErased,
     onStrokeFinalized,
@@ -177,6 +179,7 @@
     selectedShapeId?: string | null;
     /// False while the eraser is out, so it reaches the ink surface under a shape.
     shapesGrabbable?: boolean;
+    dimmedGroupChildIds?: string[];
     editingShapeId?: string | null;
     onCompile: (
       id: string,
@@ -190,6 +193,7 @@
     onMoveImage?: (id: string, position: { x: number; y: number }) => void;
     onScaleImage?: (id: string, scale: number) => void;
     onSelectShape?: (id: string) => void;
+    shapeEndpointEdit?: import("svelte").ComponentProps<typeof ShapeObject>["endpointEdit"];
     onChangeShape?: (shape: ShapeView, commit?: ShapeEditCommit) => void;
     onEditShape?: (id: string, editing: boolean) => void;
     onShapesErased?: (replaced: ReadonlyMap<string, ShapeView[]>) => void;
@@ -244,37 +248,39 @@
 <div class:interactive class:editing={editingBlockId !== null} class="objects">
   {#if root}<PdfMaterials objects={materials} {root} {zoom}/>{/if}
   {#each blocks as block (block.id)}
-    <TypstBlock
-      id={block.id}
-      source={block.source}
-      initialX={block.x}
-      initialY={block.y}
-      initialLayoutWidthPt={block.layoutWidthPt}
-      initialScale={block.scale}
-      rotation={block.rotation ?? 0}
-      zIndex={block.zIndex}
-      readingOrder={block.readingOrder}
-      compileResult={results[block.id] ?? null}
-      cached={getCachedTypst(`${sharedStyle}\n${block.source}`, block.layoutWidthPt, root ?? "") ?? null}
-      compileContext={sharedStyle}
-      compileDependency={readsNotebookFiles(`${sharedStyle}\n${block.source}`) ? presetRevision : 0}
-      {root}
-      selected={interactive && selectedBlockId === block.id}
-      {toPageDelta}
-      {pageWidthPt}
-      {pageHeightPt}
-      {zoom}
-      onSelect={interactive ? () => onSelectBlock?.(block.id) : undefined}
-      onDeselect={interactive ? () => onDeselectBlock?.() : undefined}
-      onCompile={(request) => onCompile(block.id, { ...request, sharedStyle })}
-      onSourceChange={(source) => onSourceChange?.(block.id, source)}
-      onTransform={(transform) => onTransform?.(block.id, transform)}
-      onEditingChange={(editing) =>
-        (editingBlockId = editing ? block.id : editingBlockId === block.id ? null : editingBlockId)}
-      inlineEditing={interactive && inlineEditing}
-      onAskAI={onAskAI ? (focus, restore) => onAskAI?.(block.id, focus, restore) : undefined}
-      onRequestEdit={() => onRequestEdit?.(block.id)}
-    />
+    <div class="group-child" class:dimmed={dimmedGroupChildIds.includes(block.id)}>
+      <TypstBlock
+        id={block.id}
+        source={block.source}
+        initialX={block.x}
+        initialY={block.y}
+        initialLayoutWidthPt={block.layoutWidthPt}
+        initialScale={block.scale}
+        rotation={block.rotation ?? 0}
+        zIndex={block.zIndex}
+        readingOrder={block.readingOrder}
+        compileResult={results[block.id] ?? null}
+        cached={getCachedTypst(`${sharedStyle}\n${block.source}`, block.layoutWidthPt, root ?? "") ?? null}
+        compileContext={sharedStyle}
+        compileDependency={readsNotebookFiles(`${sharedStyle}\n${block.source}`) ? presetRevision : 0}
+        {root}
+        selected={interactive && selectedBlockId === block.id}
+        {toPageDelta}
+        {pageWidthPt}
+        {pageHeightPt}
+        {zoom}
+        onSelect={interactive ? () => onSelectBlock?.(block.id) : undefined}
+        onDeselect={interactive ? () => onDeselectBlock?.() : undefined}
+        onCompile={(request) => onCompile(block.id, { ...request, sharedStyle })}
+        onSourceChange={(source) => onSourceChange?.(block.id, source)}
+        onTransform={(transform) => onTransform?.(block.id, transform)}
+        onEditingChange={(editing) =>
+          (editingBlockId = editing ? block.id : editingBlockId === block.id ? null : editingBlockId)}
+        inlineEditing={interactive && inlineEditing}
+        onAskAI={onAskAI ? (focus, restore) => onAskAI?.(block.id, focus, restore) : undefined}
+        onRequestEdit={() => onRequestEdit?.(block.id)}
+      />
+    </div>
   {/each}
   {#each images as image (image.id)}
     <ImageObject
@@ -299,21 +305,24 @@
     />
   {/each}
   {#each displayedShapes as shape (shape.id)}
-    <ShapeObject
-      {shape}
-      grabbable={interactive && shapesGrabbable}
-      selected={interactive && selectedShapeId === shape.id}
-      editing={interactive && editingShapeId === shape.id}
-      {pageWidthPt}
-      {pageHeightPt}
-      {zoom}
-      endSnap={shapeEndSnap}
-      snapShapes={displayedShapes}
-      {toPageDelta}
-      onSelect={interactive ? () => onSelectShape?.(shape.id) : undefined}
-      onChange={interactive ? (next, commit) => onChangeShape?.(next, commit) : undefined}
-      onEditingChange={interactive ? (editing) => onEditShape?.(shape.id, editing) : undefined}
-    />
+    <div class="group-child" class:dimmed={dimmedGroupChildIds.includes(shape.id)}>
+      <ShapeObject
+        {shape}
+        grabbable={interactive && shapesGrabbable}
+        selected={interactive && selectedShapeId === shape.id}
+        editing={interactive && editingShapeId === shape.id}
+        {pageWidthPt}
+        {pageHeightPt}
+        {zoom}
+        endSnap={shapeEndSnap}
+        snapShapes={displayedShapes}
+        endpointEdit={interactive && selectedShapeId === shape.id ? shapeEndpointEdit : undefined}
+        {toPageDelta}
+        onSelect={interactive ? () => onSelectShape?.(shape.id) : undefined}
+        onChange={interactive ? (next, commit) => onChangeShape?.(next, commit) : undefined}
+        onEditingChange={interactive ? (editing) => onEditShape?.(shape.id, editing) : undefined}
+      />
+    </div>
   {/each}
 </div>
 <div class:object-input={directObjectInput} class="ink-layer">
@@ -380,6 +389,8 @@
 </div>
 
 <style>
+  .group-child { display: contents; }
+  .dimmed :global(.shape-object), .dimmed :global(.typst-block) { opacity: 0.3; }
   .page-text-layer,
   .objects,
   .ink-layer {

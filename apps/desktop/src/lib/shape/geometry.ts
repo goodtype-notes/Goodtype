@@ -59,6 +59,137 @@ export function patternDashArray(
 export const MIN_CLOSED_SPLINE_NODES = 3;
 const MAX_SPLINE_NODES = 256;
 
+export const SHAPE_CAPS = ["none", "arrow", "open", "dot", "bar"] as const;
+
+export function supportsShapeCaps(geometry: ShapeGeometry): boolean {
+  return geometry.kind === "line" || (geometry.kind === "spline" && !geometry.closed);
+}
+
+type Cap = {
+  at: "start" | "end";
+  kind: Exclude<ShapeStyle["startCap"], "none" | undefined>;
+  tip: Point;
+  points: Point[];
+  radius: number;
+  path: string;
+};
+
+/** Local cap marks and the shortened visible shaft. Mirrored in the Rust SVG export. */
+export function shapeCaps(geometry: ShapeGeometry, style: ShapeStyle): {
+  caps: Cap[];
+  shaft: ShapeGeometry | null;
+  startTrim: number;
+} {
+  if (!style.startCap && !style.endCap) return { caps: [], shaft: geometry, startTrim: 0 };
+  const line = geometry.kind === "line";
+  const nodes = line
+    ? [geometry.start, geometry.end].map((point) => ({ point, handleIn: null, handleOut: null }))
+    : geometry.kind === "spline" && !geometry.closed ? geometry.nodes : [];
+  const caps: Cap[] = [];
+  if (nodes.length < 2) return { caps, shaft: geometry, startTrim: 0 };
+  const width = style.strokeWidthPt;
+
+  for (const at of ["start", "end"] as const) {
+    const kind = at === "start" ? style.startCap : style.endCap;
+    if (!kind || kind === "none") continue;
+    const start = at === "start";
+    const node = nodes[start ? 0 : nodes.length - 1];
+    const tip = node.point;
+    const neighbour = nodes[start ? 1 : nodes.length - 2].point;
+    const handle = start ? node.handleOut : node.handleIn;
+    const direction = handle && Math.hypot(handle.x, handle.y) > 0
+      ? handle : { x: neighbour.x - tip.x, y: neighbour.y - tip.y };
+    const length = Math.hypot(direction.x, direction.y);
+    const x = length > 0 ? direction.x / length : start ? 1 : -1;
+    const y = length > 0 ? direction.y / length : 0;
+    const depth = kind === "bar" ? 0 : 4 * width;
+    const half = kind === "open" ? 1.75 * width : 2 * width;
+    const wing = (side: number) => ({
+      x: tip.x + depth * x - side * half * y,
+      y: tip.y + depth * y + side * half * x,
+    });
+    const points = kind === "dot" ? [tip] :
+      kind === "bar" ? [wing(1), wing(-1)] : [wing(1), tip, wing(-1)];
+    const radius = kind === "dot" ? 1.5 * width : kind === "arrow" ? 0 : width / 2;
+    const path = kind === "dot"
+      ? `M ${number(tip.x + radius)} ${number(tip.y)} A ${number(radius)} ${number(radius)} 0 1 0 ${number(tip.x - radius)} ${number(tip.y)} A ${number(radius)} ${number(radius)} 0 1 0 ${number(tip.x + radius)} ${number(tip.y)} Z`
+      : points.map((point, i) => `${i ? "L" : "M"} ${number(point.x)} ${number(point.y)}`).join(" ")
+        + (kind === "arrow" ? " Z" : "");
+    caps.push({ at, kind, tip, points, radius, path });
+  }
+
+  const startTrim = style.startCap === "arrow" ? 3.5 * width : 0;
+  const endTrim = style.endCap === "arrow" ? 3.5 * width : 0;
+  if (startTrim === 0 && endTrim === 0) return { caps, shaft: geometry, startTrim: 0 };
+  if (geometry.kind === "line") {
+    const { start, end } = geometry;
+    const length = distance(start, end);
+    return { caps, startTrim, shaft: length <= startTrim + endTrim ? null : {
+      kind: "line",
+      start: interpolate(start, end, startTrim / length),
+      end: interpolate(end, start, endTrim / length),
+    } };
+  }
+
+  const trimmed = nodes.map((node) => ({ ...node }));
+  trimSplineStart(trimmed, startTrim);
+  trimmed.reverse();
+  for (const node of trimmed) [node.handleIn, node.handleOut] = [node.handleOut, node.handleIn];
+  trimSplineStart(trimmed, endTrim);
+  trimmed.reverse();
+  for (const node of trimmed) [node.handleIn, node.handleOut] = [node.handleOut, node.handleIn];
+  return { caps, startTrim, shaft: trimmed.length < 2 ? null : { kind: "spline", nodes: trimmed, closed: false } };
+}
+
+function interpolate(a: Point, b: Point, t: number): Point {
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+}
+
+function trimSplineStart(nodes: BezierNode[], remaining: number): void {
+  if (remaining === 0) return;
+  const vector = (from: Point, to: Point) => ({ x: to.x - from.x, y: to.y - from.y });
+  for (let i = 0; i + 1 < nodes.length; i++) {
+    const from = nodes[i], to = nodes[i + 1];
+    const a = from.point, d = to.point;
+    const b = from.handleOut ? add(a, from.handleOut) : a;
+    const c = to.handleIn ? add(d, to.handleIn) : d;
+    const split = (t: number) => {
+      const ab = interpolate(a, b, t), bc = interpolate(b, c, t), cd = interpolate(c, d, t);
+      const abc = interpolate(ab, bc, t), bcd = interpolate(bc, cd, t);
+      return { point: interpolate(abc, bcd, t), bcd, cd };
+    };
+    let previous = a;
+    // Measure the length on a fixed subdivision, then retain the exact cubic at the cut.
+    for (let step = 1; step <= 32; step++) {
+      const next = split(step / 32).point;
+      const length = distance(previous, next);
+      if (remaining < length) {
+        const { point, bcd, cd } = split((step - 1 + remaining / length) / 32);
+        nodes.splice(0, i + 1, { point, handleIn: null, handleOut: vector(point, bcd) });
+        to.handleIn = vector(d, cd);
+        return;
+      }
+      remaining -= length;
+      previous = next;
+    }
+  }
+  nodes.length = 0;
+}
+
+export function distanceToShapeCap(cap: Cap, point: Point): number {
+  if (cap.kind === "dot") return Math.max(0, distance(cap.tip, point) - cap.radius);
+  const [a, b, c] = cap.points;
+  const ab = distanceToSegment(point, a, b);
+  if (!c) return Math.max(0, ab - cap.radius);
+  const bc = distanceToSegment(point, b, c);
+  if (cap.kind === "open") return Math.max(0, Math.min(ab, bc) - cap.radius);
+  const sign = (from: Point, to: Point) =>
+    (to.x - from.x) * (point.y - from.y) - (to.y - from.y) * (point.x - from.x);
+  const signs = [sign(a, b), sign(b, c), sign(c, a)];
+  if (signs.every((n) => n >= 0) || signs.every((n) => n <= 0)) return 0;
+  return Math.min(ab, bc, distanceToSegment(point, c, a));
+}
+
 export function shapePath(geometry: ShapeGeometry): string {
   switch (geometry.kind) {
     case "line":
@@ -257,16 +388,22 @@ export function shapeOutline(geometry: ShapeGeometry): ShapePoint[] {
   }
 }
 
-export function shapeBounds(geometry: ShapeGeometry): ShapeBounds {
+export function shapeBounds(geometry: ShapeGeometry, style?: ShapeStyle): ShapeBounds {
   if (geometry.kind === "rectangle" || geometry.kind === "ellipse") {
     return { left: 0, top: 0, right: geometry.widthPt, bottom: geometry.heightPt };
   }
-  if (geometry.kind === "line") return pointsBounds([geometry.start, geometry.end]);
-  const points = geometry.nodes.flatMap((node) => [
+  const points = geometry.kind === "line" ? [geometry.start, geometry.end] : geometry.nodes.flatMap((node) => [
     node.point,
     ...(node.handleIn ? [add(node.point, node.handleIn)] : []),
     ...(node.handleOut ? [add(node.point, node.handleOut)] : []),
   ]);
+  if (style) {
+    for (const cap of shapeCaps(geometry, style).caps) {
+      for (const { x, y } of cap.points) {
+        points.push({ x: x - cap.radius, y: y - cap.radius }, { x: x + cap.radius, y: y + cap.radius });
+      }
+    }
+  }
   return pointsBounds(points);
 }
 
@@ -346,23 +483,30 @@ export function splineFromPoints(
     ? sampled.slice(0, -1)
     : sampled;
   const simplified = evenlyCap(simplify(open, Math.max(tolerancePt, 0.25)), MAX_SPLINE_NODES);
-  const bounds = pointsBounds(simplified);
-  const local = simplified.map((point) => ({ x: point.x - bounds.left, y: point.y - bounds.top }));
   // A closed curve is a ring with no ends, so every knot takes its tangent from the neighbours
   // it actually has — the last one's next is the first. Leaving the end knots straight, as an
   // open curve does, would put a visible corner where the two ends meet.
-  const ring = closed && local.length >= MIN_CLOSED_SPLINE_NODES;
+  const ring = closed && simplified.length >= MIN_CLOSED_SPLINE_NODES;
+  const plan = cornerPlan(open, simplified, ring);
+  const bounds = pointsBounds(plan.knots);
+  const local = plan.knots.map((point) => ({ x: point.x - bounds.left, y: point.y - bounds.top }));
   const tangents = besselTangents(local, ring);
   const nodes = local.map((point, index): BezierNode => {
     const first = !ring && index === 0;
     const last = !ring && index === local.length - 1;
-    const back = first ? 0 : distance(local[(index - 1 + local.length) % local.length], point);
+    const previous = (index - 1 + local.length) % local.length;
+    const back = first ? 0 : distance(local[previous], point);
     const ahead = last ? 0 : distance(point, local[(index + 1) % local.length]);
     const tangent = tangents[index];
+    const sharp = plan.corner[index];
     return {
       point,
-      handleIn: first ? null : { x: (-tangent.x * back) / 3, y: (-tangent.y * back) / 3 },
-      handleOut: last ? null : { x: (tangent.x * ahead) / 3, y: (tangent.y * ahead) / 3 },
+      handleIn: first || sharp || plan.straightAfter[previous]
+        ? null
+        : { x: (-tangent.x * back) / 3, y: (-tangent.y * back) / 3 },
+      handleOut: last || sharp || plan.straightAfter[index]
+        ? null
+        : { x: (tangent.x * ahead) / 3, y: (tangent.y * ahead) / 3 },
     };
   });
   return {
@@ -371,6 +515,117 @@ export function splineFromPoints(
     rotation: 0,
     geometry: { kind: "spline", nodes, closed: ring },
     style,
+  };
+}
+
+/// How sharply the drawn line has to turn at a knot for that knot to be a corner: a √, a bracket
+/// or a triangle turns by 90° or more there, while a smooth curve turns a few degrees over the
+/// same short stretch.
+const CORNER_TURN_DEGREES = 55;
+/// The stretch either side of a knot the turn is measured over, as a share of the mark's diagonal,
+/// with a floor so a small mark still measures across more than one sample.
+const CORNER_REACH = 0.05;
+const CORNER_REACH_MIN_PT = 3;
+/// How far the samples between two corners may wander from the chord joining them and still be
+/// drawn as one straight segment; a hand's straight stroke wobbles more than the fit tolerance.
+const STRAIGHT_RUN = 0.035;
+const STRAIGHT_RUN_MIN_PT = 2;
+
+type CornerPlan = { knots: Point[]; corner: boolean[]; straightAfter: boolean[] };
+
+/**
+ * Which knots of a fitted curve are corners, and which runs between them were drawn straight.
+ *
+ * Every knot used to take a smooth tangent, so a held √ or [ came out rounded at each corner and
+ * wavy along each side. A corner keeps no handles, and a run between corners that stays near its
+ * chord loses its inner knots and is drawn as a straight segment. A mark with no corner — an arc,
+ * a loop — is left exactly as fitted. The answer stays an ordinary spline: a knot without handles
+ * is already a sharp point to every renderer and to export.
+ */
+function cornerPlan(samples: readonly Point[], knots: Point[], ring: boolean): CornerPlan {
+  const count = samples.length;
+  const plain = { knots, corner: knots.map(() => false), straightAfter: knots.map(() => false) };
+  if (knots.length < 3 || count < 3) return plain;
+  const indexOf = new Map(samples.map((sample, index) => [sample, index]));
+  const at = knots.map((knot) => indexOf.get(knot) ?? -1);
+  if (at.includes(-1)) return plain;
+  const box = pointsBounds(samples);
+  const diagonal = Math.hypot(box.right - box.left, box.bottom - box.top);
+  const reach = Math.max(CORNER_REACH_MIN_PT, diagonal * CORNER_REACH);
+
+  /// The sample `length` along the drawn line from sample `from`, walking `step` (±1).
+  const walk = (from: number, length: number, step: 1 | -1): Point => {
+    let index = from;
+    let travelled = 0;
+    for (let guard = 0; guard < count && travelled < length; guard += 1) {
+      const next = ring ? (index + step + count) % count : index + step;
+      if (next < 0 || next >= count) break;
+      travelled += distance(samples[index], samples[next]);
+      index = next;
+    }
+    return samples[index];
+  };
+  const turn = knots.map((knot, k) => {
+    if (!ring && (k === 0 || k === knots.length - 1)) return 0;
+    const before = walk(at[k], reach, -1);
+    const after = walk(at[k], reach, 1);
+    const inward = { x: knot.x - before.x, y: knot.y - before.y };
+    const outward = { x: after.x - knot.x, y: after.y - knot.y };
+    const lengths = Math.hypot(inward.x, inward.y) * Math.hypot(outward.x, outward.y);
+    if (lengths < (reach * 0.4) ** 2) return 0;
+    const cosine = (inward.x * outward.x + inward.y * outward.y) / lengths;
+    return (Math.acos(Math.min(1, Math.max(-1, cosine))) * 180) / Math.PI;
+  });
+  if (!turn.some((degrees) => degrees > CORNER_TURN_DEGREES)) return plain;
+  // A shaky corner can leave two knots a couple of points apart that both measure as the turn;
+  // it is one corner, kept at whichever knot turns hardest.
+  const twin = knots.map(() => false);
+  for (let k = 0; k < knots.length; k += 1) {
+    const other = (k + 1) % knots.length;
+    if ((!ring && other === 0) || turn[k] <= CORNER_TURN_DEGREES || turn[other] <= CORNER_TURN_DEGREES) continue;
+    if (distance(knots[k], knots[other]) < reach) twin[turn[k] < turn[other] ? k : other] = true;
+  }
+  if (twin.some(Boolean)) {
+    const left = knots.flatMap((_, k) => (twin[k] ? [] : [k]));
+    if (!ring || left.length >= MIN_CLOSED_SPLINE_NODES) {
+      knots = left.map((k) => knots[k]);
+      at.splice(0, at.length, ...left.map((k) => at[k]));
+      turn.splice(0, turn.length, ...left.map((k) => turn[k]));
+      plain.knots = knots;
+      plain.corner = knots.map(() => false);
+      plain.straightAfter = knots.map(() => false);
+    }
+  }
+  const corner = turn.map((degrees) => degrees > CORNER_TURN_DEGREES);
+
+  // Runs go from one break (a corner, or an open end) to the next; a ring wraps round to its first.
+  const breaks = knots.flatMap((_, k) => (corner[k] || (!ring && (k === 0 || k === knots.length - 1)) ? [k] : []));
+  if (breaks.length < 2) return { ...plain, corner };
+  const wander = Math.max(STRAIGHT_RUN_MIN_PT, diagonal * STRAIGHT_RUN);
+  const keep = knots.map(() => true);
+  const straight = knots.map(() => false);
+  const runs = ring ? breaks.length : breaks.length - 1;
+  for (let run = 0; run < runs; run += 1) {
+    const from = breaks[run];
+    const to = breaks[(run + 1) % breaks.length];
+    let straightRun = true;
+    for (let index = at[from]; index !== at[to]; index = (index + 1) % count) {
+      if (distanceToSegment(samples[index], knots[from], knots[to]) > wander) {
+        straightRun = false;
+        break;
+      }
+    }
+    if (!straightRun) continue;
+    straight[from] = true;
+    for (let k = (from + 1) % knots.length; k !== to; k = (k + 1) % knots.length) keep[k] = false;
+  }
+  const kept = knots.flatMap((_, k) => (keep[k] ? [k] : []));
+  // A ring needs three knots to enclose anything; one that would lose them keeps its curves.
+  if (ring && kept.length < MIN_CLOSED_SPLINE_NODES) return { ...plain, corner };
+  return {
+    knots: kept.map((k) => knots[k]),
+    corner: kept.map((k) => corner[k]),
+    straightAfter: kept.map((k) => straight[k]),
   };
 }
 

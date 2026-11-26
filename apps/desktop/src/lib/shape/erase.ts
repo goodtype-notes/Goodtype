@@ -11,12 +11,12 @@
 // A line stays a line. Everything else becomes open splines that the writer can still edit.
 
 import type { Point } from "../geometry/coordinates";
-import { complement, contactIntervals, type EraserSweep } from "../ink/erase";
+import { complement, contactIntervals, segmentDistance, type EraserSweep } from "../ink/erase";
 import { distanceToSegment } from "../ink/selection";
 import type { BezierNode, ShapeGeometry, ShapePoint } from "../model";
 import type { ShapeView } from "../notebook/pageView";
-import { containsPoint } from "./geometry";
-import { toLocalPoint } from "./hit";
+import { containsPoint, distanceToShapeCap, shapeCaps, supportsShapeCaps } from "./geometry";
+import { toLocalPoint, toPagePoint } from "./hit";
 
 type Cubic = [ShapePoint, ShapePoint, ShapePoint, ShapePoint];
 /** `straight` marks pieces that are straight lines, so they rebuild as corners without handles. */
@@ -66,14 +66,30 @@ export function cutShape(shape: ShapeView, sweeps: EraserSweep[], newId: () => s
     ? (sweeps.some((sweep) => distanceToSegment(walk.page[0], sweep.from, sweep.to) <= sweep.radius + radius) ? [[0, 0] as [number, number]] : [])
     : contactIntervals(walk.page, radii, false, sweeps);
 
+  const erasedCaps = new Set(shapeCaps(shape.geometry, shape.style).caps.filter((cap) =>
+    sweeps.some((sweep) => {
+      const from = toLocalPoint(shape, sweep.from);
+      const to = toLocalPoint(shape, sweep.to);
+      const reach = sweep.radius / Math.abs(shape.scale);
+      if (distanceToShapeCap(cap, from) <= reach || distanceToShapeCap(cap, to) <= reach) return true;
+      const edges = cap.kind === "arrow" ? [...cap.points, cap.points[0]] : cap.points;
+      if (cap.kind === "dot") return distanceToSegment(cap.tip, from, to) <= reach + cap.radius;
+      return edges.slice(1).some((point, i) =>
+        segmentDistance(from, to, edges[i], point) <= reach + cap.radius);
+    }),
+  ).map((cap) => cap.at));
+
   // A fill is an area, and an outline model cannot cut a hole in it: a touched filled shape goes
   // whole, as it always has. Touching the tint counts, as it does for the stroke eraser.
-  if (shape.style.fillColor !== null) {
+  if (shape.style.fillColor !== null && !supportsShapeCaps(shape.geometry)) {
     const touched = removed.length > 0 || sweeps.some((sweep) =>
       [sweep.from, sweep.to].some((point) => containsPoint(shape.geometry, toLocalPoint(shape, point))));
     return touched ? [] : null;
   }
-  if (removed.length === 0) return null;
+  const style = { ...shape.style };
+  if (erasedCaps.has("start")) delete style.startCap;
+  if (erasedCaps.has("end")) delete style.endCap;
+  if (removed.length === 0) return erasedCaps.size > 0 ? [{ ...shape, style }] : null;
   const last = walk.page.length - 1;
   let kept = complement(removed, last);
   if (kept.length === 0) return [];
@@ -98,13 +114,16 @@ export function cutShape(shape: ShapeView, sweeps: EraserSweep[], newId: () => s
       : splineBetween(walk, outline, spans);
     if (!geometry) continue;
     const offset = (shape.style.patternOffsetPt ?? 0) + lengthAt(walk, spans[0][0]);
+    const pieceStyle = { ...style };
+    if (spans[0][0] !== 0) delete pieceStyle.startCap;
+    if (spans[spans.length - 1][1] !== last) delete pieceStyle.endCap;
     pieces.push({
       ...shape,
       id: pieces.length === 0 ? shape.id : newId(),
       geometry,
       style: solid || offset === 0
-        ? withoutOffset(shape.style)
-        : { ...shape.style, patternOffsetPt: offset },
+        ? withoutOffset(pieceStyle)
+        : { ...pieceStyle, patternOffsetPt: offset },
     });
   }
   return pieces;
@@ -217,7 +236,7 @@ function flatten(outline: Outline, shape: ShapeView): Walk {
       const previous = walk.local[walk.local.length - 1];
       walk.lengths.push(previous ? walk.lengths[walk.lengths.length - 1] + Math.hypot(point.x - previous.x, point.y - previous.y) : 0);
       walk.local.push(point);
-      walk.page.push(toPage(shape, point));
+      walk.page.push(toPagePoint(shape, point));
       if (step > 0) walk.pieces.push({ cubic: index, from: (step - 1) / count, to: step / count });
     }
   });
@@ -258,7 +277,7 @@ function clearEnds(
   let [from, to] = span;
   const radius = (shape.style.strokeWidthPt * Math.abs(shape.scale)) / 2;
   const clear = (u: number) => {
-    const point = toPage(shape, exactAt(walk, u));
+    const point = toPagePoint(shape, exactAt(walk, u));
     return sweeps.every((sweep) => distanceToSegment(point, sweep.from, sweep.to) - radius > sweep.radius);
   };
   for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -369,15 +388,4 @@ function lerp(a: ShapePoint, b: ShapePoint, t: number): ShapePoint {
 
 function add(point: ShapePoint, offset: ShapePoint | null): ShapePoint {
   return offset ? { x: point.x + offset.x, y: point.y + offset.y } : point;
-}
-
-/// The transform every renderer applies: `translate(x y) rotate(rotation) scale(scale)`.
-function toPage(shape: ShapeView, local: ShapePoint): Point {
-  const angle = (shape.rotation * Math.PI) / 180;
-  const x = local.x * shape.scale;
-  const y = local.y * shape.scale;
-  return {
-    x: shape.x + x * Math.cos(angle) - y * Math.sin(angle),
-    y: shape.y + x * Math.sin(angle) + y * Math.cos(angle),
-  };
 }

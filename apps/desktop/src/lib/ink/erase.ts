@@ -336,7 +336,7 @@ function crossSectionDistance(a: Point, b: Point, length: number, radius: number
   );
 }
 
-function segmentDistance(a: Point, b: Point, c: Point, d: Point): number {
+export function segmentDistance(a: Point, b: Point, c: Point, d: Point): number {
   const cross = (p: Point, q: Point, r: Point) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
   const abc = cross(a, b, c), abd = cross(a, b, d), cda = cross(c, d, a), cdb = cross(c, d, b);
   if (((abc > 0 && abd < 0) || (abc < 0 && abd > 0)) && ((cda > 0 && cdb < 0) || (cda < 0 && cdb > 0))) return 0;

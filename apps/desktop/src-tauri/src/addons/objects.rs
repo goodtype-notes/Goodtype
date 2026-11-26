@@ -18,10 +18,16 @@ pub(crate) struct Request {
     revision: u64,
     addon_id: String,
     action: Action,
+    request_id: Option<String>,
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 enum Action {
     Tool {
         id: String,
@@ -31,10 +37,35 @@ enum Action {
         #[serde(default)]
         style: Option<goodtype_core::ShapeStyle>,
     },
+    PathEdit {
+        id: String,
+        object_id: String,
+        edit: Edit,
+    },
     Command {
         id: String,
         selected: Vec<String>,
     },
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub(super) enum Edit {
+    Endpoint {
+        end: End,
+        point: ShapePoint,
+        attach: Option<Attachment>,
+    },
+    Choice {
+        value: String,
+    },
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) enum End {
+    Start,
+    End,
 }
 
 /// The active pen, so a tool's new objects can match it (the addon decides whether to use it).
@@ -55,7 +86,7 @@ struct Point {
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Attachment {
+pub(super) struct Attachment {
     object_id: String,
     port: usize,
 }
@@ -198,6 +229,145 @@ fn own_value(object: &PageObject, addon: &str) -> Value {
     value
 }
 
+fn port_target<'a>(
+    page: &'a goodtype_core::Page,
+    source: Option<&PageObject>,
+    target: &str,
+) -> Option<&'a PageObject> {
+    let find = |id: &str| page.objects.iter().find(|object| object.fields().id == id);
+    let target = find(target)?;
+    let fields = target.fields();
+    if source.is_some_and(|source| source.fields().id == fields.id)
+        || (matches!(target, PageObject::Shape { geometry, .. } if batch::path_ends(geometry).is_some())
+            && fields
+                .addon_data
+                .as_ref()
+                .is_some_and(|entries| !entries.is_empty()))
+    {
+        return None;
+    }
+    let ancestors = |object: &PageObject| {
+        let mut parents = Vec::new();
+        let mut parent = object.fields().group_id.as_deref();
+        while let Some(group) = parent.and_then(find) {
+            parents.push(group);
+            parent = group.fields().group_id.as_deref();
+        }
+        parents
+    };
+    if source.is_some_and(|source| {
+        ancestors(source)
+            .iter()
+            .any(|group| group.fields().id == fields.id)
+    }) || ancestors(target).iter().any(|group| {
+        source.is_some_and(|source| group.fields().id == source.fields().id)
+            || group.fields().ports.is_some()
+    }) {
+        return None;
+    }
+    Some(target)
+}
+
+pub(super) fn capture_path(
+    bundle: &storage::NotebookSnapshot,
+    addon: &str,
+    id: String,
+    edit: Edit,
+) -> Result<(Invocation, batch::PathGrant, bool), String> {
+    let page = &bundle.page;
+    let Some(
+        source @ PageObject::Shape {
+            fields,
+            geometry,
+            style,
+        },
+    ) = page.objects.iter().find(|object| object.fields().id == id)
+    else {
+        return Err(batch::FORBIDDEN.into());
+    };
+    let entry = fields
+        .addon_data
+        .as_ref()
+        .and_then(|entries| entries.get(addon));
+    if entry.is_none()
+        && (fields
+            .addon_data
+            .as_ref()
+            .is_some_and(|entries| !entries.is_empty())
+            || (style.start_cap.is_none() && style.end_cap.is_none()))
+    {
+        return Err(batch::FORBIDDEN.into());
+    }
+    let ends = batch::path_ends(geometry).ok_or(batch::FORBIDDEN)?;
+    let mut points = ends.map(|point| {
+        let ShapePoint { x, y } = addon_data::to_page_point(fields, point);
+        Point { x, y, attach: None }
+    });
+    let mut refs = Vec::new();
+    let mut grant = batch::PathGrant {
+        id,
+        refs: HashSet::new(),
+        attached: None,
+    };
+    if let Some(entry) = entry {
+        for id in &entry.refs {
+            if let Some(object) = port_target(page, Some(source), id) {
+                grant.refs.insert(id.clone());
+                refs.push(object_snapshot(object, bundle));
+            }
+        }
+    }
+    let (edit, drop) = match edit {
+        Edit::Choice { value } => (json!({"kind": "choice", "value": value}), false),
+        Edit::Endpoint {
+            end,
+            mut point,
+            attach,
+        } => {
+            let index = match end {
+                End::Start => 0,
+                End::End => 1,
+            };
+            if let Some(attachment) = &attach {
+                let target = port_target(page, Some(source), &attachment.object_id)
+                    .ok_or(batch::FORBIDDEN)?;
+                point = *addon_data::page_ports(target)
+                    .get(attachment.port)
+                    .ok_or(batch::FORBIDDEN)?;
+                if grant.refs.insert(attachment.object_id.clone()) {
+                    refs.push(object_snapshot(target, bundle));
+                }
+                grant.attached = Some((attachment.object_id.clone(), index, point));
+            } else if entry.is_none() {
+                return Err(batch::FORBIDDEN.into());
+            }
+            if !(0.0..=page.geometry.width_pt).contains(&point.x)
+                || !(0.0..=page.geometry.height_pt).contains(&point.y)
+            {
+                return Err("addon-does-not-fit".into());
+            }
+            let drop = attach.is_some();
+            points[index] = Point {
+                x: point.x,
+                y: point.y,
+                attach,
+            };
+            (json!({"kind": "endpoint", "end": end}), drop)
+        }
+    };
+    let mut object = json!({"id": fields.id, "type": "shape", "x": fields.x, "y": fields.y,
+        "rotation": fields.rotation, "scale": fields.scale, "geometry": geometry, "style": style});
+    if let Some(entry) = entry {
+        object["addonData"] = json!({addon: entry});
+    }
+    Ok((
+        Invocation::PathEdit(json!({"page": geometry_value(page), "edit": edit,
+        "object": object, "points": points, "refs": refs})),
+        grant,
+        drop,
+    ))
+}
+
 fn capture(
     bundle: &storage::NotebookSnapshot,
     addon: &str,
@@ -207,6 +377,7 @@ fn capture(
     let objects = &page.objects;
     let find = |id: &str| objects.iter().find(|obj| obj.fields().id == id);
     match action {
+        Action::PathEdit { .. } => Err(batch::FORBIDDEN.into()),
         Action::Tool {
             id,
             mut points,
@@ -234,7 +405,8 @@ fn capture(
             let mut seen = HashSet::new();
             for point in &mut points {
                 if let Some(attachment) = &point.attach {
-                    let object = find(&attachment.object_id).ok_or("addon-object-permission")?;
+                    let object = port_target(page, None, &attachment.object_id)
+                        .ok_or("addon-object-permission")?;
                     let port = addon_data::page_ports(object)
                         .get(attachment.port)
                         .copied()
@@ -321,7 +493,7 @@ impl From<NotebookError> for ActionError {
     fn from(error: NotebookError) -> Self {
         Self {
             code: -32603,
-            message: format!("{error:?}"),
+            message: error.to_string(),
         }
     }
 }
@@ -340,8 +512,46 @@ fn error(message: impl Into<String>) -> ActionError {
 pub(crate) async fn addon_object_action(
     app: tauri::AppHandle,
     request: Request,
-) -> Result<Option<storage::HistoryResult>, ActionError> {
+) -> Result<Option<Outcome>, ActionError> {
+    let request_id = request.request_id.clone();
+    let proposals = app.state::<selection::Proposals>();
+    let cancellation = if matches!(request.action, Action::PathEdit { .. }) {
+        Some(
+            proposals
+                .begin(
+                    request_id
+                        .as_deref()
+                        .ok_or_else(|| error("addon-unavailable"))?,
+                )
+                .map_err(error)?,
+        )
+    } else {
+        None
+    };
+    let result = object_action(&app, request, cancellation.clone()).await;
+    if let Some(id) = request_id.filter(|_| cancellation.is_some()) {
+        proposals.finish(&id);
+    }
+    result
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+pub(crate) enum Outcome {
+    Committed(Box<storage::HistoryResult>),
+    Review {
+        review: Box<selection::Review>,
+        direct: bool,
+    },
+}
+
+async fn object_action(
+    app: &tauri::AppHandle,
+    request: Request,
+    cancellation: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<Option<Outcome>, ActionError> {
     let handle = app.clone();
+    let flag = cancellation.clone();
     let prepared = tauri::async_runtime::spawn_blocking(move || {
         let app = handle;
         let root = workspace::ensure_allowed(&app.state::<AllowedRoots>(), &request.root)
@@ -366,21 +576,60 @@ pub(crate) async fn addon_object_action(
             Ok((snapshot, base))
         })
         .map_err(error)?;
-        let (command, invocation, scope) =
-            capture(&snapshot, addon.id, request.action).map_err(error)?;
+        let (command, invocation, scope, path) = match request.action {
+            Action::PathEdit {
+                id,
+                object_id,
+                edit,
+            } => {
+                let kind = match &edit {
+                    Edit::Choice { .. } => "pathChoice",
+                    Edit::Endpoint {
+                        end: End::Start, ..
+                    } => "pathStart",
+                    Edit::Endpoint { end: End::End, .. } => "pathEnd",
+                };
+                let (invocation, grant, drop) =
+                    capture_path(&snapshot, addon.id, object_id, edit).map_err(error)?;
+                (id, invocation, None, Some((grant, drop, kind)))
+            }
+            action => {
+                let (id, invocation, scope) =
+                    capture(&snapshot, addon.id, action).map_err(error)?;
+                (id, invocation, scope, None)
+            }
+        };
+        let cancelled = || {
+            flag.as_ref()
+                .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst))
+        };
+        let direct_at_start = path.is_some() && super::manager::direct_apply(&app, addon.id);
         let context = format!("{}:{}", root.display(), request.page_id);
         let reply = app
             .state::<session::Runtime>()
             .run(&app, addon, &command, invocation, Some(&context), || {
-                selection::revoked(job, &authorization)
+                cancelled() || selection::revoked(job, &authorization)
             })
             .map_err(|failure| error(failure.code()))?
             .map_err(|failure| ActionError {
                 code: failure.code,
                 message: failure.message,
             })?;
-        let candidate =
-            batch::apply_owned(&root, snapshot, addon.id, scope.as_ref(), reply).map_err(error)?;
+        if path.is_some() && cancelled() {
+            return Err(error("addon-cancelled"));
+        }
+        let (candidate, review) = match path {
+            Some((grant, drop, kind)) => {
+                let candidate =
+                    batch::apply_path_edit(snapshot, addon.id, &grant, reply).map_err(error)?;
+                (Some(candidate), (!drop).then_some((grant.id, kind)))
+            }
+            None => (
+                batch::apply_owned(&root, snapshot, addon.id, scope.as_ref(), reply)
+                    .map_err(error)?,
+                None,
+            ),
+        };
         Ok::<_, ActionError>((
             request.root,
             request.page_id,
@@ -388,21 +637,36 @@ pub(crate) async fn addon_object_action(
             candidate,
             base,
             authorization,
+            review,
+            direct_at_start,
         ))
     })
     .await
     .map_err(|_| error("addon-unavailable"))??;
-    let (root, page, addon_id, candidate, base, authorization) = prepared;
+    let (root, page, addon_id, candidate, base, authorization, review, direct_at_start) = prepared;
     let Some(candidate) = candidate else {
         return Ok(None);
     };
     let handle = app.clone();
+    let cancelled = cancellation
+        .as_ref()
+        .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst));
+    if cancelled {
+        return Err(error("addon-cancelled"));
+    }
+    let flag = cancellation;
     notebook::on_page(
         &app.state(),
         &app.state(),
         root,
         page,
-        move |root, _, history| {
+        move |root, page, history| {
+            if flag
+                .as_ref()
+                .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst))
+            {
+                return Err(invalid("addon-cancelled"));
+            }
             let state = handle.state::<Importers>();
             let (job, addon) = state.get(&addon_id).map_err(|e| invalid(&e))?;
             let state = job
@@ -413,16 +677,40 @@ pub(crate) async fn addon_object_action(
             {
                 return Err(invalid("addon-unavailable"));
             }
+            if flag.is_some() {
+                if !history.observes(page) {
+                    return Err(invalid("addon-unavailable"));
+                }
+                let snapshot = storage::open_page(root, page)?;
+                if snapshot.page.revision != base.revision {
+                    return Err(invalid("addon-stale-page"));
+                }
+                storage::check_proposal_base(root, &snapshot, &base)?;
+            }
+            if let Some((id, kind)) = review {
+                let (review, direct) = selection::review_path(
+                    &handle,
+                    (root.to_path_buf(), base),
+                    candidate,
+                    (&id, kind),
+                    (addon, authorization, direct_at_start),
+                )
+                .map_err(|message| invalid(&message))?;
+                return Ok(Some(Outcome::Review {
+                    review: Box::new(review),
+                    direct,
+                }));
+            }
             storage::commit_notebook_with_precondition(
                 root,
                 history,
                 candidate,
                 Some(storage::ProposalPrecondition {
                     base,
-                    require_retained_history: false,
+                    require_retained_history: flag.is_some(),
                 }),
             )
-            .map(Some)
+            .map(|result| Some(Outcome::Committed(Box::new(result))))
         },
     )
     .await
@@ -521,6 +809,8 @@ fn reactions(
 pub(crate) struct ReactionResult {
     token: Option<String>,
     retry: bool,
+    /// The addon whose reaction failed after its bounded retry.
+    failed: Option<selection::Name>,
 }
 
 struct PendingReaction {
@@ -608,32 +898,48 @@ pub(crate) async fn addon_react(
                 let importers = handle.state::<Importers>();
                 let (job, _) = importers.get(addon.id).ok()?;
                 let authorization = selection::authorization(&handle, job, addon).ok()?;
-                let value = handle
-                    .state::<session::Runtime>()
-                    .run(
-                        &handle,
-                        addon,
-                        "",
-                        Invocation::Reaction(params),
-                        Some(&context),
-                        || Instant::now() >= deadline || selection::revoked(job, &authorization),
-                    )
-                    .ok()?
-                    .ok()?;
-                let candidate =
-                    batch::apply_owned(&root, snapshot, addon.id, Some(&scope), value).ok()?;
+                let changed = || {
+                    let value = handle
+                        .state::<session::Runtime>()
+                        .run(
+                            &handle,
+                            addon,
+                            "",
+                            Invocation::Reaction(params),
+                            Some(&context),
+                            || {
+                                Instant::now() >= deadline
+                                    || selection::revoked(job, &authorization)
+                            },
+                        )
+                        .map_err(|failure| failure.code())?
+                        .map_err(|_| "addon-invalid-response")?;
+                    if addon.id == super::catalog::CONNECTORS.id {
+                        batch::check_path_reaction(&snapshot, addon.id, &value)
+                            .map_err(|_| "addon-invalid-response")?;
+                    }
+                    batch::apply_owned(&root, snapshot, addon.id, Some(&scope), value)
+                        .map_err(|_| "addon-invalid-response")
+                };
+                let candidate = changed();
+                if selection::revoked(job, &authorization) {
+                    return None;
+                }
                 Some((candidate, authorization))
             })
             .await
             .map_err(|_| error("addon-unavailable"))?;
-            if Instant::now() >= deadline {
+            if Instant::now() >= deadline
+                || response.as_ref().is_some_and(|(result, _)| result.is_err())
+            {
                 return Ok(ReactionResult {
                     token: None,
                     retry: !retry,
+                    failed: retry.then(|| selection::Name::of(addon)),
                 });
             }
             visited.insert(addon.id);
-            let Some((Some(candidate), authorization)) = response else {
+            let Some((Ok(Some(candidate)), authorization)) = response else {
                 continue;
             };
             current = candidate;
@@ -660,6 +966,7 @@ pub(crate) async fn addon_react(
     Ok(ReactionResult {
         token: Some(token),
         retry: false,
+        failed: None,
     })
 }
 
@@ -872,6 +1179,89 @@ mod tests {
             crate::export::export_page_from_bundle(&snapshot, false).unwrap(),
             crate::export::export_page_from_bundle(&plain, false).unwrap()
         );
+    }
+
+    #[test]
+    fn stretch_notifies_connector_reactions_with_both_group_ports() {
+        use goodtype_core::stretch::{self, Limits, Part, Role, StretchRequest, StretchRule};
+        let mut before = fixture();
+        let child = &mut before.page.objects[0];
+        let mut fields = child.fields().clone();
+        child.fields_mut().group_id = Some("symbol".into());
+        fields.id = "symbol".into();
+        fields.ports = Some(vec![
+            ShapePoint { x: 0.0, y: 5.0 },
+            ShapePoint { x: 20.0, y: 5.0 },
+        ]);
+        before.page.objects.push(PageObject::Group {
+            fields,
+            child_ids: vec!["left".into()],
+            stretch: Some(StretchRule {
+                axis: [0, 1],
+                parts: vec![Part {
+                    child_id: "left".into(),
+                    role: Role::Span,
+                }],
+                limits: Limits::Span {
+                    minimum_length: 10.0,
+                },
+            }),
+        });
+        let start = &mut before.page.objects[3];
+        start.fields_mut().addon_data = Some(
+            serde_json::from_value(json!({
+                "connectors": {"refs":["symbol"],"data":{"attach":{"objectId":"symbol","port":0}}}
+            }))
+            .unwrap(),
+        );
+        let mut end = start.clone();
+        end.fields_mut().id = "end-connector".into();
+        end.fields_mut().addon_data = Some(
+            serde_json::from_value(json!({
+                "connectors": {"refs":["symbol"],"data":{"attach":{"objectId":"symbol","port":1}}}
+            }))
+            .unwrap(),
+        );
+        before.page.objects.push(end);
+        for (port, x, expected) in [(0, 10.0, [10.0, 40.0]), (1, 60.0, [20.0, 60.0])] {
+            let mut after = before.clone();
+            assert!(
+                stretch::apply(
+                    &mut after.page.objects,
+                    &StretchRequest {
+                        page_id: before.page.id.clone(),
+                        revision: before.page.revision,
+                        group_id: "symbol".into(),
+                        port,
+                        endpoint: ShapePoint { x, y: 25.0 },
+                        modified_at: "2026-11-25".into(),
+                    }
+                )
+                .unwrap()
+            );
+            let (payload, scope) = reactions(&before, &after, "connectors").unwrap();
+            assert_eq!(
+                scope,
+                HashSet::from(["connector".to_owned(), "end-connector".to_owned()])
+            );
+            assert_eq!(payload["deleted"], json!([]));
+            assert_eq!(payload["changed"].as_array().unwrap().len(), 1);
+            assert_eq!(payload["changed"][0]["id"], "symbol");
+            assert_eq!(
+                payload["changed"][0]["ports"],
+                json!([
+                    {"x":expected[0],"y":25.0}, {"x":expected[1],"y":25.0},
+                ])
+            );
+            for index in 0..2 {
+                assert_eq!(
+                    payload["own"][index]["addonData"]["connectors"]["data"]["attach"],
+                    json!({"objectId":"symbol","port":index})
+                );
+            }
+            assert_eq!(before.page.objects[3], after.page.objects[3]);
+            assert_eq!(before.page.objects[5], after.page.objects[5]);
+        }
     }
 
     #[test]

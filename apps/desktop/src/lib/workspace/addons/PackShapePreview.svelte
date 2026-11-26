@@ -1,5 +1,6 @@
 ﻿<script lang="ts">
-  import { shapeDashArray, shapePath } from "../../shape/geometry";
+  import { shapeCaps, supportsShapeCaps } from "../../shape/geometry";
+  import ShapeMarks from "../../notebook/ShapeMarks.svelte";
   import type { PackShape } from "./content";
   import { previewMargin } from "./shapePanel";
 
@@ -21,10 +22,10 @@
         fillColor: object.style.fillColor === "pen" ? color : object.style.fillColor ?? null,
         opacity: object.style.opacity ?? 1,
       }}
-      <path d={shapePath(object.geometry)} transform={`translate(${object.x} ${object.y})`}
-        stroke={style.strokeColor} stroke-width={style.strokeWidthPt} fill={style.fillColor ?? "none"}
-        opacity={style.opacity} stroke-dasharray={shapeDashArray(style)?.join(" ")}
-        stroke-linecap="round" stroke-linejoin="round" />
+      <g transform={`translate(${object.x} ${object.y})`}>
+        <ShapeMarks marks={shapeCaps(object.geometry, style)} style={style}
+          closed={!supportsShapeCaps(object.geometry)} />
+      </g>
     {/if}
   {/each}
 </svg>
