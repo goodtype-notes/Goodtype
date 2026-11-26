@@ -6,6 +6,8 @@ import { toPagePoint } from "./hit";
 
 /// Shift-rotation lands on the same twelfth-turn grid a constrained line snaps to.
 const ROTATION_SNAP_DEGREES = 15;
+/// How far above a selection box the rotate handle sits, in screen pixels at any zoom.
+export const ROTATE_HANDLE_SCREEN_PX = 28;
 
 /**
  * Turn `moved` around `fixed` onto the nearest 15° step as seen on the page, keeping its distance.

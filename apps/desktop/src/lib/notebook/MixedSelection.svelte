@@ -3,6 +3,7 @@
   import type { Bounds } from "../ink/selection";
   import type { Point } from "../geometry/coordinates";
   import { viewportToPage } from "../geometry/coordinates";
+  import { selectionDragTransform, selectionHandles } from "./lasso";
   import { onDestroy } from "svelte";
   let { bounds, zoom, onStart, onPreview, onEnd, onEnter }: {
     bounds: Bounds; zoom: number; onStart: () => void;
@@ -10,7 +11,7 @@
     onEnter?: (event?: PointerEvent) => void;
     onEnd: (cancelled: boolean) => void;
   } = $props();
-  const scaleOffset = $derived(onEnter ? 18 / zoom : 0);
+  const handles = $derived(selectionHandles(bounds, zoom));
   let drag: { id: number; x: number; y: number; bounds: Bounds; kind: "move" | "scale" | "rotate"; moved: boolean } | null = null;
   let previewFrame = 0;
   let pending: { delta: Point; scale: number; anchor: Point; rotation: number } | null = null;
@@ -41,16 +42,7 @@
     if (onEnter && !drag.moved) return;
     const { x: dx, y: dy } = viewportToPage({ x: event.clientX - drag.x, y: event.clientY - drag.y },
       { pageOriginX: 0, pageOriginY: 0, zoom });
-    const b = drag.bounds;
-    const width = b.right - b.left + scaleOffset;
-    const height = b.bottom - b.top + scaleOffset;
-    const scale = drag.kind === "scale" ? Math.max(0.05, Math.hypot(width + dx, height + dy) /
-      Math.max(1, Math.hypot(width, height))) : 1;
-    const rotating = drag.kind === "rotate";
-    const arm = (b.bottom - b.top) / 2 + 26 / zoom;
-    const rotation = rotating ? Math.atan2(dx, arm - dy) * 180 / Math.PI : 0;
-    pending = { delta: drag.kind === "move" ? { x: dx, y: dy } : { x: 0, y: 0 }, scale, rotation,
-      anchor: rotating ? { x: (b.left + b.right) / 2, y: (b.top + b.bottom) / 2 } : { x: b.left, y: b.top } };
+    pending = selectionDragTransform(drag.kind, drag.bounds, { x: dx, y: dy }, zoom);
 
     if (!previewFrame) previewFrame = requestAnimationFrame(flushPreview);
   }
@@ -83,14 +75,14 @@
   <rect role="button" tabindex="0" aria-label={$t(onEnter ? "workspace.shapeGroupSelected" : "workspace.moveSelectedItems")} use:focusOnMount
     x={bounds.left} y={bounds.top} width={Math.max(1, bounds.right - bounds.left)} height={Math.max(1, bounds.bottom - bounds.top)}
     onkeydown={keydown} onpointerdown={event => begin(event)} onpointermove={move} onpointerup={end} onpointercancel={end} onlostpointercapture={end} />
-  <circle role="button" tabindex="0" aria-label={$t("workspace.scaleSelectedItems")} cx={bounds.right + scaleOffset} cy={bounds.bottom + scaleOffset} r={22 / zoom}
+  <circle role="button" tabindex="0" aria-label={$t("workspace.scaleSelectedItems")} cx={handles.scale.x} cy={handles.scale.y} r={22 / zoom}
     onkeydown={keydown} onpointerdown={event => begin(event, "scale")} onpointermove={move} onpointerup={end} onpointercancel={end} onlostpointercapture={end} />
-  <circle class="visible-handle" cx={bounds.right + scaleOffset} cy={bounds.bottom + scaleOffset} r={6 / zoom} />
+  <circle class="visible-handle" cx={handles.scale.x} cy={handles.scale.y} r={6 / zoom} />
   {#if onEnter}
     <circle class="rotate" role="button" tabindex="0" aria-label={$t("workspace.rotateShapeGroup")}
-      cx={(bounds.left + bounds.right) / 2} cy={bounds.top - 26 / zoom} r={22 / zoom}
+      cx={handles.rotate.x} cy={handles.rotate.y} r={22 / zoom}
       onpointerdown={event => begin(event, "rotate")} onpointermove={move} onpointerup={end} onpointercancel={end} onlostpointercapture={end} />
-    <circle class="visible-handle" cx={(bounds.left + bounds.right) / 2} cy={bounds.top - 26 / zoom} r={6 / zoom} />
+    <circle class="visible-handle" cx={handles.rotate.x} cy={handles.rotate.y} r={6 / zoom} />
   {/if}
 </svg>
 

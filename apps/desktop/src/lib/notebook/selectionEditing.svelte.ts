@@ -189,12 +189,8 @@ export function createSelection(env: SelectionEnvironment) {
 
   const mixedSelectionBounds = $derived.by(() => {
     if (!lassoObjectIds.length) return null;
-    const bounds = combinedBounds(lassoItems().filter(item => lassoObjectIds.includes(item.id)),
+    return combinedBounds(lassoItems().filter(item => lassoObjectIds.includes(item.id)),
       inkPreviewBounds(env.strokes, selectedStrokeIds, mixedStrokePreview));
-    if (!bounds || !selectedGroup) return bounds;
-    const padding = 5 / env.zoom;
-    return { left: bounds.left - padding, top: bounds.top - padding,
-      right: bounds.right + padding, bottom: bounds.bottom + padding };
   });
 
   function lassoSelection(polygon: Point[], inkIds: string[]) {
