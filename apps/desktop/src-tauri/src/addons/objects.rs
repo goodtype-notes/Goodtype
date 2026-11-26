@@ -789,7 +789,11 @@ fn reactions(
         }
         if affected {
             ids.insert(fields.id.clone());
-            own.push(own_value(object, addon));
+            let mut value = own_value(object, addon);
+            // Retain deleted dependencies after canonical ref cleanup, for chunk scoping only.
+            value["_reactionRefs"] = json!(entry.refs);
+            value["_reactionDeletedRefs"] = json!(previous_entry.map(|entry| &entry.refs));
+            own.push(value);
         }
     }
     if own.is_empty() {
@@ -805,12 +809,118 @@ fn reactions(
     ))
 }
 
+// At most 512 owned objects per addon/change; per-reply limits remain unchanged.
+const REACTION_CHUNK_SIZE: usize = 32;
+const MAX_REACTION_CHUNKS: usize = 16;
+
+fn reaction_chunks(params: Value) -> Result<Vec<(Value, HashSet<String>)>, &'static str> {
+    let own = params["own"].as_array().ok_or("addon-invalid-response")?;
+    if own.len() > REACTION_CHUNK_SIZE * MAX_REACTION_CHUNKS {
+        return Err("addon-reaction-over-budget");
+    }
+    own.chunks(REACTION_CHUNK_SIZE)
+        .map(|objects| {
+            let dependencies: HashSet<_> = objects
+                .iter()
+                .filter_map(|object| object["_reactionRefs"].as_array())
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            let deleted_dependencies: HashSet<_> = objects
+                .iter()
+                .filter_map(|object| object["_reactionDeletedRefs"].as_array())
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            let changed: Vec<_> = params["changed"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|object| {
+                    object["id"]
+                        .as_str()
+                        .is_some_and(|id| dependencies.contains(id))
+                })
+                .collect();
+            let deleted: Vec<_> = params["deleted"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|id| {
+                    id.as_str()
+                        .is_some_and(|id| deleted_dependencies.contains(id))
+                })
+                .collect();
+            let own: Vec<_> = objects
+                .iter()
+                .cloned()
+                .map(|mut object| {
+                    object.as_object_mut().unwrap().remove("_reactionRefs");
+                    object
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("_reactionDeletedRefs");
+                    object
+                })
+                .collect();
+            let chunk =
+                json!({"page":params["page"], "own":own, "changed":changed, "deleted":deleted});
+            let scope = objects
+                .iter()
+                .filter_map(|object| object["id"].as_str().map(str::to_owned))
+                .collect();
+            (chunk, scope)
+        })
+        .map(Ok)
+        .collect()
+}
+
+fn run_reaction_chunks(
+    root: &std::path::Path,
+    snapshot: &storage::NotebookSnapshot,
+    addon: &str,
+    params: Value,
+    mut invoke: impl FnMut(Value) -> Result<Value, &'static str>,
+) -> Result<Option<storage::NotebookSnapshot>, &'static str> {
+    let mut candidate = snapshot.clone();
+    let mut updated = false;
+    for (params, scope) in reaction_chunks(params)? {
+        let value = invoke(params)?;
+        if addon == super::catalog::CONNECTORS.id {
+            batch::check_path_reaction(snapshot, addon, &value)
+                .map_err(|_| "addon-invalid-response")?;
+        }
+        let operations = value
+            .pointer("/batch/operations")
+            .or_else(|| value.pointer("/batch/ops"))
+            .or_else(|| value.get("ops"));
+        if operations
+            .and_then(Value::as_array)
+            .is_some_and(|ops| ops.len() > 32)
+        {
+            return Err("addon-reaction-over-budget");
+        }
+        // Validate each reply against the captured ownership before combining it.
+        batch::apply_owned(root, snapshot.clone(), addon, Some(&scope), value.clone())
+            .map_err(|_| "addon-invalid-response")?;
+        if let Some(next) = batch::apply_owned(root, candidate.clone(), addon, Some(&scope), value)
+            .map_err(|_| "addon-invalid-response")?
+        {
+            candidate = next;
+            updated = true;
+        }
+    }
+    Ok(updated.then_some(candidate))
+}
+
 #[derive(Serialize, Default)]
 pub(crate) struct ReactionResult {
     token: Option<String>,
     retry: bool,
-    /// The addon whose reaction failed after its bounded retry.
+    /// The addon whose reaction failed; the user commit is preserved.
     failed: Option<selection::Name>,
+    owner: Option<selection::Name>,
+    count: usize,
 }
 
 struct PendingReaction {
@@ -821,6 +931,7 @@ struct PendingReaction {
     authorization: Vec<(&'static super::Addon, selection::Authorization)>,
     deadline: std::time::Instant,
     retry: bool,
+    count: usize,
 }
 
 #[derive(Default)]
@@ -844,10 +955,17 @@ pub(crate) async fn addon_react(
         page_id.clone(),
         move |root, page, history| {
             let current = storage::open_page(root, page)?;
-            let Some((before, committed)) = history.amendment_base(revision, base_revision) else {
+            let Some((before, committed)) = history.amendment_base(
+                if retry {
+                    current.page.revision
+                } else {
+                    revision
+                },
+                base_revision,
+            ) else {
                 return Ok(None);
             };
-            if current.page.revision != revision
+            if (!retry && current.page.revision != revision)
                 || current.page.calculation.is_some()
                 || !current
                     .page
@@ -873,6 +991,8 @@ pub(crate) async fn addon_react(
         committed + Duration::from_millis(750)
     };
     let mut claims = Vec::new();
+    let mut affected_count = 0;
+    let mut chunk_count = 0;
     let mut before = before;
     let mut visited = HashSet::new();
     for _ in 0..2 {
@@ -887,6 +1007,23 @@ pub(crate) async fn addon_react(
             let Some((params, scope)) = reactions(&before, &after, addon.id) else {
                 continue;
             };
+            let count = scope.len();
+            affected_count += count;
+            chunk_count += count.div_ceil(REACTION_CHUNK_SIZE);
+            if chunk_count > MAX_REACTION_CHUNKS {
+                #[cfg(debug_assertions)]
+                eprintln!(
+                    "addon-reaction-failed addon={} count={} reason=addon-reaction-over-budget",
+                    addon.id, count
+                );
+                return Ok(ReactionResult {
+                    token: None,
+                    retry: false,
+                    failed: Some(selection::Name::of(addon)),
+                    owner: None,
+                    count,
+                });
+            }
             let handle = app.clone();
             let requested_root = root.clone();
             let context = format!("{root}:{page_id}");
@@ -898,8 +1035,8 @@ pub(crate) async fn addon_react(
                 let importers = handle.state::<Importers>();
                 let (job, _) = importers.get(addon.id).ok()?;
                 let authorization = selection::authorization(&handle, job, addon).ok()?;
-                let changed = || {
-                    let value = handle
+                let candidate = run_reaction_chunks(&root, &snapshot, addon.id, params, |params| {
+                    handle
                         .state::<session::Runtime>()
                         .run(
                             &handle,
@@ -913,17 +1050,10 @@ pub(crate) async fn addon_react(
                             },
                         )
                         .map_err(|failure| failure.code())?
-                        .map_err(|_| "addon-invalid-response")?;
-                    if addon.id == super::catalog::CONNECTORS.id {
-                        batch::check_path_reaction(&snapshot, addon.id, &value)
-                            .map_err(|_| "addon-invalid-response")?;
-                    }
-                    batch::apply_owned(&root, snapshot, addon.id, Some(&scope), value)
                         .map_err(|_| "addon-invalid-response")
-                };
-                let candidate = changed();
+                });
                 if selection::revoked(job, &authorization) {
-                    return None;
+                    return Some((Err("addon-cancelled"), authorization));
                 }
                 Some((candidate, authorization))
             })
@@ -932,10 +1062,22 @@ pub(crate) async fn addon_react(
             if Instant::now() >= deadline
                 || response.as_ref().is_some_and(|(result, _)| result.is_err())
             {
+                #[cfg(debug_assertions)]
+                eprintln!(
+                    "addon-reaction-failed addon={} count={} reason={}",
+                    addon.id,
+                    count,
+                    response
+                        .as_ref()
+                        .and_then(|(result, _)| result.as_ref().err().copied())
+                        .unwrap_or("addon-timeout")
+                );
                 return Ok(ReactionResult {
                     token: None,
                     retry: !retry,
-                    failed: retry.then(|| selection::Name::of(addon)),
+                    failed: Some(selection::Name::of(addon)),
+                    owner: None,
+                    count,
                 });
             }
             visited.insert(addon.id);
@@ -954,6 +1096,7 @@ pub(crate) async fn addon_react(
         return Ok(ReactionResult::default());
     }
     let token = crate::helper::random_hex(16).map_err(error)?;
+    let owner = claims.first().map(|(addon, _)| selection::Name::of(addon));
     *app.state::<Reactions>().0.lock().unwrap() = Some(PendingReaction {
         token: token.clone(),
         root,
@@ -962,24 +1105,50 @@ pub(crate) async fn addon_react(
         authorization: claims,
         deadline,
         retry,
+        count: affected_count,
     });
     Ok(ReactionResult {
         token: Some(token),
         retry: false,
         failed: None,
+        owner,
+        count: affected_count,
     })
+}
+
+fn reaction_gate(
+    expected: u64,
+    actual: u64,
+    expired: bool,
+    retry: bool,
+) -> Option<(&'static str, bool)> {
+    if expected != actual {
+        Some(("addon-stale-page", !retry))
+    } else if expired {
+        Some(("addon-timeout", !retry))
+    } else {
+        None
+    }
 }
 
 #[tauri::command]
 pub(crate) async fn addon_apply_reaction(
     app: tauri::AppHandle,
     token: String,
-) -> Result<(Option<storage::HistoryResult>, bool), ActionError> {
+) -> Result<
+    (
+        Option<storage::HistoryResult>,
+        bool,
+        Option<selection::Name>,
+        usize,
+    ),
+    ActionError,
+> {
     let state = app.state::<Reactions>();
     let pending = {
         let mut slot = state.0.lock().unwrap();
         if slot.as_ref().is_none_or(|pending| pending.token != token) {
-            return Ok((None, false));
+            return Ok((None, false, None, 0));
         }
         slot.take().unwrap()
     };
@@ -990,25 +1159,50 @@ pub(crate) async fn addon_apply_reaction(
         pending.root,
         pending.page,
         move |root, _, history| {
-            if std::time::Instant::now() >= pending.deadline {
-                return Ok((None, !pending.retry));
-            }
             let importers = handle.state::<Importers>();
             let mut guards = Vec::new();
             for (addon, authorization) in &pending.authorization {
                 let (job, _) = importers.get(addon.id).map_err(|e| invalid(&e))?;
                 let Some(state) = job.lock_idle() else {
-                    return Ok((None, false));
+                    return Ok((None, false, Some(selection::Name::of(addon)), pending.count));
                 };
                 if !selection::authorized(&handle, addon, &state)
                     .is_ok_and(|actual| actual == *authorization)
                 {
-                    return Ok((None, false));
+                    return Ok((None, false, Some(selection::Name::of(addon)), pending.count));
                 }
                 guards.push(state);
             }
+            let current = storage::open_page(root, &pending.candidate.page.id)?;
+            if let Some((_reason, retry)) = reaction_gate(
+                pending.candidate.page.revision,
+                current.page.revision,
+                std::time::Instant::now() >= pending.deadline,
+                pending.retry,
+            ) {
+                #[cfg(debug_assertions)]
+                eprintln!(
+                    "addon-reaction-failed addon={} count={} reason={}",
+                    pending
+                        .authorization
+                        .first()
+                        .map(|(addon, _)| addon.id)
+                        .unwrap_or("unknown"),
+                    pending.count,
+                    _reason
+                );
+                return Ok((
+                    None,
+                    retry,
+                    pending
+                        .authorization
+                        .first()
+                        .map(|(addon, _)| selection::Name::of(addon)),
+                    pending.count,
+                ));
+            }
             storage::amend_notebook(root, history, pending.candidate)
-                .map(|result| (Some(result), false))
+                .map(|result| (Some(result), false, None, 0))
         },
     )
     .await
@@ -1046,6 +1240,255 @@ mod tests {
             connector,
         ];
         snapshot
+    }
+
+    #[test]
+    fn reaction_fanout_preserves_snapshot_and_bounds_scope() {
+        let before = fixture();
+        let mut after = before.clone();
+        let connector = after.page.objects.last().unwrap().clone();
+        for index in 0..64 {
+            let mut object = connector.clone();
+            object.fields_mut().id = format!("connector-{index}");
+            after.page.objects.push(object);
+        }
+        after.page.objects[0].fields_mut().x += 10.0;
+        let (params, scope) = reactions(&before, &after, "connectors").unwrap();
+        let chunks = reaction_chunks(params.clone()).unwrap();
+        assert_eq!(chunks.len(), 3);
+        let mut combined = HashSet::new();
+        for (chunk, ids) in chunks {
+            assert_eq!(chunk["page"], params["page"]);
+            assert_eq!(chunk["changed"][0]["id"], "left");
+            assert!(chunk["own"][0].get("_reactionRefs").is_none());
+            assert!(ids.len() <= 32);
+            assert!(combined.is_disjoint(&ids));
+            combined.extend(ids);
+        }
+        assert_eq!(combined, scope);
+        let mut too_many = params;
+        too_many["own"] = json!(vec![json!({"id":"x"}); 513]);
+        assert_eq!(
+            reaction_chunks(too_many).unwrap_err(),
+            "addon-reaction-over-budget"
+        );
+    }
+
+    #[test]
+    fn reaction_chunks_disclose_only_disjoint_dependencies() {
+        let mut before = fixture();
+        let connector = before.page.objects.pop().unwrap();
+        for index in 0..33 {
+            let mut object = connector.clone();
+            object.fields_mut().id = format!("connector-{index}");
+            let refs = if index < 32 {
+                vec!["left", "unrelated"]
+            } else {
+                vec!["right", "removed"]
+            };
+            object.fields_mut().addon_data = Some(
+                serde_json::from_value(json!({
+                    "connectors":{"refs":refs,"data":{}}
+                }))
+                .unwrap(),
+            );
+            before.page.objects.push(object);
+        }
+        let mut removed = before.page.objects[0].clone();
+        removed.fields_mut().id = "removed".into();
+        before.page.objects.push(removed);
+        let mut after = before.clone();
+        after
+            .page
+            .objects
+            .retain(|object| !["unrelated", "removed"].contains(&object.fields().id.as_str()));
+        addon_data::remove_refs(
+            &mut after.page.objects,
+            &HashSet::from(["unrelated", "removed"]),
+        );
+        after.page.objects[0].fields_mut().x += 10.0;
+        after.page.objects[1].fields_mut().x += 20.0;
+        let (params, _) = reactions(&before, &after, "connectors").unwrap();
+        let chunks = reaction_chunks(params).unwrap();
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].0["changed"][0]["id"], "left");
+        assert_eq!(chunks[1].0["changed"][0]["id"], "right");
+        assert_eq!(chunks[0].0["changed"].as_array().unwrap().len(), 1);
+        assert_eq!(chunks[1].0["changed"].as_array().unwrap().len(), 1);
+        assert_eq!(chunks[0].0["deleted"], json!(["unrelated"]));
+        assert_eq!(chunks[1].0["deleted"], json!(["removed"]));
+        let unknown = reaction_chunks(json!({
+            "page": {}, "own": [{"id":"unknown"}],
+            "changed":[{"id":"secret"}], "deleted":["secret"], "extra":"private"
+        }))
+        .unwrap();
+        assert_eq!(unknown[0].0["changed"], json!([]));
+        assert_eq!(unknown[0].0["deleted"], json!([]));
+        assert!(unknown[0].0.get("extra").is_none());
+    }
+
+    #[test]
+    fn reaction_fanout_amends_once_and_failed_chunk_publishes_nothing() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("notebook");
+        let mut initial = fixture();
+        let connector = initial.page.objects.last().unwrap().clone();
+        for index in 0..40 {
+            let mut object = connector.clone();
+            object.fields_mut().id = format!("connector-{index}");
+            initial.page.objects.push(object);
+        }
+        for (index, object) in initial.page.objects.iter_mut().enumerate() {
+            object.fields_mut().reading_order = index as u32;
+        }
+        initial.blocks.retain(|file| file.path == "style.typ");
+        initial.assets.clear();
+        initial.page.ink_layers.clear();
+        initial.ink_layers.clear();
+        initial.page.reading_order = initial
+            .page
+            .objects
+            .iter()
+            .map(|object| object.fields().id.clone())
+            .collect();
+        initial.page.schema_version = 5;
+        initial.manifest.schema_version = 5;
+        storage::create_notebook(&root, &initial).unwrap();
+        let mut history = storage::NotebookHistory::default();
+        let before = storage::observe_page(&root, &initial.page.id, &mut history).unwrap();
+        let mut after = before.clone();
+        after.page.objects[0].fields_mut().x += 10.0;
+        let after = storage::commit_notebook(&root, &mut history, after)
+            .unwrap()
+            .snapshot;
+        let (params, _) = reactions(&before, &after, "connectors").unwrap();
+        let reply = |params: Value| -> Result<Value, &'static str> {
+            let operations: Vec<_> = params["own"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|object| json!({"op":"updateObject","id":object["id"],"x":80.0}))
+                .collect();
+            Ok(json!({"batch":{"operations":operations}}))
+        };
+        let mut calls = 0;
+        let failed = run_reaction_chunks(&root, &after, "connectors", params.clone(), |params| {
+            calls += 1;
+            if calls == 2 {
+                return Err("addon-timeout");
+            }
+            reply(params)
+        });
+        assert_eq!(calls, 2);
+        assert!(failed.is_err());
+        assert_eq!(
+            storage::open_page(&root, &after.page.id)
+                .unwrap()
+                .page
+                .objects,
+            after.page.objects
+        );
+        let candidate = run_reaction_chunks(&root, &after, "connectors", params, reply)
+            .unwrap()
+            .unwrap();
+        assert_eq!(candidate.page.revision, after.page.revision);
+        assert!(
+            candidate.page.objects[3..]
+                .iter()
+                .all(|object| object.fields().x == 80.0)
+        );
+        storage::amend_notebook(&root, &mut history, candidate).unwrap();
+        let undone = storage::undo_notebook(&root, &mut history).unwrap();
+        assert_eq!(undone.snapshot.page.objects, before.page.objects);
+        assert!(!undone.can_undo);
+    }
+
+    #[test]
+    fn stale_reaction_retries_new_revision_once_then_reports_failure() {
+        // Exercise the production fan-out and history functions against persisted revisions.
+        for stale_twice in [false, true] {
+            let temporary = tempfile::tempdir().unwrap();
+            let root = temporary.path().join("notebook");
+            let mut initial = fixture();
+            let connector = initial.page.objects.last().unwrap().clone();
+            for index in 0..32 {
+                let mut object = connector.clone();
+                object.fields_mut().id = format!("connector-{index}");
+                initial.page.objects.push(object);
+            }
+            for (index, object) in initial.page.objects.iter_mut().enumerate() {
+                object.fields_mut().reading_order = index as u32;
+            }
+            initial.blocks.retain(|file| file.path == "style.typ");
+            initial.assets.clear();
+            initial.page.ink_layers.clear();
+            initial.ink_layers.clear();
+            initial.page.reading_order = initial
+                .page
+                .objects
+                .iter()
+                .map(|object| object.fields().id.clone())
+                .collect();
+            initial.page.schema_version = 5;
+            initial.manifest.schema_version = 5;
+            storage::create_notebook(&root, &initial).unwrap();
+            let mut history = storage::NotebookHistory::default();
+            let before = storage::observe_page(&root, &initial.page.id, &mut history).unwrap();
+            let base_revision = before.page.revision;
+            let mut edit = before.clone();
+            edit.page.objects[0].fields_mut().x += 10.0;
+            let mut captured = storage::commit_notebook(&root, &mut history, edit)
+                .unwrap()
+                .snapshot;
+            let mut calls = 0;
+            for retry in [false, true] {
+                let (base, _) = history
+                    .amendment_base(captured.page.revision, base_revision)
+                    .unwrap();
+                let (params, _) = reactions(base, &captured, "connectors").unwrap();
+                let expected_x = captured.page.objects[0].fields().x;
+                let candidate = run_reaction_chunks(&root, &captured, "connectors", params, |params| {
+                    calls += 1;
+                    assert_eq!(params["changed"][0]["x"], expected_x);
+                    let operations: Vec<_> = params["own"].as_array().unwrap().iter()
+                        .map(|object| json!({"op":"updateObject","id":object["id"],"x":expected_x + 50.0})).collect();
+                    // An edit lands while the first chunk is in flight.
+                    if (!retry || stale_twice) && calls % 2 == 1 {
+                        let mut edit = storage::open_page(&root, &captured.page.id).unwrap();
+                        edit.page.objects[0].fields_mut().x += 5.0;
+                        storage::commit_notebook(&root, &mut history, edit).unwrap();
+                    }
+                    Ok(json!({"batch":{"operations":operations}}))
+                }).unwrap().unwrap();
+                let current = storage::open_page(&root, &captured.page.id).unwrap();
+                let gate =
+                    reaction_gate(candidate.page.revision, current.page.revision, false, retry);
+                if !retry || stale_twice {
+                    assert_eq!(gate, Some(("addon-stale-page", !retry)));
+                    assert!(
+                        current.page.objects[3..]
+                            .iter()
+                            .all(|object| object.fields().x == 70.0)
+                    );
+                    captured = current;
+                } else {
+                    assert_eq!(gate, None);
+                    let amended = storage::amend_notebook(&root, &mut history, candidate).unwrap();
+                    assert!(
+                        amended.snapshot.page.objects[3..]
+                            .iter()
+                            .all(|object| object.fields().x == expected_x + 50.0)
+                    );
+                    let undone = storage::undo_notebook(&root, &mut history).unwrap();
+                    assert!(
+                        undone.snapshot.page.objects[3..]
+                            .iter()
+                            .all(|object| object.fields().x == 70.0)
+                    );
+                }
+            }
+            assert_eq!(calls, 4);
+        }
     }
 
     #[test]

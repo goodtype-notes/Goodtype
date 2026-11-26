@@ -155,6 +155,29 @@ describe("notebook session coordination", () => {
     expect(ipc.prepareReaction).toHaveBeenCalledTimes(2);
   });
 
+  it("reports a second stale application without retrying again", async () => {
+    const { session } = workspace();
+    session.applySnapshot(connectedPage());
+    ipc.commit.mockImplementation(async (_root, next: NotebookSnapshot) =>
+      result({ ...next, page: { ...next.page, revision: next.page.revision + 1 } }));
+    const owner = { en: "Connectors", de: "Connectors" };
+    ipc.prepareReaction.mockResolvedValueOnce({ token: "first", retry: false, owner, count: 33 })
+      .mockResolvedValueOnce({ token: "fresh", retry: false, owner, count: 33 });
+    ipc.applyReaction.mockResolvedValueOnce([null, true, owner, 33])
+      .mockResolvedValueOnce([null, false, owner, 33]);
+    session.queueCommit(notice("workspace.updatedShape"));
+    await session.persist();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(session.activeSnapshot?.page.objects[1].x).toBe(40);
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(ipc.applyReaction.mock.calls).toEqual([["first"], ["fresh"]]);
+    expect(ipc.prepareReaction.mock.calls[1].at(-1)).toBe(true);
+    expect(session.activeSnapshot?.page.objects[1].x).toBe(40);
+    expect(session.status).toEqual(notice("addons.reactionFailed", { addon: "Connectors", count: 33 }));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(ipc.prepareReaction).toHaveBeenCalledTimes(2);
+  });
+
   it("drops a prepared reply when the writer commits another edit", async () => {
     const { session } = workspace();
     session.applySnapshot(connectedPage());
