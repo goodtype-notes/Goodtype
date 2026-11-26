@@ -1353,7 +1353,8 @@
   }
 
   .eraser-cursor.pressed .eraser-cursor-halo {
-    fill: var(--accent-tint);
+    /* See-through on purpose: the ink about to go must stay visible. Not --accent-tint, which is solid. */
+    fill: rgb(47 111 219 / 10%);
     stroke: rgb(255 255 255 / 90%);
   }
 
