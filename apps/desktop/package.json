@@ -15,6 +15,7 @@
     "@codemirror/lang-python": "^6.2.1",
     "@codemirror/language": "6.12.4",
     "@codemirror/lint": "^6.9.7",
+    "@extism/extism": "1.0.3",
     "@lezer/highlight": "1.2.3",
     "@tauri-apps/api": "2.11.1",
     "codemirror": "6.0.2",

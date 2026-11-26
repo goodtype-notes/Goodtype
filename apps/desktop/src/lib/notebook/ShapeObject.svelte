@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from "../i18n";
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import ShapeMarks from "./ShapeMarks.svelte";
   import type { Point } from "../geometry/coordinates";
   import {
@@ -52,6 +52,7 @@
     toPageDelta,
     onSelect,
     onChange,
+    onGhost,
     onEditingChange,
     endpointEdit,
   }: {
@@ -75,6 +76,7 @@
     toPageDelta: (screenDx: number, screenDy: number) => Point;
     onSelect?: () => void;
     onChange?: (shape: ShapeView, commit?: ShapeEditCommit) => void;
+    onGhost?: (phase: "start" | "move" | "end", shape: ShapeView) => void;
     endpointEdit?: {
       name: string; owned: boolean; ports: Port[]; pointAt: (x: number, y: number) => Point | null;
       apply: (edit: PathEdit) => void;
@@ -84,6 +86,7 @@
 
   let preview = $state.raw(untrack(() => shape));
   let gesture = $state<Gesture | null>(null);
+  onDestroy(() => { if (gesture) onGhost?.("end", preview); });
   /// The end a dragged line handle has met, marked until the drag ends.
   let portRings = $state<Port[]>([]);
   let portSnap = $state<Port>();
@@ -141,6 +144,7 @@
         ? snapTargets(snapShapes, preview.id)
         : [],
     };
+    onGhost?.("start", preview);
   }
 
   function update(event: PointerEvent) {
@@ -149,6 +153,7 @@
     const page = toPageDelta(event.clientX - gesture.clientX, event.clientY - gesture.clientY);
     if (gesture.kind === "move") {
       preview = moveShape(gesture.start, page);
+      onGhost?.("move", preview);
       return;
     }
     // Rotation is decided in page space, because the angle is between the pointer and the shape
@@ -156,11 +161,13 @@
     // brought back through its own rotation and scale first.
     if (gesture.kind === "rotate") {
       preview = rotateShape(gesture.start, gesture.grabbed!, page, event.shiftKey);
+      onGhost?.("move", preview);
       return;
     }
     const local = localDelta(page, gesture.start.rotation, gesture.start.scale);
     if (gesture.kind === "resize") {
       preview = resizeShape(gesture.start, local, event.shiftKey);
+      onGhost?.("move", preview);
       return;
     }
     const port = samplePort(gesture, event);
@@ -173,6 +180,7 @@
     preview = snapped
       ? moveShapeAnchor(gesture.start, gesture.anchor!, snapped.local)
       : moveShapeAnchor(gesture.start, gesture.anchor!, local, event.shiftKey);
+    onGhost?.("move", preview);
   }
 
   /// A dragged line end that has come near another shape's end: the target, and the delta in the
@@ -234,6 +242,7 @@
   }
 
   function clearGesture() {
+    onGhost?.("end", preview);
     gesture = null;
     snapRing = null;
     portRings = [];

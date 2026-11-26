@@ -125,6 +125,8 @@ fn main() {
             library::set_library_favourite,
             library::list_library_favourites,
             addons::addon_catalog,
+            #[cfg(all(debug_assertions, feature = "wasm-spike"))]
+            addons::wasm::addon_wasm_bytes,
             addons::content::addon_content,
             notebook::insert_content_shape,
             #[cfg(debug_assertions)]

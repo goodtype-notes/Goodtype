@@ -1,0 +1,1504 @@
+{
+  "digest": "970e8f619956017978d502ebea4054b287547a82abf4c149ae967b36fc93463b",
+  "moduleBytes": 403452,
+  "fixtures": [
+    {
+      "name": "snapping",
+      "nativeReply": "{\"id\":\"2\",\"jsonrpc\":\"2.0\",\"result\":{\"batch\":{\"operations\":[{\"addonData\":{\"connectors\":{\"data\":{\"bends\":[],\"end\":{\"objectId\":\"b\",\"port\":0},\"endBounds\":{\"height\":16.0,\"width\":48.0,\"x\":300.0,\"y\":100.0},\"endPoint\":{\"x\":300.0,\"y\":108.0},\"endSide\":\"left\",\"origin\":{\"x\":148.0,\"y\":108.0},\"routing\":\"orthogonal\",\"start\":{\"objectId\":\"a\",\"port\":1},\"startBounds\":{\"height\":16.0,\"width\":48.0,\"x\":100.0,\"y\":100.0},\"startPoint\":{\"x\":148.0,\"y\":108.0},\"startSide\":\"right\",\"version\":2},\"refs\":[\"a\",\"b\"]}},\"geometry\":{\"closed\":false,\"kind\":\"spline\",\"nodes\":[{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":0.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":152.0,\"y\":0.0}}]},\"op\":\"addShape\",\"style\":{\"fillColor\":null,\"opacity\":1,\"strokeColor\":\"#182c39\",\"strokeWidthPt\":1.5},\"x\":148.0,\"y\":108.0}]}}}",
+      "commit": {
+        "revision": 7,
+        "gesture": "tool",
+        "scope": {
+          "tool": "connect",
+          "settings": {
+            "routing": "orthogonal",
+            "arrow": "none"
+          },
+          "page": {
+            "widthPt": 595.28,
+            "heightPt": 841.89
+          },
+          "style": {
+            "strokeColor": "#182c39",
+            "strokeWidthPt": 1.5,
+            "fillColor": null,
+            "opacity": 1
+          },
+          "points": [
+            {
+              "x": 148,
+              "y": 108,
+              "attach": {
+                "objectId": "a",
+                "port": 1
+              }
+            },
+            {
+              "x": 300,
+              "y": 108,
+              "attach": {
+                "objectId": "b",
+                "port": 0
+              }
+            }
+          ],
+          "objects": [
+            {
+              "id": "a",
+              "type": "shape",
+              "bounds": {
+                "x": 100,
+                "y": 100,
+                "width": 48,
+                "height": 16
+              },
+              "ports": [
+                {
+                  "x": 100,
+                  "y": 108
+                },
+                {
+                  "x": 148,
+                  "y": 108
+                }
+              ]
+            },
+            {
+              "id": "b",
+              "type": "shape",
+              "bounds": {
+                "x": 300,
+                "y": 100,
+                "width": 48,
+                "height": 16
+              },
+              "ports": [
+                {
+                  "x": 300,
+                  "y": 108
+                },
+                {
+                  "x": 348,
+                  "y": 108
+                }
+              ]
+            }
+          ]
+        },
+        "settings": {
+          "routing": "orthogonal",
+          "arrow": "none"
+        }
+      },
+      "preview": {
+        "gestureId": "snapping",
+        "seq": 1,
+        "revision": 7,
+        "kind": "tool",
+        "local": {
+          "tool": "connect",
+          "settings": {
+            "routing": "orthogonal",
+            "arrow": "none"
+          },
+          "page": {
+            "widthPt": 595.28,
+            "heightPt": 841.89
+          },
+          "style": {
+            "strokeColor": "#182c39",
+            "strokeWidthPt": 1.5,
+            "fillColor": null,
+            "opacity": 1
+          },
+          "points": [
+            {
+              "x": 148,
+              "y": 108,
+              "attach": {
+                "objectId": "a",
+                "port": 1
+              }
+            },
+            {
+              "x": 300,
+              "y": 108,
+              "attach": {
+                "objectId": "b",
+                "port": 0
+              }
+            }
+          ],
+          "objects": [
+            {
+              "id": "a",
+              "type": "shape",
+              "bounds": {
+                "x": 100,
+                "y": 100,
+                "width": 48,
+                "height": 16
+              },
+              "ports": [
+                {
+                  "x": 100,
+                  "y": 108
+                },
+                {
+                  "x": 148,
+                  "y": 108
+                }
+              ]
+            },
+            {
+              "id": "b",
+              "type": "shape",
+              "bounds": {
+                "x": 300,
+                "y": 100,
+                "width": 48,
+                "height": 16
+              },
+              "ports": [
+                {
+                  "x": 300,
+                  "y": 108
+                },
+                {
+                  "x": 348,
+                  "y": 108
+                }
+              ]
+            }
+          ]
+        },
+        "ports": [],
+        "settings": {
+          "routing": "orthogonal",
+          "arrow": "none"
+        }
+      },
+      "expected": {
+        "batch": {
+          "operations": [
+            {
+              "addonData": {
+                "connectors": {
+                  "data": {
+                    "bends": [],
+                    "end": {
+                      "objectId": "b",
+                      "port": 0
+                    },
+                    "endBounds": {
+                      "height": 16,
+                      "width": 48,
+                      "x": 300,
+                      "y": 100
+                    },
+                    "endPoint": {
+                      "x": 300,
+                      "y": 108
+                    },
+                    "endSide": "left",
+                    "origin": {
+                      "x": 148,
+                      "y": 108
+                    },
+                    "routing": "orthogonal",
+                    "start": {
+                      "objectId": "a",
+                      "port": 1
+                    },
+                    "startBounds": {
+                      "height": 16,
+                      "width": 48,
+                      "x": 100,
+                      "y": 100
+                    },
+                    "startPoint": {
+                      "x": 148,
+                      "y": 108
+                    },
+                    "startSide": "right",
+                    "version": 2
+                  },
+                  "refs": [
+                    "a",
+                    "b"
+                  ]
+                }
+              },
+              "geometry": {
+                "closed": false,
+                "kind": "spline",
+                "nodes": [
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 0,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 152,
+                      "y": 0
+                    }
+                  }
+                ]
+              },
+              "op": "addShape",
+              "style": {
+                "fillColor": null,
+                "opacity": 1,
+                "strokeColor": "#182c39",
+                "strokeWidthPt": 1.5
+              },
+              "x": 148,
+              "y": 108
+            }
+          ]
+        }
+      },
+      "commitRaw": "{\"batch\":{\"operations\":[{\"addonData\":{\"connectors\":{\"data\":{\"bends\":[],\"end\":{\"objectId\":\"b\",\"port\":0},\"endBounds\":{\"height\":16.0,\"width\":48.0,\"x\":300.0,\"y\":100.0},\"endPoint\":{\"x\":300.0,\"y\":108.0},\"endSide\":\"left\",\"origin\":{\"x\":148.0,\"y\":108.0},\"routing\":\"orthogonal\",\"start\":{\"objectId\":\"a\",\"port\":1},\"startBounds\":{\"height\":16.0,\"width\":48.0,\"x\":100.0,\"y\":100.0},\"startPoint\":{\"x\":148.0,\"y\":108.0},\"startSide\":\"right\",\"version\":2},\"refs\":[\"a\",\"b\"]}},\"geometry\":{\"closed\":false,\"kind\":\"spline\",\"nodes\":[{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":0.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":152.0,\"y\":0.0}}]},\"op\":\"addShape\",\"style\":{\"fillColor\":null,\"opacity\":1,\"strokeColor\":\"#182c39\",\"strokeWidthPt\":1.5},\"x\":148.0,\"y\":108.0}]}}",
+      "previewRaw": "{\"marks\":[{\"geometry\":{\"closed\":false,\"kind\":\"spline\",\"nodes\":[{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":0.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":152.0,\"y\":0.0}}]},\"rotation\":0.0,\"scale\":1.0,\"x\":148.0,\"y\":108.0}]}",
+      "previewExpected": {
+        "marks": [
+          {
+            "geometry": {
+              "closed": false,
+              "kind": "spline",
+              "nodes": [
+                {
+                  "handleIn": null,
+                  "handleOut": null,
+                  "point": {
+                    "x": 0,
+                    "y": 0
+                  }
+                },
+                {
+                  "handleIn": null,
+                  "handleOut": null,
+                  "point": {
+                    "x": 152,
+                    "y": 0
+                  }
+                }
+              ]
+            },
+            "rotation": 0,
+            "scale": 1,
+            "x": 148,
+            "y": 108
+          }
+        ]
+      }
+    },
+    {
+      "name": "drag",
+      "nativeReply": "{\"id\":\"2\",\"jsonrpc\":\"2.0\",\"result\":{\"batch\":{\"operations\":[{\"addonData\":{\"data\":{\"bends\":[],\"end\":{\"objectId\":\"b\",\"port\":0},\"endBounds\":{\"height\":16.0,\"width\":48.0,\"x\":300.0,\"y\":100.0},\"endPoint\":{\"x\":300.0,\"y\":108.0},\"endSide\":\"left\",\"origin\":{\"x\":148.0,\"y\":108.0},\"routing\":\"orthogonal\",\"start\":{\"objectId\":\"a\",\"port\":1},\"startBounds\":{\"height\":16.0,\"width\":48.0,\"x\":140.0,\"y\":100.0},\"startPoint\":{\"x\":188.0,\"y\":108.0},\"startSide\":\"right\",\"version\":2},\"refs\":[\"a\",\"b\"]},\"geometry\":{\"closed\":false,\"kind\":\"spline\",\"nodes\":[{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":40.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":152.0,\"y\":0.0}}]},\"id\":\"wire\",\"op\":\"updateObject\"}]}}}",
+      "commit": {
+        "revision": 8,
+        "gesture": "changed",
+        "scope": {
+          "page": {
+            "widthPt": 595.28,
+            "heightPt": 841.89
+          },
+          "own": [
+            {
+              "addonData": {
+                "connectors": {
+                  "data": {
+                    "bends": [],
+                    "end": {
+                      "objectId": "b",
+                      "port": 0
+                    },
+                    "endBounds": {
+                      "height": 16,
+                      "width": 48,
+                      "x": 300,
+                      "y": 100
+                    },
+                    "endPoint": {
+                      "x": 300,
+                      "y": 108
+                    },
+                    "endSide": "left",
+                    "origin": {
+                      "x": 148,
+                      "y": 108
+                    },
+                    "routing": "orthogonal",
+                    "start": {
+                      "objectId": "a",
+                      "port": 1
+                    },
+                    "startBounds": {
+                      "height": 16,
+                      "width": 48,
+                      "x": 100,
+                      "y": 100
+                    },
+                    "startPoint": {
+                      "x": 148,
+                      "y": 108
+                    },
+                    "startSide": "right",
+                    "version": 2
+                  },
+                  "refs": [
+                    "a",
+                    "b"
+                  ]
+                }
+              },
+              "geometry": {
+                "closed": false,
+                "kind": "spline",
+                "nodes": [
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 0,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 152,
+                      "y": 0
+                    }
+                  }
+                ]
+              },
+              "style": {
+                "fillColor": null,
+                "opacity": 1,
+                "strokeColor": "#182c39",
+                "strokeWidthPt": 1.5
+              },
+              "x": 148,
+              "y": 108,
+              "id": "wire",
+              "type": "shape",
+              "rotation": 0,
+              "scale": 1
+            }
+          ],
+          "changed": [
+            {
+              "id": "a",
+              "type": "shape",
+              "bounds": {
+                "x": 140,
+                "y": 100,
+                "width": 48,
+                "height": 16
+              },
+              "ports": [
+                {
+                  "x": 140,
+                  "y": 108
+                },
+                {
+                  "x": 188,
+                  "y": 108
+                }
+              ]
+            }
+          ],
+          "deleted": []
+        },
+        "settings": {
+          "routing": "orthogonal",
+          "arrow": "none"
+        }
+      },
+      "preview": {
+        "gestureId": "drag",
+        "seq": 1,
+        "revision": 8,
+        "kind": "changed",
+        "local": {
+          "page": {
+            "widthPt": 595.28,
+            "heightPt": 841.89
+          },
+          "own": [
+            {
+              "addonData": {
+                "connectors": {
+                  "data": {
+                    "bends": [],
+                    "end": {
+                      "objectId": "b",
+                      "port": 0
+                    },
+                    "endBounds": {
+                      "height": 16,
+                      "width": 48,
+                      "x": 300,
+                      "y": 100
+                    },
+                    "endPoint": {
+                      "x": 300,
+                      "y": 108
+                    },
+                    "endSide": "left",
+                    "origin": {
+                      "x": 148,
+                      "y": 108
+                    },
+                    "routing": "orthogonal",
+                    "start": {
+                      "objectId": "a",
+                      "port": 1
+                    },
+                    "startBounds": {
+                      "height": 16,
+                      "width": 48,
+                      "x": 100,
+                      "y": 100
+                    },
+                    "startPoint": {
+                      "x": 148,
+                      "y": 108
+                    },
+                    "startSide": "right",
+                    "version": 2
+                  },
+                  "refs": [
+                    "a",
+                    "b"
+                  ]
+                }
+              },
+              "geometry": {
+                "closed": false,
+                "kind": "spline",
+                "nodes": [
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 0,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 152,
+                      "y": 0
+                    }
+                  }
+                ]
+              },
+              "style": {
+                "fillColor": null,
+                "opacity": 1,
+                "strokeColor": "#182c39",
+                "strokeWidthPt": 1.5
+              },
+              "x": 148,
+              "y": 108,
+              "id": "wire",
+              "type": "shape",
+              "rotation": 0,
+              "scale": 1
+            }
+          ],
+          "changed": [
+            {
+              "id": "a",
+              "type": "shape",
+              "bounds": {
+                "x": 140,
+                "y": 100,
+                "width": 48,
+                "height": 16
+              },
+              "ports": [
+                {
+                  "x": 140,
+                  "y": 108
+                },
+                {
+                  "x": 188,
+                  "y": 108
+                }
+              ]
+            }
+          ],
+          "deleted": []
+        },
+        "ports": [],
+        "settings": {
+          "routing": "orthogonal",
+          "arrow": "none"
+        }
+      },
+      "expected": {
+        "batch": {
+          "operations": [
+            {
+              "addonData": {
+                "data": {
+                  "bends": [],
+                  "end": {
+                    "objectId": "b",
+                    "port": 0
+                  },
+                  "endBounds": {
+                    "height": 16,
+                    "width": 48,
+                    "x": 300,
+                    "y": 100
+                  },
+                  "endPoint": {
+                    "x": 300,
+                    "y": 108
+                  },
+                  "endSide": "left",
+                  "origin": {
+                    "x": 148,
+                    "y": 108
+                  },
+                  "routing": "orthogonal",
+                  "start": {
+                    "objectId": "a",
+                    "port": 1
+                  },
+                  "startBounds": {
+                    "height": 16,
+                    "width": 48,
+                    "x": 140,
+                    "y": 100
+                  },
+                  "startPoint": {
+                    "x": 188,
+                    "y": 108
+                  },
+                  "startSide": "right",
+                  "version": 2
+                },
+                "refs": [
+                  "a",
+                  "b"
+                ]
+              },
+              "geometry": {
+                "closed": false,
+                "kind": "spline",
+                "nodes": [
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 40,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 152,
+                      "y": 0
+                    }
+                  }
+                ]
+              },
+              "id": "wire",
+              "op": "updateObject"
+            }
+          ]
+        }
+      },
+      "commitRaw": "{\"batch\":{\"operations\":[{\"addonData\":{\"data\":{\"bends\":[],\"end\":{\"objectId\":\"b\",\"port\":0},\"endBounds\":{\"height\":16.0,\"width\":48.0,\"x\":300.0,\"y\":100.0},\"endPoint\":{\"x\":300.0,\"y\":108.0},\"endSide\":\"left\",\"origin\":{\"x\":148.0,\"y\":108.0},\"routing\":\"orthogonal\",\"start\":{\"objectId\":\"a\",\"port\":1},\"startBounds\":{\"height\":16.0,\"width\":48.0,\"x\":140.0,\"y\":100.0},\"startPoint\":{\"x\":188.0,\"y\":108.0},\"startSide\":\"right\",\"version\":2},\"refs\":[\"a\",\"b\"]},\"geometry\":{\"closed\":false,\"kind\":\"spline\",\"nodes\":[{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":40.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":152.0,\"y\":0.0}}]},\"id\":\"wire\",\"op\":\"updateObject\"}]}}",
+      "previewRaw": "{\"marks\":[{\"geometry\":{\"closed\":false,\"kind\":\"spline\",\"nodes\":[{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":40.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":152.0,\"y\":0.0}}]},\"rotation\":0,\"scale\":1,\"x\":148,\"y\":108}]}",
+      "previewExpected": {
+        "marks": [
+          {
+            "geometry": {
+              "closed": false,
+              "kind": "spline",
+              "nodes": [
+                {
+                  "handleIn": null,
+                  "handleOut": null,
+                  "point": {
+                    "x": 40,
+                    "y": 0
+                  }
+                },
+                {
+                  "handleIn": null,
+                  "handleOut": null,
+                  "point": {
+                    "x": 152,
+                    "y": 0
+                  }
+                }
+              ]
+            },
+            "rotation": 0,
+            "scale": 1,
+            "x": 148,
+            "y": 108
+          }
+        ]
+      }
+    },
+    {
+      "name": "reroute",
+      "nativeReply": "{\"id\":\"2\",\"jsonrpc\":\"2.0\",\"result\":{\"batch\":{\"operations\":[{\"addonData\":{\"data\":{\"bends\":[],\"end\":{\"objectId\":\"b\",\"port\":0},\"endBounds\":{\"height\":16.0,\"width\":48.0,\"x\":160.0,\"y\":100.0},\"endPoint\":{\"x\":160.0,\"y\":108.0},\"endSide\":\"left\",\"origin\":{\"x\":148.0,\"y\":108.0},\"routing\":\"orthogonal\",\"start\":{\"objectId\":\"a\",\"port\":1},\"startBounds\":{\"height\":16.0,\"width\":48.0,\"x\":200.0,\"y\":100.0},\"startPoint\":{\"x\":248.0,\"y\":108.0},\"startSide\":\"right\",\"version\":2},\"refs\":[\"a\",\"b\"]},\"geometry\":{\"closed\":false,\"kind\":\"spline\",\"nodes\":[{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":100.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":112.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":112.0,\"y\":20.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":0.0,\"y\":20.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":0.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":12.0,\"y\":0.0}}]},\"id\":\"wire\",\"op\":\"updateObject\"}]}}}",
+      "commit": {
+        "revision": 9,
+        "gesture": "changed",
+        "scope": {
+          "page": {
+            "widthPt": 595.28,
+            "heightPt": 841.89
+          },
+          "own": [
+            {
+              "addonData": {
+                "connectors": {
+                  "data": {
+                    "bends": [],
+                    "end": {
+                      "objectId": "b",
+                      "port": 0
+                    },
+                    "endBounds": {
+                      "height": 16,
+                      "width": 48,
+                      "x": 300,
+                      "y": 100
+                    },
+                    "endPoint": {
+                      "x": 300,
+                      "y": 108
+                    },
+                    "endSide": "left",
+                    "origin": {
+                      "x": 148,
+                      "y": 108
+                    },
+                    "routing": "orthogonal",
+                    "start": {
+                      "objectId": "a",
+                      "port": 1
+                    },
+                    "startBounds": {
+                      "height": 16,
+                      "width": 48,
+                      "x": 100,
+                      "y": 100
+                    },
+                    "startPoint": {
+                      "x": 148,
+                      "y": 108
+                    },
+                    "startSide": "right",
+                    "version": 2
+                  },
+                  "refs": [
+                    "a",
+                    "b"
+                  ]
+                }
+              },
+              "geometry": {
+                "closed": false,
+                "kind": "spline",
+                "nodes": [
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 0,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 152,
+                      "y": 0
+                    }
+                  }
+                ]
+              },
+              "style": {
+                "fillColor": null,
+                "opacity": 1,
+                "strokeColor": "#182c39",
+                "strokeWidthPt": 1.5
+              },
+              "x": 148,
+              "y": 108,
+              "id": "wire",
+              "type": "shape",
+              "rotation": 0,
+              "scale": 1
+            }
+          ],
+          "changed": [
+            {
+              "id": "a",
+              "type": "shape",
+              "bounds": {
+                "x": 200,
+                "y": 100,
+                "width": 48,
+                "height": 16
+              },
+              "ports": [
+                {
+                  "x": 200,
+                  "y": 108
+                },
+                {
+                  "x": 248,
+                  "y": 108
+                }
+              ]
+            },
+            {
+              "id": "b",
+              "type": "shape",
+              "bounds": {
+                "x": 160,
+                "y": 100,
+                "width": 48,
+                "height": 16
+              },
+              "ports": [
+                {
+                  "x": 160,
+                  "y": 108
+                },
+                {
+                  "x": 208,
+                  "y": 108
+                }
+              ]
+            }
+          ],
+          "deleted": []
+        },
+        "settings": {
+          "routing": "orthogonal",
+          "arrow": "none"
+        }
+      },
+      "preview": {
+        "gestureId": "reroute",
+        "seq": 1,
+        "revision": 9,
+        "kind": "changed",
+        "local": {
+          "page": {
+            "widthPt": 595.28,
+            "heightPt": 841.89
+          },
+          "own": [
+            {
+              "addonData": {
+                "connectors": {
+                  "data": {
+                    "bends": [],
+                    "end": {
+                      "objectId": "b",
+                      "port": 0
+                    },
+                    "endBounds": {
+                      "height": 16,
+                      "width": 48,
+                      "x": 300,
+                      "y": 100
+                    },
+                    "endPoint": {
+                      "x": 300,
+                      "y": 108
+                    },
+                    "endSide": "left",
+                    "origin": {
+                      "x": 148,
+                      "y": 108
+                    },
+                    "routing": "orthogonal",
+                    "start": {
+                      "objectId": "a",
+                      "port": 1
+                    },
+                    "startBounds": {
+                      "height": 16,
+                      "width": 48,
+                      "x": 100,
+                      "y": 100
+                    },
+                    "startPoint": {
+                      "x": 148,
+                      "y": 108
+                    },
+                    "startSide": "right",
+                    "version": 2
+                  },
+                  "refs": [
+                    "a",
+                    "b"
+                  ]
+                }
+              },
+              "geometry": {
+                "closed": false,
+                "kind": "spline",
+                "nodes": [
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 0,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 152,
+                      "y": 0
+                    }
+                  }
+                ]
+              },
+              "style": {
+                "fillColor": null,
+                "opacity": 1,
+                "strokeColor": "#182c39",
+                "strokeWidthPt": 1.5
+              },
+              "x": 148,
+              "y": 108,
+              "id": "wire",
+              "type": "shape",
+              "rotation": 0,
+              "scale": 1
+            }
+          ],
+          "changed": [
+            {
+              "id": "a",
+              "type": "shape",
+              "bounds": {
+                "x": 200,
+                "y": 100,
+                "width": 48,
+                "height": 16
+              },
+              "ports": [
+                {
+                  "x": 200,
+                  "y": 108
+                },
+                {
+                  "x": 248,
+                  "y": 108
+                }
+              ]
+            },
+            {
+              "id": "b",
+              "type": "shape",
+              "bounds": {
+                "x": 160,
+                "y": 100,
+                "width": 48,
+                "height": 16
+              },
+              "ports": [
+                {
+                  "x": 160,
+                  "y": 108
+                },
+                {
+                  "x": 208,
+                  "y": 108
+                }
+              ]
+            }
+          ],
+          "deleted": []
+        },
+        "ports": [],
+        "settings": {
+          "routing": "orthogonal",
+          "arrow": "none"
+        }
+      },
+      "expected": {
+        "batch": {
+          "operations": [
+            {
+              "addonData": {
+                "data": {
+                  "bends": [],
+                  "end": {
+                    "objectId": "b",
+                    "port": 0
+                  },
+                  "endBounds": {
+                    "height": 16,
+                    "width": 48,
+                    "x": 160,
+                    "y": 100
+                  },
+                  "endPoint": {
+                    "x": 160,
+                    "y": 108
+                  },
+                  "endSide": "left",
+                  "origin": {
+                    "x": 148,
+                    "y": 108
+                  },
+                  "routing": "orthogonal",
+                  "start": {
+                    "objectId": "a",
+                    "port": 1
+                  },
+                  "startBounds": {
+                    "height": 16,
+                    "width": 48,
+                    "x": 200,
+                    "y": 100
+                  },
+                  "startPoint": {
+                    "x": 248,
+                    "y": 108
+                  },
+                  "startSide": "right",
+                  "version": 2
+                },
+                "refs": [
+                  "a",
+                  "b"
+                ]
+              },
+              "geometry": {
+                "closed": false,
+                "kind": "spline",
+                "nodes": [
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 100,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 112,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 112,
+                      "y": 20
+                    }
+                  },
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 0,
+                      "y": 20
+                    }
+                  },
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 0,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 12,
+                      "y": 0
+                    }
+                  }
+                ]
+              },
+              "id": "wire",
+              "op": "updateObject"
+            }
+          ]
+        }
+      },
+      "commitRaw": "{\"batch\":{\"operations\":[{\"addonData\":{\"data\":{\"bends\":[],\"end\":{\"objectId\":\"b\",\"port\":0},\"endBounds\":{\"height\":16.0,\"width\":48.0,\"x\":160.0,\"y\":100.0},\"endPoint\":{\"x\":160.0,\"y\":108.0},\"endSide\":\"left\",\"origin\":{\"x\":148.0,\"y\":108.0},\"routing\":\"orthogonal\",\"start\":{\"objectId\":\"a\",\"port\":1},\"startBounds\":{\"height\":16.0,\"width\":48.0,\"x\":200.0,\"y\":100.0},\"startPoint\":{\"x\":248.0,\"y\":108.0},\"startSide\":\"right\",\"version\":2},\"refs\":[\"a\",\"b\"]},\"geometry\":{\"closed\":false,\"kind\":\"spline\",\"nodes\":[{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":100.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":112.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":112.0,\"y\":20.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":0.0,\"y\":20.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":0.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":12.0,\"y\":0.0}}]},\"id\":\"wire\",\"op\":\"updateObject\"}]}}",
+      "previewRaw": "{\"marks\":[{\"geometry\":{\"closed\":false,\"kind\":\"spline\",\"nodes\":[{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":100.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":112.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":112.0,\"y\":20.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":0.0,\"y\":20.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":0.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":12.0,\"y\":0.0}}]},\"rotation\":0,\"scale\":1,\"x\":148,\"y\":108}]}",
+      "previewExpected": {
+        "marks": [
+          {
+            "geometry": {
+              "closed": false,
+              "kind": "spline",
+              "nodes": [
+                {
+                  "handleIn": null,
+                  "handleOut": null,
+                  "point": {
+                    "x": 100,
+                    "y": 0
+                  }
+                },
+                {
+                  "handleIn": null,
+                  "handleOut": null,
+                  "point": {
+                    "x": 112,
+                    "y": 0
+                  }
+                },
+                {
+                  "handleIn": null,
+                  "handleOut": null,
+                  "point": {
+                    "x": 112,
+                    "y": 20
+                  }
+                },
+                {
+                  "handleIn": null,
+                  "handleOut": null,
+                  "point": {
+                    "x": 0,
+                    "y": 20
+                  }
+                },
+                {
+                  "handleIn": null,
+                  "handleOut": null,
+                  "point": {
+                    "x": 0,
+                    "y": 0
+                  }
+                },
+                {
+                  "handleIn": null,
+                  "handleOut": null,
+                  "point": {
+                    "x": 12,
+                    "y": 0
+                  }
+                }
+              ]
+            },
+            "rotation": 0,
+            "scale": 1,
+            "x": 148,
+            "y": 108
+          }
+        ]
+      }
+    },
+    {
+      "name": "stretch",
+      "nativeReply": "{\"id\":\"2\",\"jsonrpc\":\"2.0\",\"result\":{\"batch\":{\"operations\":[{\"addonData\":{\"data\":{\"bends\":[],\"end\":{\"objectId\":\"b\",\"port\":0},\"endBounds\":{\"height\":16.0,\"width\":48.0,\"x\":300.0,\"y\":100.0},\"endPoint\":{\"x\":300.0,\"y\":108.0},\"endSide\":\"left\",\"origin\":{\"x\":148.0,\"y\":108.0},\"routing\":\"orthogonal\",\"start\":{\"objectId\":\"a\",\"port\":1},\"startBounds\":{\"height\":16.0,\"width\":96.0,\"x\":100.0,\"y\":100.0},\"startPoint\":{\"x\":196.0,\"y\":108.0},\"startSide\":\"right\",\"version\":2},\"refs\":[\"a\",\"b\"]},\"geometry\":{\"closed\":false,\"kind\":\"spline\",\"nodes\":[{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":48.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":152.0,\"y\":0.0}}]},\"id\":\"wire\",\"op\":\"updateObject\"}]}}}",
+      "commit": {
+        "revision": 10,
+        "gesture": "changed",
+        "scope": {
+          "page": {
+            "widthPt": 595.28,
+            "heightPt": 841.89
+          },
+          "own": [
+            {
+              "addonData": {
+                "connectors": {
+                  "data": {
+                    "bends": [],
+                    "end": {
+                      "objectId": "b",
+                      "port": 0
+                    },
+                    "endBounds": {
+                      "height": 16,
+                      "width": 48,
+                      "x": 300,
+                      "y": 100
+                    },
+                    "endPoint": {
+                      "x": 300,
+                      "y": 108
+                    },
+                    "endSide": "left",
+                    "origin": {
+                      "x": 148,
+                      "y": 108
+                    },
+                    "routing": "orthogonal",
+                    "start": {
+                      "objectId": "a",
+                      "port": 1
+                    },
+                    "startBounds": {
+                      "height": 16,
+                      "width": 48,
+                      "x": 100,
+                      "y": 100
+                    },
+                    "startPoint": {
+                      "x": 148,
+                      "y": 108
+                    },
+                    "startSide": "right",
+                    "version": 2
+                  },
+                  "refs": [
+                    "a",
+                    "b"
+                  ]
+                }
+              },
+              "geometry": {
+                "closed": false,
+                "kind": "spline",
+                "nodes": [
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 0,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 152,
+                      "y": 0
+                    }
+                  }
+                ]
+              },
+              "style": {
+                "fillColor": null,
+                "opacity": 1,
+                "strokeColor": "#182c39",
+                "strokeWidthPt": 1.5
+              },
+              "x": 148,
+              "y": 108,
+              "id": "wire",
+              "type": "shape",
+              "rotation": 0,
+              "scale": 1
+            }
+          ],
+          "changed": [
+            {
+              "id": "a",
+              "type": "shape",
+              "bounds": {
+                "x": 100,
+                "y": 100,
+                "width": 96,
+                "height": 16
+              },
+              "ports": [
+                {
+                  "x": 100,
+                  "y": 108
+                },
+                {
+                  "x": 196,
+                  "y": 108
+                }
+              ]
+            }
+          ],
+          "deleted": []
+        },
+        "settings": {
+          "routing": "orthogonal",
+          "arrow": "none"
+        }
+      },
+      "preview": {
+        "gestureId": "stretch",
+        "seq": 1,
+        "revision": 10,
+        "kind": "changed",
+        "local": {
+          "page": {
+            "widthPt": 595.28,
+            "heightPt": 841.89
+          },
+          "own": [
+            {
+              "addonData": {
+                "connectors": {
+                  "data": {
+                    "bends": [],
+                    "end": {
+                      "objectId": "b",
+                      "port": 0
+                    },
+                    "endBounds": {
+                      "height": 16,
+                      "width": 48,
+                      "x": 300,
+                      "y": 100
+                    },
+                    "endPoint": {
+                      "x": 300,
+                      "y": 108
+                    },
+                    "endSide": "left",
+                    "origin": {
+                      "x": 148,
+                      "y": 108
+                    },
+                    "routing": "orthogonal",
+                    "start": {
+                      "objectId": "a",
+                      "port": 1
+                    },
+                    "startBounds": {
+                      "height": 16,
+                      "width": 48,
+                      "x": 100,
+                      "y": 100
+                    },
+                    "startPoint": {
+                      "x": 148,
+                      "y": 108
+                    },
+                    "startSide": "right",
+                    "version": 2
+                  },
+                  "refs": [
+                    "a",
+                    "b"
+                  ]
+                }
+              },
+              "geometry": {
+                "closed": false,
+                "kind": "spline",
+                "nodes": [
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 0,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 152,
+                      "y": 0
+                    }
+                  }
+                ]
+              },
+              "style": {
+                "fillColor": null,
+                "opacity": 1,
+                "strokeColor": "#182c39",
+                "strokeWidthPt": 1.5
+              },
+              "x": 148,
+              "y": 108,
+              "id": "wire",
+              "type": "shape",
+              "rotation": 0,
+              "scale": 1
+            }
+          ],
+          "changed": [
+            {
+              "id": "a",
+              "type": "shape",
+              "bounds": {
+                "x": 100,
+                "y": 100,
+                "width": 96,
+                "height": 16
+              },
+              "ports": [
+                {
+                  "x": 100,
+                  "y": 108
+                },
+                {
+                  "x": 196,
+                  "y": 108
+                }
+              ]
+            }
+          ],
+          "deleted": []
+        },
+        "ports": [],
+        "settings": {
+          "routing": "orthogonal",
+          "arrow": "none"
+        }
+      },
+      "expected": {
+        "batch": {
+          "operations": [
+            {
+              "addonData": {
+                "data": {
+                  "bends": [],
+                  "end": {
+                    "objectId": "b",
+                    "port": 0
+                  },
+                  "endBounds": {
+                    "height": 16,
+                    "width": 48,
+                    "x": 300,
+                    "y": 100
+                  },
+                  "endPoint": {
+                    "x": 300,
+                    "y": 108
+                  },
+                  "endSide": "left",
+                  "origin": {
+                    "x": 148,
+                    "y": 108
+                  },
+                  "routing": "orthogonal",
+                  "start": {
+                    "objectId": "a",
+                    "port": 1
+                  },
+                  "startBounds": {
+                    "height": 16,
+                    "width": 96,
+                    "x": 100,
+                    "y": 100
+                  },
+                  "startPoint": {
+                    "x": 196,
+                    "y": 108
+                  },
+                  "startSide": "right",
+                  "version": 2
+                },
+                "refs": [
+                  "a",
+                  "b"
+                ]
+              },
+              "geometry": {
+                "closed": false,
+                "kind": "spline",
+                "nodes": [
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 48,
+                      "y": 0
+                    }
+                  },
+                  {
+                    "handleIn": null,
+                    "handleOut": null,
+                    "point": {
+                      "x": 152,
+                      "y": 0
+                    }
+                  }
+                ]
+              },
+              "id": "wire",
+              "op": "updateObject"
+            }
+          ]
+        }
+      },
+      "commitRaw": "{\"batch\":{\"operations\":[{\"addonData\":{\"data\":{\"bends\":[],\"end\":{\"objectId\":\"b\",\"port\":0},\"endBounds\":{\"height\":16.0,\"width\":48.0,\"x\":300.0,\"y\":100.0},\"endPoint\":{\"x\":300.0,\"y\":108.0},\"endSide\":\"left\",\"origin\":{\"x\":148.0,\"y\":108.0},\"routing\":\"orthogonal\",\"start\":{\"objectId\":\"a\",\"port\":1},\"startBounds\":{\"height\":16.0,\"width\":96.0,\"x\":100.0,\"y\":100.0},\"startPoint\":{\"x\":196.0,\"y\":108.0},\"startSide\":\"right\",\"version\":2},\"refs\":[\"a\",\"b\"]},\"geometry\":{\"closed\":false,\"kind\":\"spline\",\"nodes\":[{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":48.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":152.0,\"y\":0.0}}]},\"id\":\"wire\",\"op\":\"updateObject\"}]}}",
+      "previewRaw": "{\"marks\":[{\"geometry\":{\"closed\":false,\"kind\":\"spline\",\"nodes\":[{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":48.0,\"y\":0.0}},{\"handleIn\":null,\"handleOut\":null,\"point\":{\"x\":152.0,\"y\":0.0}}]},\"rotation\":0,\"scale\":1,\"x\":148,\"y\":108}]}",
+      "previewExpected": {
+        "marks": [
+          {
+            "geometry": {
+              "closed": false,
+              "kind": "spline",
+              "nodes": [
+                {
+                  "handleIn": null,
+                  "handleOut": null,
+                  "point": {
+                    "x": 48,
+                    "y": 0
+                  }
+                },
+                {
+                  "handleIn": null,
+                  "handleOut": null,
+                  "point": {
+                    "x": 152,
+                    "y": 0
+                  }
+                }
+              ]
+            },
+            "rotation": 0,
+            "scale": 1,
+            "x": 148,
+            "y": 108
+          }
+        ]
+      }
+    }
+  ],
+  "jsColdMs": 3.4607000000000028,
+  "workerColdMs": 78.53279999999995,
+  "guestMemoryBytes": 1179648,
+  "jsProcessRssDeltaBytes": 3141632,
+  "worker": {
+    "samples": 600,
+    "hz": 60,
+    "p50": 1.0807000000004336,
+    "p95": 30.297099999999773,
+    "p99": 41.49380000000019
+  }
+}
