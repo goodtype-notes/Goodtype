@@ -415,6 +415,25 @@ impl Registry {
         })
     }
 
+    /// A listed `version` this app cannot run, with its minimum Goodtype version when known.
+    /// Unlisted versions (sideloads, legacy archives) are left to the manifest checks.
+    pub fn unrunnable(&self, addon: &Addon, version: &str) -> Option<Option<String>> {
+        let release = self
+            .index
+            .addons
+            .iter()
+            .find(|entry| entry.id == addon.id)?
+            .versions
+            .iter()
+            .find(|release| release.version == version)?;
+        (!release.compatible(self.runtime.as_deref())).then(|| {
+            release
+                .min_goodtype
+                .clone()
+                .filter(|version| numeric_version(version).is_some())
+        })
+    }
+
     pub fn docs(&self, addon: &Addon) -> Option<&Docs> {
         self.index
             .addons
@@ -608,7 +627,21 @@ fn registry_url_allowed(initial: &str, url: &str, redirected: bool) -> bool {
 }
 
 fn fetch() -> Result<(Vec<u8>, Vec<u8>), Problem> {
-    fetch_preferred(fetch_format)
+    let mut format = 0;
+    let (bytes, signature) = fetch_preferred(|file| {
+        format = if file == "index-v2.json" { 2 } else { 1 };
+        fetch_format(file)
+    })?;
+    served_as(&bytes, &signature, &KEY, format)?;
+    Ok((bytes, signature))
+}
+
+/// Both formats share one key and sequence, so a signed format-1 index served under the format-2
+/// name would otherwise be accepted and hide every release that carries requirements.
+fn served_as(bytes: &[u8], signature: &[u8], key: &[u8; 32], format: u8) -> Result<(), Problem> {
+    (verify(bytes, signature, key)?.format == format)
+        .then_some(())
+        .ok_or(Problem::Invalid)
 }
 
 fn fetch_preferred(
@@ -953,12 +986,33 @@ mod tests {
     }
 
     #[test]
+    fn an_index_must_match_the_file_it_was_served_as() {
+        let signing = SigningKey::from_bytes(&[23; 32]);
+        let key = signing.verifying_key();
+        for format in [1, 2] {
+            let mut input = fixture();
+            input["format"] = json!(format);
+            let bytes = serde_json::to_vec(&input).unwrap();
+            let signature = signing.sign(&bytes).to_bytes();
+            assert_eq!(
+                served_as(&bytes, &signature, key.as_bytes(), format),
+                Ok(())
+            );
+            assert_eq!(
+                served_as(&bytes, &signature, key.as_bytes(), 3 - format),
+                Err(Problem::Invalid)
+            );
+        }
+    }
+
+    #[test]
     fn cache_records_format_and_preserves_shared_floor_across_restart() {
         let local = tempfile::tempdir().unwrap();
         let path = local.path().join("registry.json");
         let signing = SigningKey::from_bytes(&[19; 32]);
         let verifying = signing.verifying_key();
         let key = verifying.as_bytes();
+        // Above the bundled snapshot's sequence 4, whose real digest would otherwise reject the fixture.
         let time = at("2026-11-22T00:00:00Z");
         let download = |format, sequence, changed| {
             let mut input = fixture();
@@ -974,14 +1028,14 @@ mod tests {
         for format in [1, 2, 1] {
             Checks::default()
                 .perform(&path, Check::Manual, true, (|| time, key), || {
-                    download(format, 4, false)
+                    download(format, 5, false)
                 })
                 .unwrap();
             let cache: Cache = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
             assert_eq!(cache.format, format);
-            assert_eq!(load(&path, key).unwrap().floor.sequence, 4);
+            assert_eq!(load(&path, key).unwrap().floor.sequence, 5);
         }
-        for (format, sequence, changed) in [(2, 3, false), (2, 4, true), (1, 4, true)] {
+        for (format, sequence, changed) in [(2, 4, false), (2, 5, true), (1, 5, true)] {
             assert!(matches!(
                 Checks::default().perform(&path, Check::Manual, true, (|| time, key), || download(
                     format, sequence, changed
@@ -1044,6 +1098,14 @@ mod tests {
             registry.blocked(&catalog::GOODNOTES, Some("8.0.0")),
             Some(Some("99.0.0".into()))
         );
+        // Rollback consults the same rule: a listed release this app cannot run is refused,
+        // while unlisted versions are left to the manifest checks.
+        assert_eq!(
+            registry.unrunnable(&catalog::GOODNOTES, "9.0.0"),
+            Some(Some("99.0.0".into()))
+        );
+        assert_eq!(registry.unrunnable(&catalog::GOODNOTES, "8.0.0"), None);
+        assert_eq!(registry.unrunnable(&catalog::GOODNOTES, "7.7.7"), None);
     }
 
     #[test]

@@ -53,7 +53,7 @@
   let selected = $state<string>();
   let details = $state<Record<string, AddonDetails>>({});
   let loading = $state<Record<string, boolean>>({});
-  let errors = $state<Record<string, { key: MessageKey; feature?: string; retry: () => void } | undefined>>({});
+  let errors = $state<Record<string, { key: MessageKey; feature?: string; version?: string; retry: () => void } | undefined>>({});
   let pending = $state<Record<string, boolean>>({});
   let cancelling = $state<Record<string, boolean>>({});
   let listFailed = $state(false);
@@ -196,9 +196,12 @@
     try { await action(); }
     catch (error) {
       const reason = String(error);
+      const minimum = reason.match(/needs-newer-goodtype:([0-9.]*)$/)?.[1];
       errors[addon.id] = reason.startsWith("missing-addon-features:")
         ? { key: "addons.manager.status.missing-features", feature: reason.slice("missing-addon-features:".length), retry }
-        : { key, retry };
+        : minimum !== undefined
+          ? { key: minimum ? "addons.store.minimumApp" : "addons.store.newerApp", version: minimum, retry }
+          : { key, retry };
     }
     finally { await refresh(); pending[addon.id] = false; }
   }
@@ -304,7 +307,7 @@
   {@const error = errors[addon.id]}
   {#if error || addon.activity === "installFailed" || addon.activity === "updateIncompatible"}
     <div class="problem">
-      <span role="alert">{error ? $t(error.key, { feature: error.feature }) : addon.problem === "missingFeatures" ? $t("addons.manager.status.missing-features", { feature: addon.missingFeatures ?? "" }) : addon.problem ? $t(`addons.store.installProblem.${addon.problem}`) : $t(`addons.manager.activity.${addon.activity === "updateIncompatible" ? "updateIncompatible" : "installFailed"}`)}</span>
+      <span role="alert">{error ? $t(error.key, { feature: error.feature, version: error.version }) : addon.problem === "missingFeatures" ? $t("addons.manager.status.missing-features", { feature: addon.missingFeatures ?? "" }) : addon.problem ? $t(`addons.store.installProblem.${addon.problem}`) : $t(`addons.manager.activity.${addon.activity === "updateIncompatible" ? "updateIncompatible" : "installFailed"}`)}</span>
       {#if error || addonAction(addon)}
         <button type="button" class="quiet-action" onclick={error ? error.retry : () => retryInstall(addon)}>{$t("addons.store.retry")}</button>
       {/if}

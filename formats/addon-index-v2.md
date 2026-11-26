@@ -8,7 +8,8 @@ Unknown release fields and unsupported requirements make that release incompatib
 
 Hosts fetch format 2 first and use format 1 only after the format-2 index request returns 404.
 Signature download failures, bad signatures, expiry and rollback never trigger fallback. Each
-signature comes from the tagged registry release that served its index. The cache records its
+signature comes from the tagged registry release that served its index. An index must carry the
+format of the file it was served as, so a signed format-1 index under the format-2 name is rejected. The cache records its
 format; both formats share one highest accepted sequence, with separate digests at that sequence.
 The bundled offline snapshot remains format 1.
 
@@ -20,3 +21,5 @@ updates; scripts/release.mjs writes it through target/release-config.json. Local
 Blocked newer versions appear in the store with an Update Goodtype action opening Settings >
 App updates and checking through the existing updater. A beta caveat appears when betas are off.
 Installed versions remain available; automatic discovery reports skipped incompatible updates.
+Rollback refuses a previous version that the index lists as needing a newer Goodtype; versions the
+index does not list are left to the manifest checks.

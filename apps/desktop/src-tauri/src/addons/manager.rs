@@ -461,6 +461,16 @@ pub async fn addon_rollback(app: tauri::AppHandle, id: String) -> Result<(), Str
         let result = (|| {
             let dir = install_dir(&app, addon)?;
             let (version, path) = dir.previous().ok_or("no previous addon release")?;
+            // `minGoodtype` lives only in the registry, so the manifest check below cannot see it.
+            if let Some(minimum) = registry::current(&app)
+                .ok()
+                .and_then(|registry| registry.unrunnable(addon, &version))
+            {
+                return Err(format!(
+                    "needs-newer-goodtype:{}",
+                    minimum.unwrap_or_default()
+                ));
+            }
             let declaration = installed(addon, &path, &version, true).map_err(manifest_problem)?;
             shutdown(&app, addon);
             let active = dir.active();
