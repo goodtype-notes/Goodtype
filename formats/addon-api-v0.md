@@ -646,3 +646,31 @@ in on an already-owned spline. Existing explicit caps are preserved.
 
 A displayed port drop commits directly in one undo step. Routing choices and
 free endpoint releases follow proposal review or the two direct-apply opt-ins.
+
+## Minimum host features
+
+Manifests may declare `requires: ["end-caps", "group-stretch", "path-edit-v0"]`.
+The field is optional and omitted when empty. The host accepts at most 16 unique
+identifier-safe feature names (lowercase ASCII letters/digits separated by hyphens,
+using the same bounded identifier validation as contribution IDs). Unknown requirements
+refuse installation and enablement with "Needs a newer Goodtype" and the feature names.
+An installed incompatible package stays on disk but contributes nothing and cannot launch.
+Content packs use the same gate. `wasm-v0` is not supported.
+
+This host implements caps through core ShapeStyle and shared frontend/export cap geometry,
+stretch through core stretch rules and frontend stretch gestures, and path edits through
+Rust revision-bound connector grants and batch validation. Connectors must explicitly
+require `path-edit-v0`; command access remains restricted to `change-routing`. Version
+numbers no longer grant path-edit access. Existing pre-0.2 packages without this declaration
+remain refused; an explicitly declaring package is judged by its contract rather than version.
+
+Released v0.3 hosts deserialize Manifest with `deny_unknown_fields`, so even `requires: []`
+is refused there with their existing generic manifest error. Keep the field absent for packages
+that need no new feature and should work on those hosts.
+
+The signed registry index and its releases use `deny_unknown_fields`; adding requirements
+there would break released stores. The signed update descriptor tolerates extra fields, but
+has no requirement producer or pre-download selection contract today. Neither format changes
+here: the downloaded package manifest is the installation gate. Handshake negotiation stays
+unchanged. Shared manifest conformance inputs and expected outcomes live in
+`fixtures/addon-requires`; sibling repositories can copy or fetch them at a pinned commit.

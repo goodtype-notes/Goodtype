@@ -180,6 +180,8 @@ pub(super) struct Manifest {
     version: String,
     api_version: String,
     target: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     entrypoint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -198,6 +200,7 @@ pub(super) enum Error {
     Invalid,
     NeedsReinstall,
     Incompatible(String),
+    MissingFeatures(Vec<String>),
 }
 
 pub(super) fn release_version(version: &str) -> bool {
@@ -294,6 +297,11 @@ impl Addon {
             version: version.into(),
             api_version: API.into(),
             target: TARGET.into(),
+            requires: if self.id == catalog::CONNECTORS.id {
+                vec!["path-edit-v0".into()]
+            } else {
+                vec![]
+            },
             entrypoint: (!self.is_content()).then(|| self.executable()),
             contents: None,
             transport: if self.is_content() {
@@ -531,6 +539,17 @@ pub(super) fn parse(bytes: &[u8], addon: &Addon, version: &str) -> Result<Manife
     {
         return Err(Error::Invalid);
     }
+    if manifest.requires.len() > 16
+        || manifest.requires.iter().any(|feature| !identifier(feature))
+        || manifest
+            .requires
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            != manifest.requires.len()
+    {
+        return Err(Error::Invalid);
+    }
     if manifest.api_version != API {
         return Err(Error::Incompatible(
             manifest
@@ -545,8 +564,24 @@ pub(super) fn parse(bytes: &[u8], addon: &Addon, version: &str) -> Result<Manife
                 .map_or_else(String::new, |_| manifest.api_version.clone()),
         ));
     }
-    if !addon.path_edit_release(version) {
-        return Err(Error::Incompatible("path-edit-v0".into()));
+    let mut missing: Vec<String> = manifest
+        .requires
+        .iter()
+        .filter(|feature| {
+            !["end-caps", "group-stretch", "path-edit-v0"].contains(&feature.as_str())
+        })
+        .cloned()
+        .collect();
+    if addon.id == catalog::CONNECTORS.id
+        && !manifest
+            .requires
+            .iter()
+            .any(|feature| feature == "path-edit-v0")
+    {
+        missing.push("path-edit-v0".into());
+    }
+    if !missing.is_empty() {
+        return Err(Error::MissingFeatures(missing));
     }
     Ok(manifest)
 }
@@ -580,6 +615,43 @@ pub(super) fn load(
 mod tests {
     use super::*;
     use serde_json::{Value, json};
+
+    #[test]
+    fn shared_requirement_fixtures_use_real_loader() {
+        let fixtures: Value = serde_json::from_str(include_str!(
+            "../../../../../fixtures/addon-requires/manifests.json"
+        ))
+        .unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let inventory = PackageManifest {
+            version: "1.2.3".into(),
+            target: TARGET.into(),
+            decoder_commit: String::new(),
+            protocol_version: 1,
+            notebook_schema_version: 0,
+            files: vec![],
+        };
+        for fixture in fixtures.as_array().unwrap() {
+            let value = &fixture["manifest"];
+            let addon = CATALOG
+                .iter()
+                .find(|addon| addon.id == value["id"].as_str().unwrap())
+                .unwrap();
+            fs::write(home.path().join(FILE), serde_json::to_vec(value).unwrap()).unwrap();
+            let outcome = match load(addon, home.path(), "1.2.3", &inventory, None) {
+                Ok(_) => "accepted".into(),
+                Err(Error::Invalid) => "invalid".into(),
+                Err(Error::MissingFeatures(features)) => format!("missing:{}", features.join(",")),
+                Err(other) => panic!("unexpected {other:?}"),
+            };
+            assert_eq!(
+                outcome,
+                fixture["expected"].as_str().unwrap(),
+                "{}",
+                fixture["name"]
+            );
+        }
+    }
 
     #[test]
     fn documented_example_and_catalog_fixtures_round_trip() {

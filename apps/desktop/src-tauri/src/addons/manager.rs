@@ -112,6 +112,9 @@ pub(super) fn manifest_problem(error: Error) -> String {
     match error {
         Error::NeedsReinstall => "addon needs reinstall".into(),
         Error::Invalid => "invalid addon manifest or package".into(),
+        Error::MissingFeatures(features) => {
+            format!("missing-addon-features:{}", features.join(", "))
+        }
         Error::Incompatible(_) => "incompatible addon API".into(),
     }
 }
@@ -379,7 +382,15 @@ pub(super) fn install(
             )
         },
     );
-    *problem = phase.get();
+    *problem = if result
+        .as_ref()
+        .err()
+        .is_some_and(|message| message.starts_with("missing-addon-features:"))
+    {
+        InstallProblem::MissingFeatures
+    } else {
+        phase.get()
+    };
     result
 }
 
@@ -539,6 +550,7 @@ enum Status {
     Enabled,
     Disabled,
     IncompatibleApi,
+    MissingFeatures,
     VerificationFailed,
     NeedsReinstall,
 }
@@ -578,6 +590,7 @@ struct ManagedAddon {
     progress: Option<(u64, u64)>,
     approval: Option<Approval>,
     problem: Option<InstallProblem>,
+    missing_features: Option<String>,
     summary: Option<registry::Summary>,
     repository: &'static str,
 }
@@ -630,6 +643,10 @@ pub async fn addon_list(
                     } else {
                         Status::Disabled
                     }
+                }
+                Err(Error::MissingFeatures(features)) => {
+                    found_api = Some(features.join(", "));
+                    Status::MissingFeatures
                 }
                 Err(Error::Incompatible(found)) => {
                     found_api = Some(found);
@@ -708,6 +725,12 @@ pub async fn addon_list(
             direct_apply: preference.direct_apply,
             activity,
             progress,
+            missing_features: match &state.activity {
+                Some(Activity::InstallFailed { message, .. }) => message
+                    .strip_prefix("missing-addon-features:")
+                    .map(str::to_owned),
+                _ => None,
+            },
             problem: match &state.activity {
                 Some(Activity::InstallFailed { problem, .. }) => Some(*problem),
                 _ => None,
@@ -806,7 +829,13 @@ fn set_enabled(app: &tauri::AppHandle, id: String, enabled: bool) -> Result<(), 
         Ok(())
     })();
     job.set(Activity::Idle);
-    result.map_err(|_: String| "enable-write-failed".into())
+    result.map_err(|error: String| {
+        if error.starts_with("missing-addon-features:") {
+            error
+        } else {
+            "enable-write-failed".into()
+        }
+    })
 }
 
 #[tauri::command]

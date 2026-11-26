@@ -1312,3 +1312,48 @@ fn retained_archive_allows_readers_and_denies_writes_and_deletion() {
     drop(retained);
     fs::remove_file(&archive).unwrap();
 }
+
+#[test]
+fn installed_unmet_requirements_disable_loading_without_deleting_package() {
+    let home = tempfile::tempdir().unwrap();
+    let tool = &ONENOTE;
+    let dir = InstallDir(home.path().to_path_buf(), tool);
+    let bytes = package(tool, VERSION, false, None);
+    let archive = home.path().join("good.zip");
+    fs::write(&archive, &bytes).unwrap();
+    install_archive(&dir, &archive, &pin(tool, &bytes), &|_| good_probe(tool)).unwrap();
+    let (_, path) = dir.active().unwrap();
+    // Model a package valid on a newer host, then loaded by this older feature set.
+    let mut declaration = tool.declaration(VERSION);
+    declaration.requires = vec!["future-feature".into()];
+    let bytes = serde_json::to_vec(&declaration).unwrap();
+    fs::write(path.join(manifest::FILE), &bytes).unwrap();
+    let mut inventory: PackageManifest =
+        serde_json::from_slice(&fs::read(path.join(PACKAGE_MANIFEST)).unwrap()).unwrap();
+    let entry = inventory
+        .files
+        .iter_mut()
+        .find(|file| file.path == manifest::FILE)
+        .unwrap();
+    entry.size_bytes = bytes.len() as u64;
+    entry.sha256 = sha(&bytes);
+    fs::write(
+        path.join(PACKAGE_MANIFEST),
+        serde_json::to_vec(&inventory).unwrap(),
+    )
+    .unwrap();
+    let mut provenance: Provenance =
+        serde_json::from_slice(&fs::read(path.join(PROVENANCE)).unwrap()).unwrap();
+    provenance.inventory_sha256 = installation_digest(&path).unwrap();
+    fs::write(
+        path.join(PROVENANCE),
+        serde_json::to_vec(&provenance).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        matches!(manager::installed(tool, &path, VERSION, true), Err(manifest::Error::MissingFeatures(features)) if features == ["future-feature"])
+    );
+    assert!(usable_installation(&dir).is_err());
+    assert_eq!(dir.active().unwrap().0, VERSION);
+    assert!(path.join(manifest::FILE).is_file());
+}

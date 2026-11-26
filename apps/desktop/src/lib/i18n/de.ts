@@ -105,6 +105,7 @@ export const de = {
       verified: "Durch das signierte Verzeichnis festgelegt",
       kind: { shapes: "Formen", templates: "Vorlagen", palettes: "Palette", content: "Inhalt", import: "Import", recognize: "Erkennung", theme: "Design", other: "Erweiterung" },
       installProblem: {
+        missingFeatures: "Benötigt eine neuere Goodtype-Version.",
         download: "Die Erweiterung konnte nicht heruntergeladen werden.",
         verify: "Das heruntergeladene Paket konnte nicht verifiziert werden.",
         probe: "Die Startprüfung der Erweiterung ist fehlgeschlagen.",
@@ -180,6 +181,7 @@ export const de = {
         "available": "Zur Installation verfügbar",
         "enabled": "Aktiviert",
         "disabled": "Deaktiviert",
+        "missing-features": "Benötigt eine neuere Goodtype-Version ({{feature}})",
         "incompatible-api": "Update erforderlich (erwartet: {{expected}}, gefunden: {{found}})",
         "verification-failed": "Paketprüfung fehlgeschlagen"
       },

@@ -1229,6 +1229,7 @@ impl Activity {
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum InstallProblem {
+    MissingFeatures,
     Download,
     Verify,
     Probe,
