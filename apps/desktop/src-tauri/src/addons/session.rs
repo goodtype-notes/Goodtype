@@ -716,7 +716,8 @@ impl Runtime {
         }
         let manifest = super::manager::installed(addon, &path, &version, true).map_err(
             |problem| match problem {
-                super::manifest::Error::Incompatible(_) => Failure::NeedsUpdate,
+                super::manifest::Error::Incompatible(_)
+                | super::manifest::Error::MissingFeatures(_) => Failure::NeedsUpdate,
                 _ => Failure::Unavailable,
             },
         )?;

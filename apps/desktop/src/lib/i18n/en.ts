@@ -103,6 +103,7 @@ export const en = {
       verified: "Pinned by the signed registry",
       kind: { shapes: "Shapes", templates: "Templates", palettes: "Palette", content: "Content", import: "Import", recognize: "Recognition", theme: "Theme", other: "Addon" },
       installProblem: {
+        missingFeatures: "Needs a newer Goodtype.",
         download: "The addon download failed.",
         verify: "The downloaded package could not be verified.",
         probe: "The addon failed its startup check.",
@@ -178,6 +179,7 @@ export const en = {
         "available": "Available to install",
         "enabled": "Enabled",
         "disabled": "Disabled",
+        "missing-features": "Needs a newer Goodtype ({{feature}})",
         "incompatible-api": "Needs update (expected {{expected}}, found {{found}})",
         "verification-failed": "Package verification failed"
       },

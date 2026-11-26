@@ -907,9 +907,11 @@ fn fixture_connector_path_edits_exchange_scoped_requests_and_reject_broader_batc
     assert!(parse(&invalid, "0.2.0").is_err());
     invalid = declaration.clone();
     invalid["version"] = json!("0.1.0");
+    assert!(parse(&invalid, "0.1.0").is_ok());
+    invalid["requires"] = json!([]);
     assert!(matches!(
         parse(&invalid, "0.1.0"),
-        Err(manifest::Error::Incompatible(_))
+        Err(manifest::Error::MissingFeatures(_))
     ));
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/notebooks/minimal");

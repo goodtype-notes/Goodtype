@@ -53,7 +53,7 @@
   let selected = $state<string>();
   let details = $state<Record<string, AddonDetails>>({});
   let loading = $state<Record<string, boolean>>({});
-  let errors = $state<Record<string, { key: MessageKey; retry: () => void } | undefined>>({});
+  let errors = $state<Record<string, { key: MessageKey; feature?: string; retry: () => void } | undefined>>({});
   let pending = $state<Record<string, boolean>>({});
   let cancelling = $state<Record<string, boolean>>({});
   let listFailed = $state(false);
@@ -194,7 +194,12 @@
     pending[addon.id] = true;
     errors[addon.id] = undefined;
     try { await action(); }
-    catch { errors[addon.id] = { key, retry }; }
+    catch (error) {
+      const reason = String(error);
+      errors[addon.id] = reason.startsWith("missing-addon-features:")
+        ? { key: "addons.manager.status.missing-features", feature: reason.slice("missing-addon-features:".length), retry }
+        : { key, retry };
+    }
     finally { await refresh(); pending[addon.id] = false; }
   }
 
@@ -299,7 +304,7 @@
   {@const error = errors[addon.id]}
   {#if error || addon.activity === "installFailed" || addon.activity === "updateIncompatible"}
     <div class="problem">
-      <span role="alert">{error ? $t(error.key) : addon.problem ? $t(`addons.store.installProblem.${addon.problem}`) : $t(`addons.manager.activity.${addon.activity === "updateIncompatible" ? "updateIncompatible" : "installFailed"}`)}</span>
+      <span role="alert">{error ? $t(error.key, { feature: error.feature }) : addon.problem === "missingFeatures" ? $t("addons.manager.status.missing-features", { feature: addon.missingFeatures ?? "" }) : addon.problem ? $t(`addons.store.installProblem.${addon.problem}`) : $t(`addons.manager.activity.${addon.activity === "updateIncompatible" ? "updateIncompatible" : "installFailed"}`)}</span>
       {#if error || addonAction(addon)}
         <button type="button" class="quiet-action" onclick={error ? error.retry : () => retryInstall(addon)}>{$t("addons.store.retry")}</button>
       {/if}
@@ -336,7 +341,7 @@
 
   <div class="scroll" bind:this={scroller} onscroll={placePrompt}>
     {#if sideloadFailed}
-      <p class="page problem" role="alert">{$t("contentPacks.loadFailed")}{#if dev && sideloadReason} <code>{sideloadReason}</code>{/if}</p>
+      <p class="page problem" role="alert">{$t(sideloadReason.startsWith("missing-addon-features:") ? "addons.manager.status.missing-features" : "contentPacks.loadFailed", { feature: sideloadReason.slice("missing-addon-features:".length) })}{#if dev && sideloadReason} <code>{sideloadReason}</code>{/if}</p>
     {/if}
     {#if listFailed}
       <div class="page problem"><span role="alert">{$t("addons.store.loadFailed")}</span>
@@ -393,7 +398,7 @@
               {$t(active.activity === "installing" ? "addons.manager.activity.installing" : "addons.manager.activity.downloading")}
               {#if percent !== null}{$t("addons.store.percent", { value: formatNumber(percent, undefined, $displayLocale) })}{/if}
             {:else}
-              {$t(`addons.manager.status.${active.status}`, { expected: active.expectedApi, found: active.foundApi || $t("addons.manager.unknownVersion") })}
+              {$t(`addons.manager.status.${active.status}`, { expected: active.expectedApi, feature: active.foundApi ?? "", found: active.foundApi || $t("addons.manager.unknownVersion") })}
             {/if}
           </p>
           {@render errorLine(active)}
@@ -508,8 +513,8 @@
                 {:else if addon.status === "enabled"}
                   <span class="tile-status installed">{@render icon(icons.check)}{$t("addons.store.installed")}</span>
                 {:else if addon.status !== "available"}
-                  <span class="tile-status" class:warning={addon.status === "needs-reinstall" || addon.status === "incompatible-api"}>
-                    {$t(`addons.manager.status.${addon.status}`, { expected: addon.expectedApi, found: addon.foundApi || $t("addons.manager.unknownVersion") })}
+                  <span class="tile-status" class:warning={addon.status === "needs-reinstall" || addon.status === "incompatible-api" || addon.status === "missing-features"}>
+                    {$t(`addons.manager.status.${addon.status}`, { expected: addon.expectedApi, feature: addon.foundApi ?? "", found: addon.foundApi || $t("addons.manager.unknownVersion") })}
                   </span>
                 {/if}
               </div>

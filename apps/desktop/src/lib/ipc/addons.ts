@@ -56,10 +56,11 @@ export type ManagedAddon = {
   repository: string;
   /** Older catalogs supply kind through addon_catalog. */
   kind?: string;
-  problem?: "download" | "verify" | "probe" | "policy" | "unavailable" | null;
+  missingFeatures?: string | null;
+  problem?: "missingFeatures" | "download" | "verify" | "probe" | "policy" | "unavailable" | null;
   installed: string | null;
   previous: string | null;
-  status: "unsupported-os" | "unpublished" | "available" | "enabled" | "disabled" | "incompatible-api" | "verification-failed" | "needs-reinstall";
+  status: "missing-features" | "unsupported-os" | "unpublished" | "available" | "enabled" | "disabled" | "incompatible-api" | "verification-failed" | "needs-reinstall";
   expectedApi: string;
   foundApi: string | null;
   permissions: AddonPermission[];
