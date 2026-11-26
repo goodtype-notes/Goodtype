@@ -132,20 +132,26 @@ function shifted(box: Bounds, ports: readonly Point[], delta: Point): Index {
  * The delta a drag asks for, pulled onto the nearest edge, centre or port of another object within
  * `thresholdPt`, x and y independently, and the guides that result. With no match an axis keeps its
  * own delta. Pure lookup: it allocates no index and never touches the notebook.
+ *
+ * `constrain` is whatever limit the object applies after snapping (the page clamp). The guides are
+ * measured at the delta it returns, so a clamp that moves the snapped position leaves no guide
+ * marking a spot the object did not reach.
  */
 export function snapMoveDelta(
   session: SnapSession,
   delta: Point,
   thresholdPt: number,
+  constrain?: (delta: Point) => Point,
 ): { delta: Point; guides: SnapGuide[] } {
   const moving = shifted(session.moving.box, session.moving.ports, delta);
   const dx = bestCorrection(moving.x, session.targets.x, thresholdPt);
   const dy = bestCorrection(moving.y, session.targets.y, thresholdPt);
   const snapped = { x: delta.x + (dx ?? 0), y: delta.y + (dy ?? 0) };
-  if (dx === null && dy === null) return { delta: snapped, guides: [] };
-  const after = shifted(session.moving.box, session.moving.ports, snapped);
+  const final = constrain ? constrain(snapped) : snapped;
+  if (dx === null && dy === null) return { delta: final, guides: [] };
+  const after = shifted(session.moving.box, session.moving.ports, final);
   return {
-    delta: snapped,
+    delta: final,
     guides: [
       ...(dx === null ? [] : guidesFor("x", after.x, session.targets.x)),
       ...(dy === null ? [] : guidesFor("y", after.y, session.targets.y)),
@@ -161,7 +167,8 @@ export function sameGuides(a: readonly SnapGuide[], b: readonly SnapGuide[]): bo
 
 /**
  * A drag's snapping, held for its duration. `begin` builds the index, `adjust` snaps one pointer
- * delta (Alt or the setting off passes it through untouched and clears the guides), `end` drops it.
+ * delta (Alt or the setting off passes it through unsnapped and clears the guides), `end` drops it.
+ * A `constrain` callback is applied to whatever delta results, snapped or not.
  * Guides are reported through `onGuides` only when they change.
  */
 export function createMoveSnapper(host: {
@@ -181,12 +188,12 @@ export function createMoveSnapper(host: {
     begin(build: () => SnapSession | null) {
       session = host.enabled() ? build() : null;
     },
-    adjust(delta: Point, alt: boolean): Point {
+    adjust(delta: Point, alt: boolean, constrain?: (delta: Point) => Point): Point {
       if (!session || alt || !host.enabled()) {
         show([]);
-        return delta;
+        return constrain ? constrain(delta) : delta;
       }
-      const result = snapMoveDelta(session, delta, snapThresholdPt(host.zoom()));
+      const result = snapMoveDelta(session, delta, snapThresholdPt(host.zoom()), constrain);
       show(result.guides);
       return result.delta;
     },
@@ -203,6 +210,6 @@ export type MoveSnapper = ReturnType<typeof createMoveSnapper>;
 /** What the object components get: begin a drag of these ids, adjust each delta, end it. */
 export type ObjectMoveSnap = {
   begin: (ids: readonly string[], strokeIds?: readonly string[]) => void;
-  adjust: (delta: Point, alt: boolean) => Point;
+  adjust: (delta: Point, alt: boolean, constrain?: (delta: Point) => Point) => Point;
   end: () => void;
 };

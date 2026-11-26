@@ -261,6 +261,55 @@ describe("snapping a dragged selection to other objects", () => {
     selection.endMixedTransform(true);
   });
 
+  describe("one child of a group", () => {
+    /** Group "g" holds "c1" and "c2"; "t" is a loose rectangle. The group has its own port at (200, 0). */
+    function grouped() {
+      const fields = { y: 0, scale: 1, rotation: 0, zIndex: 0, readingOrder: 0, createdAt: "now", modifiedAt: "now" };
+      const group = { ...fields, id: "g", type: "group", groupId: null, x: 0, childIds: ["c1", "c2"],
+        ports: [{ x: 200, y: 0 }] } satisfies PageObject;
+      const children = [rectangle("c1", 100, 100, 50, 30), rectangle("c2", 300, 100, 50, 30)];
+      const { env, selection } = board(...children, rectangle("t", 190, 500, 40, 40));
+      env.activeSnapshot = { page: {
+        objects: [group, ...children.map(child => ({ ...fields, ...child, type: "shape", groupId: "g" })),
+          { ...fields, ...rectangle("t", 190, 500, 40, 40), type: "shape", groupId: null }],
+        readingOrder: ["g", "t"], inkLayers: [], schemaVersion: 5,
+      }, blocks: [], inkLayers: [], assets: [] } as unknown as typeof env.activeSnapshot;
+      return { env, selection };
+    }
+
+    it("snaps to its siblings, which stay targets", () => {
+      const { selection } = grouped();
+      selection.lassoObjectIds = ["c2"];
+      selection.beginMixedTransform();
+      // c2's left edge (300 - 148 = 152) is within six points of c1's right edge (150).
+      selection.previewMixedTransform({ x: -148, y: 0 }, 1, { x: 0, y: 0 }, 0, { altKey: false });
+      expect(selection.previewShapes[1].x).toBe(150);
+      expect(selection.snapGuides).toContainEqual(expect.objectContaining({ axis: "x", at: 150 }));
+      selection.endMixedTransform(true);
+    });
+
+    it("moves with its own ports, not the group's", () => {
+      const { selection } = grouped();
+      selection.lassoObjectIds = ["c2"];
+      selection.beginMixedTransform();
+      // The group's port at x = 200 would reach t's left edge (190) after -7; c2 itself reaches nothing.
+      selection.previewMixedTransform({ x: -7, y: 0 }, 1, { x: 0, y: 0 }, 0, { altKey: false });
+      expect(selection.previewShapes[1].x).toBe(293);
+      expect(selection.snapGuides.filter(guide => guide.axis === "x")).toEqual([]);
+      selection.endMixedTransform(true);
+    });
+
+    it("still moves a whole group as one frame", () => {
+      const { selection } = grouped();
+      selection.lassoObjectIds = ["c1", "c2"];
+      selection.beginMixedTransform();
+      // The group's port (x = 200) is pulled onto t's left edge (190): a delta of -10.
+      selection.previewMixedTransform({ x: -7, y: 0 }, 1, { x: 0, y: 0 }, 0, { altKey: false });
+      expect(selection.previewShapes[0].x).toBe(90);
+      selection.endMixedTransform(true);
+    });
+  });
+
   it("snaps a rotated object by its visible box", () => {
     // 30 x 40 turned a quarter: it covers x from 200 - 40 = 160 to 200 and y from 100 to 130.
     const { selection } = board(rectangle("a", 100, 100, 50, 30), rectangle("turned", 200, 300, 30, 40, 90));

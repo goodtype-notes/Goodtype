@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { t } from "../i18n";
   import { keepOnPage } from "../geometry/placement";
   import { rotatedVector } from "../geometry/coordinates";
@@ -81,6 +82,12 @@
     }
   });
 
+  // A drag the image never gets to end (undo, delete or a page change unmounts it) must not leave
+  // its guides on the page.
+  onDestroy(() => {
+    if (gesture?.kind === "move") moveSnap?.end();
+  });
+
   function beginMove(event: PointerEvent) {
     if (event.button !== 0) return;
     onSelect?.();
@@ -119,15 +126,22 @@
       event.clientY - gesture.clientY,
     );
     if (gesture.kind === "move") {
-      const moved = moveSnap ? moveSnap.adjust(delta, event.altKey) : delta;
+      const { x: startX, y: startY } = gesture;
+      let held: Position = { x: startX, y: startY };
       // Clamped while dragging rather than on drop, so the limit is something you feel rather
-      // than something that snaps the image back after you let go.
-      const held = keepOnPage(
-        { x: gesture.x + moved.x, y: gesture.y + moved.y },
-        { widthPt: widthPt * previewScale, heightPt: heightPt * previewScale },
-        { widthPt: pageWidthPt, heightPt: pageHeightPt },
-        undefined, rotation,
-      );
+      // than something that snaps the image back after you let go. The snapper measures its
+      // guides at the clamped spot.
+      const clamp = (moved: Position): Position => {
+        held = keepOnPage(
+          { x: startX + moved.x, y: startY + moved.y },
+          { widthPt: widthPt * previewScale, heightPt: heightPt * previewScale },
+          { widthPt: pageWidthPt, heightPt: pageHeightPt },
+          undefined, rotation,
+        );
+        return { x: held.x - startX, y: held.y - startY };
+      };
+      if (moveSnap) moveSnap.adjust(delta, event.altKey, clamp);
+      else clamp(delta);
       previewX = held.x;
       previewY = held.y;
     } else {

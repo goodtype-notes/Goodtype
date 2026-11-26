@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from "../i18n";
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import ShapeMarks from "./ShapeMarks.svelte";
   import type { Point } from "../geometry/coordinates";
   import {
@@ -238,6 +238,12 @@
     preview = gesture.start;
     clearGesture();
   }
+
+  // A drag the shape never gets to end (undo, delete or a page change unmounts it) must not leave
+  // its guides on the page.
+  onDestroy(() => {
+    if (gesture?.kind === "move") moveSnap?.end();
+  });
 
   function clearGesture() {
     moveSnap?.end();

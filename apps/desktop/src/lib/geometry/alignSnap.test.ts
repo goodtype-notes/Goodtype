@@ -116,6 +116,32 @@ describe("alignment snapping", () => {
   });
 });
 
+describe("snapping under a clamp", () => {
+  const session = () => beginSnap([frame("a", box(100, 0, 200, 50))], moving(box(0, 100, 80, 150)));
+
+  it("draws guides at the clamped spot, so a clamp that moves the snap leaves none", () => {
+    // Snapped to x = 100, then the page holds it back to 90: nothing is aligned there.
+    const held = snapMoveDelta(session(), { x: 103, y: 0 }, 6, delta => ({ x: Math.min(delta.x, 90), y: delta.y }));
+    expect(held.delta).toEqual({ x: 90, y: 0 });
+    expect(held.guides).toEqual([]);
+  });
+
+  it("keeps the guide of an axis the clamp left alone", () => {
+    const { delta, guides } = snapMoveDelta(session(), { x: 103, y: 0 }, 6, d => ({ x: d.x, y: Math.min(d.y, -5) }));
+    expect(delta).toEqual({ x: 100, y: -5 });
+    expect(guides).toEqual([expect.objectContaining({ axis: "x", at: 100 })]);
+  });
+
+  it("applies the clamp with Alt held or snapping off, and without a drag", () => {
+    const clamp = (delta: { x: number; y: number }) => ({ x: Math.min(delta.x, 90), y: delta.y });
+    const snapper = createMoveSnapper({ enabled: () => true, zoom: () => 1, onGuides: () => {} });
+    snapper.begin(() => session());
+    expect(snapper.adjust({ x: 103, y: 0 }, true, clamp)).toEqual({ x: 90, y: 0 });
+    snapper.end();
+    expect(snapper.adjust({ x: 103, y: 0 }, false, clamp)).toEqual({ x: 90, y: 0 });
+  });
+});
+
 describe("move snapper", () => {
   const frames = [frame("a", box(100, 0, 200, 50))];
   const host = (enabled = true, zoom = 1) => {

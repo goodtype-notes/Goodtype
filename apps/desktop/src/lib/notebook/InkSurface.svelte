@@ -926,6 +926,9 @@
     if (!immediateFrame) immediateFrame = requestAnimationFrame(() => redrawImmediate());
   }
   onDestroy(() => {
+    // A selection drag the surface never gets to end (a page change unmounts it) must not leave its
+    // guides on the page.
+    if (gesture?.kind === "move") moveSnap?.end();
     if (immediateFrame) cancelAnimationFrame(immediateFrame);
     cancelEraseFrame();
     clearHoldTimer();

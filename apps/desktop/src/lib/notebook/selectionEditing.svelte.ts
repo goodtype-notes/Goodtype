@@ -219,11 +219,17 @@ export function createSelection(env: SelectionEnvironment) {
     }));
   }
 
-  /** Each loose object, and each whole group as one, with its box and the ports it exposes. */
-  function snapFrames(boxes: ReadonlyMap<string, Bounds>): SnapFrame[] {
+  /**
+   * Each loose object, and each whole group as one, with its box and the ports it exposes. A group
+   * only some of whose children are being moved has no frame of its own: its children stand
+   * alone, so the dragged child moves with its own box and ports and its siblings stay targets.
+   */
+  function snapFrames(boxes: ReadonlyMap<string, Bounds>, moving: ReadonlySet<string>): SnapFrame[] {
     const grouped = new Set<string>();
     const frames: SnapFrame[] = [];
     for (const group of shapeGroups) {
+      const dragged = group.childIds.filter(id => moving.has(id)).length;
+      if (dragged > 0 && dragged < group.childIds.length) continue;
       const parts = group.childIds.flatMap(id => boxes.get(id) ?? []);
       if (!parts.length) continue;
       group.childIds.forEach(id => grouped.add(id));
@@ -241,7 +247,7 @@ export function createSelection(env: SelectionEnvironment) {
     const parts = [...ids.flatMap(id => boxes.get(id) ?? []), ...(ink ? [ink] : [])];
     if (!parts.length) return null;
     const moving = new Set(ids);
-    const frames = snapFrames(boxes);
+    const frames = snapFrames(boxes, moving);
     return beginSnap(frames, { ids: moving, box: unionBounds(parts),
       ports: frames.filter(frame => frame.ids.some(id => moving.has(id))).flatMap(frame => frame.ports) });
   }

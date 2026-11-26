@@ -24,9 +24,10 @@ to edit its parts.
 ### Line things up
 
 While you drag shapes, symbols, images, Typst blocks or selected ink, thin guide lines appear and the
-object snaps to the edges and centres of other objects, and to their connection points, so wires
-come out straight. Hold **Alt** to move freely, or switch **Snap to other objects** off in
-Settings → Editing. With two or more objects selected, the **Align and distribute** button in the
+object snaps to the edges and centres of shapes, groups, images and Typst blocks, and to their
+connection points, so wires come out straight. Ink is dragged along but is never a target. Only a
+pointer drag snaps: keyboard nudges, scaling and rotation land exactly where you put them. Hold
+**Alt** to move freely, or switch **Snap to other objects** off in Settings → Editing. With two or more objects selected, the **Align and distribute** button in the
 selection bar lines them up by their left, centre, right, top, middle or bottom edge, or spaces
 three or more evenly. Rotated objects line up by their visible outline, and each action is one Undo step.
 

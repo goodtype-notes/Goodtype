@@ -217,6 +217,9 @@
   });
 
   onDestroy(() => {
+    // A drag the block never gets to end (undo, delete or a page change unmounts it) must not
+    // leave its guides on the page.
+    if (gesture?.kind === "move") moveSnap?.end();
     if (compileTimer) clearTimeout(compileTimer);
     if (svgUrl) URL.revokeObjectURL(svgUrl);
   });
@@ -258,15 +261,22 @@
     );
 
     if (gesture.kind === "move") {
-      const moved = moveSnap ? moveSnap.adjust(delta, event.altKey) : delta;
+      const { x: startX, y: startY } = gesture.start;
+      let held: { x: number; y: number } = { x: startX, y: startY };
       // Clamped while dragging rather than on drop, so the limit is something you feel rather
-      // than something that snaps the block back after you let go.
-      const held = keepOnPage(
-        { x: gesture.start.x + moved.x, y: gesture.start.y + moved.y },
-        { widthPt: layoutWidthPt * scale, heightPt: renderedHeightPt * scale },
-        { widthPt: pageWidthPt, heightPt: pageHeightPt },
-        undefined, rotation,
-      );
+      // than something that snaps the block back after you let go. The snapper measures its
+      // guides at the clamped spot.
+      const clamp = (moved: { x: number; y: number }) => {
+        held = keepOnPage(
+          { x: startX + moved.x, y: startY + moved.y },
+          { widthPt: layoutWidthPt * scale, heightPt: renderedHeightPt * scale },
+          { widthPt: pageWidthPt, heightPt: pageHeightPt },
+          undefined, rotation,
+        );
+        return { x: held.x - startX, y: held.y - startY };
+      };
+      if (moveSnap) moveSnap.adjust(delta, event.altKey, clamp);
+      else clamp(delta);
       x = held.x;
       y = held.y;
     } else if (gesture.kind === "scale") {
