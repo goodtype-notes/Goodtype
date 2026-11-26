@@ -42,7 +42,8 @@ export const en = {
     loadFailed: "Goodtype could not load the local content pack.",
   },
   addons: {
-    reactionFailed: "{{addon}} could not update after the part changed.",
+    reactionFailed_one: "{{addon}} could not update {{count}} object. Your change was kept.",
+    reactionFailed_other: "{{addon}} could not update {{count}} objects. Your change was kept.",
     pathEndpoint: "{{addon}} can attach this endpoint",
     pathChoice: "{{addon}} · {{choice}}",
     pathReview: "Review change from {{addon}}",
