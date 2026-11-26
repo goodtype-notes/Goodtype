@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateKeyPairSync, verify } from 'node:crypto';
-import { checkCandidate, nextDevVersion, promotion, sha256, signReleaseManifest } from './release.mjs';
+import { checkCandidate, mergedPullRequest, nextDevVersion, promotion, sha256, signReleaseManifest } from './release.mjs';
 
 test('release signatures bind exact manifest bytes to the app public key', () => {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
@@ -70,4 +70,13 @@ test('changing dev after testing invalidates promotion; drafts and stable tags a
   assert.throws(() => checkCandidate(release, commit, 'b'.repeat(40)), /exact dev head/);
   assert.throws(() => checkCandidate({ ...release, isDraft: true }, commit, commit), /published/);
   assert.throws(() => checkCandidate({ ...release, isPrerelease: false }, commit, commit), /pre-release/);
+});
+
+test('only the one PR merged into the branch as this commit counts as its source', () => {
+  const pr = (number, base, merge = 'merge', merged = true) =>
+    ({ number, base: { ref: base }, merge_commit_sha: merge, merged_at: merged ? '2026-11-25T09:00:00Z' : null });
+  assert.equal(mergedPullRequest([pr(1, 'dev'), pr(2, 'main')], 'merge', 'dev').number, 1);
+  assert.equal(mergedPullRequest([pr(1, 'dev', 'other'), pr(2, 'dev', 'merge', false)], 'merge', 'dev'), null);
+  assert.equal(mergedPullRequest([pr(1, 'dev'), pr(2, 'dev')], 'merge', 'dev'), null);
+  assert.equal(mergedPullRequest([], 'merge', 'main'), null);
 });
