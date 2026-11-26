@@ -56,6 +56,8 @@ export type ManagedAddon = {
   repository: string;
   /** Older catalogs supply kind through addon_catalog. */
   kind?: string;
+  needsNewerApp?: boolean;
+  minGoodtype?: string | null;
   missingFeatures?: string | null;
   problem?: "missingFeatures" | "download" | "verify" | "probe" | "policy" | "unavailable" | null;
   installed: string | null;
@@ -104,7 +106,7 @@ export const installAddon = (id: string, approved: AddonPermission[]) =>
 export const updateAddon = (id: string, approved: AddonPermission[]) =>
   invoke<void>("addon_update", { id, approved });
 
-export type RegistryProblem = "offline" | "status" | "signature" | "expired" | "rollback" | "invalid";
+export type RegistryProblem = "notFound" | "offline" | "status" | "signature" | "expired" | "rollback" | "invalid";
 export type RegistryCheck = { lastCheck: number | null; checking: boolean; problem: RegistryProblem | null; expired: boolean };
 export type AddonManager = {
   allowDirectApply: boolean;
@@ -210,9 +212,9 @@ export const addonObjectAction = (root: string, pageId: string, revision: number
     "addon_object_action", { request: { root, pageId, revision, addonId, action, requestId } });
 
 export const prepareAddonReactions = (root: string, pageId: string, revision: number, baseRevision: number, retry: boolean) =>
-  invoke<{ token: string | null; retry: boolean; failed: AddonName | null }>("addon_react", { root, pageId, revision, baseRevision, retry });
+  invoke<{ token: string | null; retry: boolean; failed: AddonName | null; owner: AddonName | null; count: number }>("addon_react", { root, pageId, revision, baseRevision, retry });
 export const applyAddonReaction = (token: string) =>
-  invoke<[import("./types").HistoryResult | null, boolean]>("addon_apply_reaction", { token });
+  invoke<[import("./types").HistoryResult | null, boolean, AddonName | null, number]>("addon_apply_reaction", { token });
 
 export type AddonContribution = {
   addonId: string;

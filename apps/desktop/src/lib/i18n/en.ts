@@ -42,7 +42,8 @@ export const en = {
     loadFailed: "Goodtype could not load the local content pack.",
   },
   addons: {
-    reactionFailed: "{{addon}} could not update after the part changed.",
+    reactionFailed_one: "{{addon}} could not update {{count}} object. Your change was kept.",
+    reactionFailed_other: "{{addon}} could not update {{count}} objects. Your change was kept.",
     pathEndpoint: "{{addon}} can attach this endpoint",
     pathChoice: "{{addon}} · {{choice}}",
     pathReview: "Review change from {{addon}}",
@@ -81,6 +82,12 @@ export const en = {
       exportFailed: "The addon could not export these pages.",
     },
     store: {
+      skippedUpdate: "An addon update needs a newer Goodtype. The installed version is kept.",
+      minimumApp: "Needs Goodtype {{version}} or newer",
+      newerApp: "Needs a newer Goodtype",
+      minimumBeta: "This version may only be available as a beta.",
+      updateApp: "Update Goodtype",
+
       browse: "Browse addons",
       back: "Back",
       search: "Search addons",
@@ -164,6 +171,7 @@ export const en = {
       "checkFailed": "Goodtype could not verify an update.",
       "noCompatibleRelease": "No compatible release is available.",
       "registryProblem": {
+        notFound: "The registry file was not found.",
         "offline": "Goodtype could not connect to GitHub.",
         "status": "GitHub returned an error when Goodtype requested the addon list.",
         "signature": "The addon list signature could not be verified.",

@@ -245,7 +245,11 @@ pub(crate) fn github_asset(
         let response = agent.get(&url).call().map_err(|error| match error {
             ureq::Error::Status(status, _) => {
                 eprintln!("GitHub addon asset returned status {status}");
-                Problem::Status
+                if status == 404 {
+                    Problem::NotFound
+                } else {
+                    Problem::Status
+                }
             }
             ureq::Error::Transport(_) => Problem::Offline,
         })?;

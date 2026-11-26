@@ -2,8 +2,10 @@ use super::*;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use tauri::Emitter;
 
+#[cfg(test)]
 const URL: &str =
     "https://github.com/goodtype-notes/Goodtype-Addons/releases/latest/download/index.json";
+#[cfg(test)]
 const SIG_URL: &str =
     "https://github.com/goodtype-notes/Goodtype-Addons/releases/latest/download/index.json.sig";
 const KEY: [u8; 32] = [
@@ -23,6 +25,7 @@ const MAX_STATE: usize = 1024;
 pub(crate) enum Problem {
     Offline,
     Status,
+    NotFound,
     Signature,
     Expired,
     Rollback,
@@ -128,7 +131,7 @@ impl Docs {
 }
 
 #[derive(Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct Release {
     pub version: String,
     api: String,
@@ -136,9 +139,34 @@ pub(super) struct Release {
     pub url: String,
     pub size: u64,
     pub sha256: String,
+    #[serde(default)]
+    min_goodtype: Option<String>,
+    #[serde(default)]
+    requires: Vec<String>,
+    #[serde(flatten)]
+    unknown: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 impl Release {
+    fn compatible(&self, runtime: Option<&str>) -> bool {
+        self.api == manifest::API
+            && self.target == TARGET
+            && self.unknown.is_empty()
+            && self.requires.len() <= 16
+            && self.requires.iter().collect::<HashSet<_>>().len() == self.requires.len()
+            && self
+                .requires
+                .iter()
+                .all(|feature| manifest::supported_feature(feature))
+            && self.min_goodtype.as_ref().is_none_or(|minimum| {
+                numeric_version(minimum).is_some_and(|minimum| {
+                    runtime
+                        .and_then(numeric_version)
+                        .is_none_or(|running| running >= minimum)
+                })
+            })
+    }
+
     pub fn view(&self) -> ReleaseView {
         ReleaseView {
             version: self.version.clone(),
@@ -239,9 +267,26 @@ fn verify(bytes: &[u8], sig: &[u8], key: &[u8; 32]) -> Result<Index, Problem> {
     update::verify_signature(bytes, sig, key).map_err(|_| Problem::Signature)?;
     // Closed Serde structs reject both unknown and repeated fields.
     let mut index: Index = serde_json::from_slice(bytes).map_err(|_| Problem::Invalid)?;
+    if index.format == 1 {
+        let value: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(|_| Problem::Invalid)?;
+        if value["addons"].as_array().is_some_and(|entries| {
+            entries.iter().any(|entry| {
+                entry["versions"].as_array().is_some_and(|versions| {
+                    versions.iter().any(|release| {
+                        release.as_object().is_some_and(|fields| {
+                            fields.contains_key("minGoodtype") || fields.contains_key("requires")
+                        })
+                    })
+                })
+            })
+        }) {
+            return Err(Problem::Invalid);
+        }
+    }
     index.digest = hex(&Sha256::digest(bytes));
     let dates = timestamp(&index.issued).zip(timestamp(&index.expires));
-    if index.format != 1
+    if ![1, 2].contains(&index.format)
         || index.sequence > MAX_SEQUENCE
         || !dates.is_some_and(|(issued, expires)| issued < expires)
     {
@@ -280,12 +325,18 @@ fn verify(bytes: &[u8], sig: &[u8], key: &[u8; 32]) -> Result<Index, Problem> {
         }
         let mut versions = HashSet::new();
         for release in &entry.versions {
+            if index.format == 1
+                && (release.min_goodtype.is_some()
+                    || !release.requires.is_empty()
+                    || !release.unknown.is_empty())
+            {
+                return Err(Problem::Invalid);
+            }
             if !numeric_version(&release.version).is_some_and(|value| versions.insert(value))
                 || !release
                     .api
                     .strip_prefix("goodtype-api 0.")
                     .is_some_and(digits)
-                || release.target != TARGET
                 || !valid_url(&release.url, &entry.repository)
                 || !(1..=MAX_PACKAGE_BYTES).contains(&release.size)
                 || !update::is_hash(&release.sha256, 64)
@@ -315,13 +366,20 @@ impl Index {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Cache {
+    #[serde(default = "format_one")]
+    format: u8,
     sequence: u64,
     last_check: Option<u64>,
     bytes: String,
     signature: String,
 }
 
+fn format_one() -> u8 {
+    1
+}
+
 pub(super) struct Registry {
+    runtime: Option<String>,
     index: Index,
     pub last_check: Option<u64>,
     floor: Floor,
@@ -330,6 +388,52 @@ pub(super) struct Registry {
 }
 
 impl Registry {
+    pub fn blocked(&self, addon: &Addon, installed: Option<&str>) -> Option<Option<String>> {
+        let newest = self
+            .index
+            .addons
+            .iter()
+            .find(|entry| entry.id == addon.id)?
+            .versions
+            .iter()
+            .max_by_key(|release| numeric_version(&release.version))?;
+        let baseline = installed
+            .and_then(numeric_version)
+            .into_iter()
+            .chain(
+                self.details_release(addon)
+                    .and_then(|release| numeric_version(&release.version)),
+            )
+            .max();
+        (!newest.compatible(self.runtime.as_deref())
+            && baseline.is_none_or(|version| numeric_version(&newest.version).unwrap() > version))
+        .then(|| {
+            newest
+                .min_goodtype
+                .clone()
+                .filter(|version| numeric_version(version).is_some())
+        })
+    }
+
+    /// A listed `version` this app cannot run, with its minimum Goodtype version when known.
+    /// Unlisted versions (sideloads, legacy archives) are left to the manifest checks.
+    pub fn unrunnable(&self, addon: &Addon, version: &str) -> Option<Option<String>> {
+        let release = self
+            .index
+            .addons
+            .iter()
+            .find(|entry| entry.id == addon.id)?
+            .versions
+            .iter()
+            .find(|release| release.version == version)?;
+        (!release.compatible(self.runtime.as_deref())).then(|| {
+            release
+                .min_goodtype
+                .clone()
+                .filter(|version| numeric_version(version).is_some())
+        })
+    }
+
     pub fn docs(&self, addon: &Addon) -> Option<&Docs> {
         self.index
             .addons
@@ -352,7 +456,7 @@ impl Registry {
                 .find(|entry| entry.id == addon.id)?
                 .versions
                 .iter()
-                .filter(|release| release.api == manifest::API && release.target == TARGET),
+                .filter(|release| release.compatible(self.runtime.as_deref())),
         )
     }
 
@@ -401,6 +505,10 @@ fn now() -> Duration {
 struct Floor {
     sequence: u64,
     digest: String,
+    #[serde(default = "format_one")]
+    format: u8,
+    #[serde(default)]
+    other_digest: Option<String>,
 }
 
 impl From<&Index> for Floor {
@@ -408,6 +516,8 @@ impl From<&Index> for Floor {
         Self {
             sequence: index.sequence,
             digest: index.digest.clone(),
+            format: index.format,
+            other_digest: None,
         }
     }
 }
@@ -441,7 +551,12 @@ fn load(path: &Path, key: &[u8; 32]) -> Result<Registry, Problem> {
         if let Some(saved) = &state.floor
             && saved.sequence <= MAX_SEQUENCE
             && update::is_hash(&saved.digest, 64)
-            && saved.sequence > floor.sequence
+            && (saved.sequence > floor.sequence
+                || saved.sequence == floor.sequence
+                    && floor.other_digest.is_none()
+                    && (saved.format == floor.format && saved.digest == floor.digest
+                        || saved.format != floor.format
+                            && saved.other_digest.as_ref() == Some(&floor.digest)))
         {
             floor = saved.clone();
         }
@@ -454,18 +569,28 @@ fn load(path: &Path, key: &[u8; 32]) -> Result<Registry, Problem> {
             key,
         )
         .ok()?;
-        (index.sequence == cache.sequence).then_some((index, cache.last_check))
+        (index.sequence == cache.sequence && index.format == cache.format)
+            .then_some((index, cache.last_check))
     })();
     let old_check = cache.as_ref().and_then(|(_, check)| *check);
     let state = primary.or(backup).unwrap_or_default();
     let index = cache.map(|(index, _)| index).filter(|index| {
         index.sequence > floor.sequence
-            || (index.sequence == floor.sequence && index.digest == floor.digest)
+            || (index.sequence == floor.sequence
+                && (index.digest == floor.digest && index.format == floor.format
+                    || index.format != floor.format
+                        && floor
+                            .other_digest
+                            .as_ref()
+                            .is_none_or(|digest| *digest == index.digest)))
     });
-    if let Some(index) = &index {
+    if let Some(index) = &index
+        && index.sequence > floor.sequence
+    {
         floor = Floor::from(index);
     }
     Ok(Registry {
+        runtime: None,
         cached: index.is_some(),
         index: index.unwrap_or(snapshot),
         last_check: state.last_success.or(old_check),
@@ -475,7 +600,9 @@ fn load(path: &Path, key: &[u8; 32]) -> Result<Registry, Problem> {
 }
 
 pub(super) fn current(app: &tauri::AppHandle) -> Result<Registry, Problem> {
-    load(&cache_path(app)?, &KEY)
+    let mut registry = load(&cache_path(app)?, &KEY)?;
+    registry.runtime = Some(app.package_info().version.to_string());
+    Ok(registry)
 }
 
 fn cache_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -500,24 +627,61 @@ fn registry_url_allowed(initial: &str, url: &str, redirected: bool) -> bool {
 }
 
 fn fetch() -> Result<(Vec<u8>, Vec<u8>), Problem> {
+    let mut format = 0;
+    let (bytes, signature) = fetch_preferred(|file| {
+        format = if file == "index-v2.json" { 2 } else { 1 };
+        fetch_format(file)
+    })?;
+    served_as(&bytes, &signature, &KEY, format)?;
+    Ok((bytes, signature))
+}
+
+/// Both formats share one key and sequence, so a signed format-1 index served under the format-2
+/// name would otherwise be accepted and hide every release that carries requirements.
+fn served_as(bytes: &[u8], signature: &[u8], key: &[u8; 32], format: u8) -> Result<(), Problem> {
+    (verify(bytes, signature, key)?.format == format)
+        .then_some(())
+        .ok_or(Problem::Invalid)
+}
+
+fn fetch_preferred(
+    mut fetch_format: impl FnMut(&str) -> Result<(Vec<u8>, Vec<u8>), Problem>,
+) -> Result<(Vec<u8>, Vec<u8>), Problem> {
+    match fetch_format("index-v2.json") {
+        Err(Problem::NotFound) => fetch_format("index.json"),
+        result => result,
+    }
+}
+
+fn fetch_format(file: &str) -> Result<(Vec<u8>, Vec<u8>), Problem> {
+    let initial = format!(
+        "https://github.com/goodtype-notes/Goodtype-Addons/releases/latest/download/{file}"
+    );
     // `latest/download` resolves each asset separately, and GitHub caches those redirects
     // independently: right after a new release it served index-1's index.json with index-2's
     // signature (observed 2026-11-21). So remember which tagged release the index came from and
     // take the signature from that same release.
     let tag = std::cell::RefCell::new(None);
-    let index = update::fetch(URL, MAX_INDEX, |url, redirected| {
-        let allowed = registry_url_allowed(URL, url, redirected);
+    let index = update::fetch(&initial, MAX_INDEX, |url, redirected| {
+        let allowed = registry_url_allowed(&initial, url, redirected);
         if allowed && redirected && tag.borrow().is_none() {
             *tag.borrow_mut() = release_tag(url);
         }
         allowed
     })?;
     let signature_url = match tag.into_inner() {
-        Some(tag) => format!("{RELEASES}/{tag}/index.json.sig"),
-        None => SIG_URL.to_owned(),
+        Some(tag) => format!("{RELEASES}/{tag}/{file}.sig"),
+        None => format!("{initial}.sig"),
     };
     let signature = update::fetch(&signature_url, 64, |url, redirected| {
         registry_url_allowed(&signature_url, url, redirected)
+    })
+    .map_err(|problem| {
+        if problem == Problem::NotFound {
+            Problem::Status
+        } else {
+            problem
+        }
     })?;
     Ok((index, signature))
 }
@@ -529,7 +693,12 @@ fn release_tag(url: &str) -> Option<String> {
     let tag = url
         .strip_prefix(RELEASES)?
         .strip_prefix('/')?
-        .strip_suffix("/index.json")?;
+        .strip_suffix("/index.json")
+        .or_else(|| {
+            url.strip_prefix(RELEASES)?
+                .strip_prefix('/')?
+                .strip_suffix("/index-v2.json")
+        })?;
     let number = tag.strip_prefix("index-")?;
     (!number.is_empty() && number.len() <= 16 && number.bytes().all(|b| b.is_ascii_digit()))
         .then(|| tag.to_owned())
@@ -537,7 +706,15 @@ fn release_tag(url: &str) -> Option<String> {
 
 fn accept(index: &Index, floor: &Floor, now: Duration) -> Result<(), Problem> {
     if index.sequence < floor.sequence
-        || (index.sequence == floor.sequence && index.digest != floor.digest)
+        || (index.sequence == floor.sequence
+            && if index.format == floor.format {
+                index.digest != floor.digest
+            } else {
+                floor
+                    .other_digest
+                    .as_ref()
+                    .is_some_and(|digest| *digest != index.digest)
+            })
     {
         return Err(Problem::Rollback);
     }
@@ -646,14 +823,25 @@ impl Checks {
             let index = verify(&bytes, &signature, key)?;
             let now = clock();
             accept(&index, &registry.floor, now)?;
-            let replaced = !registry.cached || index.sequence > registry.floor.sequence;
+            let replaced = !registry.cached
+                || index.sequence > registry.floor.sequence
+                || index.format != registry.index.format;
             if replaced {
                 // Publish the floor before the index so deleting the cache cannot undo acceptance.
-                state.floor = Some(Floor::from(&index));
+                let mut floor = Floor::from(&index);
+                if index.sequence == registry.floor.sequence {
+                    floor.other_digest = if index.format != registry.floor.format {
+                        Some(registry.floor.digest.clone())
+                    } else {
+                        registry.floor.other_digest.clone()
+                    };
+                }
+                state.floor = Some(floor);
                 save_state(path, &state)?;
                 crate::store::write_json(
                     path,
                     &Cache {
+                        format: index.format,
                         sequence: index.sequence,
                         last_check: None,
                         bytes: STANDARD.encode(bytes),
@@ -686,6 +874,7 @@ fn check(app: &tauri::AppHandle, mode: Check) -> Result<(), Problem> {
     }
     if let Some(index) = result? {
         let registry = Registry {
+            runtime: Some(app.package_info().version.to_string()),
             index,
             ..load(&path, &KEY)?
         };
@@ -695,8 +884,17 @@ fn check(app: &tauri::AppHandle, mode: Check) -> Result<(), Problem> {
                 .and_then(|dir| dir.active())
                 .is_some_and(|(version, _)| registry.release(addon, Some(&version)).is_some())
         });
+        let skipped = CATALOG.iter().any(|addon| {
+            install_dir(app, addon)
+                .ok()
+                .and_then(|dir| dir.active())
+                .is_some_and(|(version, _)| registry.blocked(addon, Some(&version)).is_some())
+        });
         if has_update {
             let _ = app.emit("addon-update-available", ());
+        }
+        if skipped {
+            let _ = app.emit("addon-update-needs-app", ());
         }
     }
     Ok(())
@@ -734,6 +932,180 @@ mod tests {
 
     fn at(date: &str) -> Duration {
         Duration::from_secs(timestamp(date).unwrap().0 as u64)
+    }
+
+    #[test]
+    fn format_two_tolerates_unknown_release_fields_and_features() {
+        let mut input = fixture();
+        input["format"] = json!(2);
+        input["addons"][0]["versions"][0]["minGoodtype"] = json!("0.3.10");
+        let index = signed(&input).unwrap();
+        let release = &index.addons[0].versions[0];
+        assert!(!release.compatible(Some("0.3.9")));
+        assert!(release.compatible(Some("0.3.10")));
+        assert!(release.compatible(Some("0.3.1-local")));
+        assert!(release.compatible(None));
+        let mut legacy = input.clone();
+        legacy["format"] = json!(1);
+        assert!(signed(&legacy).is_err());
+        input["addons"][0]["versions"][0]["requires"] = json!(["future-feature"]);
+        assert!(!signed(&input).unwrap().addons[0].versions[0].compatible(None));
+        input["addons"][0]["versions"][0]["requires"] = json!([]);
+        input["addons"][0]["versions"][0]["future"] = json!(true);
+        assert!(!signed(&input).unwrap().addons[0].versions[0].compatible(None));
+        input["addons"][0]["future"] = json!(true);
+        assert!(signed(&input).is_err());
+    }
+
+    #[test]
+    fn preferred_index_falls_back_only_on_404() {
+        for problem in [
+            Problem::Offline,
+            Problem::Status,
+            Problem::Signature,
+            Problem::Expired,
+            Problem::Rollback,
+            Problem::Invalid,
+            Problem::NotFound,
+        ] {
+            let mut calls = Vec::new();
+            let result = fetch_preferred(|file| {
+                calls.push(file.to_owned());
+                if file == "index-v2.json" {
+                    Err(problem)
+                } else {
+                    Ok((vec![], vec![]))
+                }
+            });
+            assert_eq!(
+                calls.len(),
+                if problem == Problem::NotFound { 2 } else { 1 }
+            );
+            assert_eq!(result.is_ok(), problem == Problem::NotFound);
+        }
+    }
+
+    #[test]
+    fn an_index_must_match_the_file_it_was_served_as() {
+        let signing = SigningKey::from_bytes(&[23; 32]);
+        let key = signing.verifying_key();
+        for format in [1, 2] {
+            let mut input = fixture();
+            input["format"] = json!(format);
+            let bytes = serde_json::to_vec(&input).unwrap();
+            let signature = signing.sign(&bytes).to_bytes();
+            assert_eq!(
+                served_as(&bytes, &signature, key.as_bytes(), format),
+                Ok(())
+            );
+            assert_eq!(
+                served_as(&bytes, &signature, key.as_bytes(), 3 - format),
+                Err(Problem::Invalid)
+            );
+        }
+    }
+
+    #[test]
+    fn cache_records_format_and_preserves_shared_floor_across_restart() {
+        let local = tempfile::tempdir().unwrap();
+        let path = local.path().join("registry.json");
+        let signing = SigningKey::from_bytes(&[19; 32]);
+        let verifying = signing.verifying_key();
+        let key = verifying.as_bytes();
+        // Above the bundled snapshot's sequence 4, whose real digest would otherwise reject the fixture.
+        let time = at("2026-11-22T00:00:00Z");
+        let download = |format, sequence, changed| {
+            let mut input = fixture();
+            input["format"] = json!(format);
+            input["sequence"] = json!(sequence);
+            let mut bytes = serde_json::to_vec(&input).unwrap();
+            if changed {
+                bytes.push(b' ');
+            }
+            let signature = signing.sign(&bytes).to_bytes().to_vec();
+            Ok((bytes, signature))
+        };
+        for format in [1, 2, 1] {
+            Checks::default()
+                .perform(&path, Check::Manual, true, (|| time, key), || {
+                    download(format, 5, false)
+                })
+                .unwrap();
+            let cache: Cache = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            assert_eq!(cache.format, format);
+            assert_eq!(load(&path, key).unwrap().floor.sequence, 5);
+        }
+        for (format, sequence, changed) in [(2, 4, false), (2, 5, true), (1, 5, true)] {
+            assert!(matches!(
+                Checks::default().perform(&path, Check::Manual, true, (|| time, key), || download(
+                    format, sequence, changed
+                )),
+                Err(Problem::Rollback)
+            ));
+        }
+    }
+
+    #[test]
+    fn formats_share_rollback_floor() {
+        let one = signed(&fixture()).unwrap();
+        let mut input = fixture();
+        input["format"] = json!(2);
+        let two = signed(&input).unwrap();
+        let time = at("2026-11-22T00:00:00Z");
+        accept(&two, &Floor::from(&one), time).unwrap();
+        accept(&one, &Floor::from(&two), time).unwrap();
+        input["sequence"] = json!(one.sequence - 1);
+        assert_eq!(
+            accept(&signed(&input).unwrap(), &Floor::from(&one), time),
+            Err(Problem::Rollback)
+        );
+    }
+
+    #[test]
+    fn incompatible_update_keeps_installed_and_selects_newest_compatible() {
+        let mut input = fixture();
+        input["format"] = json!(2);
+        let versions = input["addons"][0]["versions"].as_array_mut().unwrap();
+        for (version, minimum) in [("8.0.0", "0.3.0"), ("9.0.0", "99.0.0")] {
+            let mut release = versions[0].clone();
+            release["version"] = json!(version);
+            release["minGoodtype"] = json!(minimum);
+            versions.push(release);
+        }
+        let index = signed(&input).unwrap();
+        let registry = Registry {
+            runtime: Some("0.3.10".into()),
+            floor: Floor::from(&index),
+            index,
+            last_check: None,
+            last_attempt: None,
+            cached: false,
+        };
+        let time = at("2026-11-22T00:00:00Z");
+        assert_eq!(
+            registry
+                .release_at(&catalog::GOODNOTES, None, false, time)
+                .unwrap()
+                .version,
+            "8.0.0"
+        );
+        assert!(
+            registry
+                .release_at(&catalog::GOODNOTES, Some("8.0.0"), false, time)
+                .is_none()
+        );
+        assert_eq!(
+            registry.blocked(&catalog::GOODNOTES, Some("8.0.0")),
+            Some(Some("99.0.0".into()))
+        );
+        // Rollback consults the same rule: a listed release this app cannot run is refused,
+        // while unlisted versions are left to the manifest checks.
+        assert_eq!(
+            registry.unrunnable(&catalog::GOODNOTES, "9.0.0"),
+            Some(Some("99.0.0".into()))
+        );
+        assert_eq!(registry.unrunnable(&catalog::GOODNOTES, "8.0.0"), None);
+        assert_eq!(registry.unrunnable(&catalog::GOODNOTES, "7.7.7"), None);
     }
 
     #[test]
@@ -888,6 +1260,7 @@ mod tests {
         }
         let index = signed(&input).unwrap();
         let registry = Registry {
+            runtime: None,
             floor: Floor::from(&index),
             index,
             cached: false,
