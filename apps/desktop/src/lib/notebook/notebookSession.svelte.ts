@@ -2026,14 +2026,16 @@ export function createSession(env: SessionEnvironment) {
         const prepared = await prepareAddonReactions(context.root, pageId, committedRevision, baseRevision, retry);
         if (!isCurrent() || pendingTransactions > 0) return;
         let retryNeeded = prepared.retry;
-        if (prepared.failed) status = notice("addons.reactionFailed", { addon: addonText(prepared.failed, get(locale)) });
+        if (prepared.failed) status = notice("addons.reactionFailed", { addon: addonText(prepared.failed, get(locale)), count: prepared.count });
         if (prepared.token) {
           const token = prepared.token;
           replacingPageCount += 1;
           pendingTransactions += 1;
           transactionQueue = transactionQueue.then(async () => {
             if (!isCurrent()) return;
-            const [result, late] = await applyAddonReaction(token);
+            const [result, late, failed, count] = await applyAddonReaction(token);
+            if (failed) status = notice("addons.reactionFailed", { addon: addonText(failed, get(locale)), count });
+            else if (!result && !late && prepared.owner) status = notice("addons.reactionFailed", { addon: addonText(prepared.owner, get(locale)), count: prepared.count });
             retryNeeded ||= late;
             if (!result || !context.current()) return;
             applySnapshot(result.snapshot);
@@ -2041,7 +2043,9 @@ export function createSession(env: SessionEnvironment) {
             canUndo = result.canUndo;
             canRedo = result.canRedo;
             editGeneration += 1;
-          }).catch(() => {}).finally(() => {
+          }).catch(() => {
+            if (prepared.owner) status = notice("addons.reactionFailed", { addon: addonText(prepared.owner, get(locale)), count: prepared.count });
+          }).finally(() => {
             pendingTransactions -= 1;
             replacingPageCount -= 1;
           });
