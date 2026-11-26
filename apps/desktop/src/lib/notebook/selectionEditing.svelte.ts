@@ -9,6 +9,10 @@ import { finishInkPreview, inkPreviewBounds, type InkPreview } from "../ink/prev
 import type { NotebookSnapshot } from "../ipc/types";
 
 import { pageToScreen, rotatedVector, type Point } from "../geometry/coordinates";
+import { alignDeltas, distributeDeltas, unionBounds, type AlignMode, type AlignUnit, type DistributeAxis } from "../geometry/align";
+import { beginSnap, createMoveSnapper, type ObjectMoveSnap, type SnapFrame, type SnapGuide, type SnapSession } from "../geometry/alignSnap";
+import { pagePorts } from "./addonPorts";
+import type { Bounds } from "../ink/selection";
 import { placeFloatingToolbar, type ViewRect } from "../geometry/placement";
 
 import { type PageObject, type Stroke } from "../model";
@@ -206,6 +210,63 @@ export function createSelection(env: SelectionEnvironment) {
     env.status = notice("workspace.selectedItems", { "value1": inkIds.length + lassoObjectIds.length });
   }
 
+  /** Page bounds, rotation included, of every shape, image and text block on the page, by id. */
+  function objectBoxes(): Map<string, Bounds> {
+    const live = new Set([...env.shapes, ...env.images, ...env.typstBlocks].map(object => object.id));
+    return new Map(lassoItems().flatMap(item => {
+      const box = live.has(item.id) ? combinedBounds([item], null) : null;
+      return box ? [[item.id, box] as const] : [];
+    }));
+  }
+
+  /**
+   * Each loose object, and each whole group as one, with its box and the ports it exposes. A group
+   * only some of whose children are being moved has no frame of its own: its children stand
+   * alone, so the dragged child moves with its own box and ports and its siblings stay targets.
+   */
+  function snapFrames(boxes: ReadonlyMap<string, Bounds>, moving: ReadonlySet<string>): SnapFrame[] {
+    const grouped = new Set<string>();
+    const frames: SnapFrame[] = [];
+    for (const group of shapeGroups) {
+      const dragged = group.childIds.filter(id => moving.has(id)).length;
+      if (dragged > 0 && dragged < group.childIds.length) continue;
+      const parts = group.childIds.flatMap(id => boxes.get(id) ?? []);
+      if (!parts.length) continue;
+      group.childIds.forEach(id => grouped.add(id));
+      frames.push({ ids: [group.id, ...group.childIds], box: unionBounds(parts), ports: pagePorts(group) });
+    }
+    const ports = new Map(env.shapes.map(shape => [shape.id, pagePorts({ type: "shape", ...shape })]));
+    for (const [id, box] of boxes) if (!grouped.has(id)) frames.push({ ids: [id], box, ports: ports.get(id) ?? [] });
+    return frames;
+  }
+
+  /** The index for one drag of these objects and ink strokes, built once at its first sample. */
+  function dragSession(ids: readonly string[], strokeIds: readonly string[]): SnapSession | null {
+    const boxes = objectBoxes();
+    const ink = strokeIds.length ? selectionBounds(env.strokes, [...strokeIds]) : null;
+    const parts = [...ids.flatMap(id => boxes.get(id) ?? []), ...(ink ? [ink] : [])];
+    if (!parts.length) return null;
+    const moving = new Set(ids);
+    const frames = snapFrames(boxes, moving);
+    return beginSnap(frames, { ids: moving, box: unionBounds(parts),
+      ports: frames.filter(frame => frame.ids.some(id => moving.has(id))).flatMap(frame => frame.ports) });
+  }
+
+  /** The alignment guides of the drag in progress: ephemeral, in page points, never saved. */
+  let snapGuides = $state.raw<SnapGuide[]>([]);
+  const snapper = createMoveSnapper({
+    enabled: () => env.settings.snapToObjects !== false,
+    zoom: () => env.zoom,
+    onGuides: guides => { snapGuides = guides; },
+  });
+  /** What a single object's own drag (shape, image, text block, ink) calls to snap its moves. */
+  const moveSnap: ObjectMoveSnap = {
+    begin: (ids, strokeIds = []) => snapper.begin(() => dragSession(ids, strokeIds)),
+    adjust: snapper.adjust,
+    end: snapper.end,
+  };
+  let snapPending = false;
+
   let mixedGesture: { current: () => boolean; objects: Set<string>; strokes: string[] } | null = null;
   let transformPreview = $state.raw<{
     objects: ReadonlySet<string>; ink: InkPreview; rotation: number;
@@ -237,14 +298,29 @@ export function createSelection(env: SelectionEnvironment) {
     const { current } = env.editContext();
     mixedGesture = { current, objects: new Set(lassoObjectIds), strokes: [...selectedStrokeIds] };
     transformPreview = null;
+    snapPending = true;
   }
 
-  function previewMixedTransform(delta: Point, scale: number, anchor: Point, rotation = 0) {
+  /**
+   * `pointer` marks a pointer drag, the only kind that snaps: a keyboard nudge or a +/- scale
+   * lands exactly where it was asked to. Only a plain move (no scale, no rotation) snaps.
+   */
+  function previewMixedTransform(delta: Point, scale: number, anchor: Point, rotation = 0, pointer?: { altKey: boolean }) {
     if (!mixedGesture?.current()) return;
+    if (pointer && scale === 1 && rotation === 0) {
+      if (snapPending) {
+        snapPending = false;
+        const { objects, strokes } = mixedGesture;
+        snapper.begin(() => dragSession([...objects], strokes));
+      }
+      delta = snapper.adjust(delta, pointer.altKey);
+    }
     transformPreview = { objects: mixedGesture.objects, ink: { ids: mixedGesture.strokes, delta, scale, anchor }, rotation };
   }
 
   function endMixedTransform(cancelled: boolean, debounce = false) {
+    snapPending = false;
+    snapper.end();
     const gesture = mixedGesture;
     const preview = transformPreview;
     const nextShapes = previewShapes, nextImages = previewImages, nextBlocks = previewBlocks;
@@ -949,6 +1025,86 @@ export function createSelection(env: SelectionEnvironment) {
     env.queueCommit(notice("workspace.pastedImage"));
   }
 
+  /** How many things Align and Distribute would move: whole groups, loose objects, the ink. */
+  const alignCount = $derived.by(() => {
+    const live = new Set([...env.shapes, ...env.images, ...env.typstBlocks].map(object => object.id));
+    const chosen = new Set(lassoObjectIds);
+    const taken = new Set<string>();
+    let count = selectedStrokeIds.length ? 1 : 0;
+    for (const group of shapeGroups) {
+      if (!group.childIds.every(id => chosen.has(id))) continue;
+      group.childIds.forEach(id => taken.add(id));
+      count++;
+    }
+    return count + lassoObjectIds.filter(id => live.has(id) && !taken.has(id)).length;
+  });
+
+  const INK_UNIT = "\u0000ink";
+
+  /** The selection as things that move whole, with the rotated page box of each. */
+  function alignUnits() {
+    const boxes = objectBoxes();
+    const chosen = new Set(lassoObjectIds);
+    const taken = new Set<string>();
+    const units: (AlignUnit & { members: string[]; group?: (typeof shapeGroups)[number] })[] = [];
+    for (const group of shapeGroups) {
+      if (!group.childIds.every(id => chosen.has(id))) continue;
+      const parts = group.childIds.flatMap(id => boxes.get(id) ?? []);
+      if (!parts.length) continue;
+      group.childIds.forEach(id => taken.add(id));
+      units.push({ id: group.id, box: unionBounds(parts), members: [...group.childIds], group });
+    }
+    for (const id of lassoObjectIds) {
+      const box = boxes.get(id);
+      if (box && !taken.has(id)) units.push({ id, box, members: [id] });
+    }
+    const ink = selectedStrokeIds.length ? selectionBounds(env.strokes, selectedStrokeIds) : null;
+    if (ink) units.push({ id: INK_UNIT, box: ink, members: [] });
+    return units;
+  }
+
+  /** Applies one delta per unit as a single change, so one undo step puts the selection back. */
+  function applyUnitDeltas(deltas: Map<string, Point>, label: UiText) {
+    const shifts = new Map<string, Point>();
+    const edits = new Map(groupEdits);
+    let ink: Point | null = null;
+    for (const unit of alignUnits()) {
+      const delta = deltas.get(unit.id);
+      if (!delta || (Math.abs(delta.x) < 1e-9 && Math.abs(delta.y) < 1e-9)) continue;
+      unit.members.forEach(id => shifts.set(id, delta));
+      if (unit.group) edits.set(unit.group.id, { x: unit.group.x + delta.x, y: unit.group.y + delta.y,
+        scale: unit.group.scale, rotation: unit.group.rotation });
+      if (unit.id === INK_UNIT) ink = delta;
+    }
+    if (!shifts.size && !ink) return;
+    groupEdits = edits;
+    env.shapes = env.shapes.map(shape => {
+      const delta = shifts.get(shape.id);
+      return delta ? { ...shape, x: shape.x + delta.x, y: shape.y + delta.y } : shape;
+    });
+    env.images = env.images.map(image => {
+      const delta = shifts.get(image.id);
+      return delta ? { ...image, x: image.x + delta.x, y: image.y + delta.y } : image;
+    });
+    env.typstBlocks = env.typstBlocks.map(block => {
+      const delta = shifts.get(block.id);
+      return delta ? { ...block, transform: { ...block.transform, x: block.transform.x + delta.x, y: block.transform.y + delta.y } } : block;
+    });
+    if (ink) env.strokes = moveSelected(env.strokes, selectedStrokeIds, ink);
+    env.queueCommit(label);
+    env.status = label;
+  }
+
+  function alignSelection(mode: AlignMode) {
+    if (alignCount < 2) return;
+    applyUnitDeltas(alignDeltas(alignUnits(), mode), notice("selectionMenu.alignedSelection"));
+  }
+
+  function distributeSelection(axis: DistributeAxis) {
+    if (alignCount < 3) return;
+    applyUnitDeltas(distributeDeltas(alignUnits(), axis), notice("selectionMenu.distributedSelection"));
+  }
+
   function selectedObjectId(): string | null {
     return selectedTypstId ?? selectedImageId ?? selectedShapeId;
   }
@@ -1154,6 +1310,11 @@ export function createSelection(env: SelectionEnvironment) {
     get groupEdits() { return groupEdits; },
     set groupEdits(value: typeof groupEdits) { groupEdits = value; },
     lassoSelection,
+    moveSnap,
+    get snapGuides() { return snapGuides; },
+    get alignCount() { return alignCount; },
+    alignSelection,
+    distributeSelection,
     beginMixedTransform,
     previewMixedTransform,
     endMixedTransform,

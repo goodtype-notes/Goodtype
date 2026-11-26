@@ -135,6 +135,8 @@
     shapeConstrain?: boolean;
     /** Line ends and rectangle corners meet nearby shape ends; Alt bypasses it. */
     shapeEndSnap?: boolean;
+    /** Snaps a dragged ink selection to the objects on the page; Alt bypasses it. */
+    moveSnap?: import("../geometry/alignSnap").ObjectMoveSnap;
     drawAndHoldShapes?: boolean;
     heldLineMinimumPt?: number;
     eraseRadiusPt?: number;
@@ -200,6 +202,7 @@
     },
     shapeConstrain = false,
     shapeEndSnap = true,
+    moveSnap,
     drawAndHoldShapes = true,
     heldLineMinimumPt = 6,
     eraseRadiusPt = 8,
@@ -548,6 +551,7 @@
       start: point,
       initial: localStrokes,
     };
+    moveSnap?.begin([], localSelection);
   }
 
   function pointerMove(event: PointerEvent): void {
@@ -589,9 +593,9 @@
       } else if (gesture.taken) eraseAt(gesture.taken, pagePoint(event));
     } else if (gesture.kind === "move") {
       const point = pagePoint(event);
-      localPreview = { ids: localSelection, delta: {
-        x: point.x - gesture.start.x, y: point.y - gesture.start.y,
-      }, scale: 1, anchor: { x: 0, y: 0 } };
+      const delta = { x: point.x - gesture.start.x, y: point.y - gesture.start.y };
+      localPreview = { ids: localSelection, delta: moveSnap ? moveSnap.adjust(delta, event.altKey) : delta,
+        scale: 1, anchor: { x: 0, y: 0 } };
     } else {
       const point = pagePoint(event);
       const distance = Math.hypot(point.x - gesture.anchor.x, point.y - gesture.anchor.y);
@@ -718,6 +722,7 @@
   }
 
   function finishPointer(pointerId: number): void {
+    moveSnap?.end();
     clearHoldTimer();
     clearSplineFrame();
     cancelEraseFrame();
@@ -921,6 +926,9 @@
     if (!immediateFrame) immediateFrame = requestAnimationFrame(() => redrawImmediate());
   }
   onDestroy(() => {
+    // A selection drag the surface never gets to end (a page change unmounts it) must not leave its
+    // guides on the page.
+    if (gesture?.kind === "move") moveSnap?.end();
     if (immediateFrame) cancelAnimationFrame(immediateFrame);
     cancelEraseFrame();
     clearHoldTimer();

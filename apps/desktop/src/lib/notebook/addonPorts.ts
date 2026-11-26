@@ -1,12 +1,16 @@
-import { transformPoint, type Point } from "../geometry/coordinates";
-import type { PageObject } from "../model";
+import { transformPoint, type Point, type Similarity } from "../geometry/coordinates";
+import type { PageObject, ShapeGeometry } from "../model";
 
-function localPorts(object: PageObject): Point[] {
+/** What carries ports: a canonical shape or group, or a live shape view given `type: "shape"`. */
+export type PortSource = Similarity & { type: string; ports?: Point[]; geometry?: ShapeGeometry };
+
+function localPorts(object: PortSource): Point[] {
   if (object.type !== "shape" && object.type !== "group") return [];
   if (object.ports !== undefined) return object.ports;
   if (object.type === "group") return [];
 
   const geometry = object.geometry;
+  if (!geometry) return [];
   switch (geometry.kind) {
     case "line":
       return [geometry.start, geometry.end];
@@ -27,7 +31,7 @@ function localPorts(object: PageObject): Point[] {
   }
 }
 
-export function pagePorts(object: PageObject): Point[] {
+export function pagePorts(object: PortSource): Point[] {
   return localPorts(object).map((port) => transformPoint(object, port));
 }
 

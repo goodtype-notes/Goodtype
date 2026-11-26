@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { t } from "../i18n";
   import { keepOnPage } from "../geometry/placement";
   import { rotatedVector } from "../geometry/coordinates";
+  import type { ObjectMoveSnap } from "../geometry/alignSnap";
 
   type Position = { x: number; y: number };
   type Gesture =
@@ -35,6 +37,8 @@
     readingOrder?: number;
     selected?: boolean;
     toPageDelta?: (screenDx: number, screenDy: number) => Position;
+    /** Pulls a dragged image onto other objects' edges, centres and ports; Alt bypasses it. */
+    moveSnap?: ObjectMoveSnap;
     /** The sheet this image has to stay reachable on. */
     pageWidthPt: number;
     pageHeightPt: number;
@@ -56,6 +60,7 @@
     zIndex = 0,
     readingOrder = 0,
     selected = false,
+    moveSnap,
     toPageDelta = (screenDx, screenDy) => ({ x: screenDx, y: screenDy }),
     pageWidthPt,
     pageHeightPt,
@@ -77,6 +82,12 @@
     }
   });
 
+  // A drag the image never gets to end (undo, delete or a page change unmounts it) must not leave
+  // its guides on the page.
+  onDestroy(() => {
+    if (gesture?.kind === "move") moveSnap?.end();
+  });
+
   function beginMove(event: PointerEvent) {
     if (event.button !== 0) return;
     onSelect?.();
@@ -90,6 +101,7 @@
       x: previewX,
       y: previewY,
     };
+    moveSnap?.begin([id]);
   }
 
   function beginScale(event: PointerEvent) {
@@ -114,14 +126,22 @@
       event.clientY - gesture.clientY,
     );
     if (gesture.kind === "move") {
+      const { x: startX, y: startY } = gesture;
+      let held: Position = { x: startX, y: startY };
       // Clamped while dragging rather than on drop, so the limit is something you feel rather
-      // than something that snaps the image back after you let go.
-      const held = keepOnPage(
-        { x: gesture.x + delta.x, y: gesture.y + delta.y },
-        { widthPt: widthPt * previewScale, heightPt: heightPt * previewScale },
-        { widthPt: pageWidthPt, heightPt: pageHeightPt },
-        undefined, rotation,
-      );
+      // than something that snaps the image back after you let go. The snapper measures its
+      // guides at the clamped spot.
+      const clamp = (moved: Position): Position => {
+        held = keepOnPage(
+          { x: startX + moved.x, y: startY + moved.y },
+          { widthPt: widthPt * previewScale, heightPt: heightPt * previewScale },
+          { widthPt: pageWidthPt, heightPt: pageHeightPt },
+          undefined, rotation,
+        );
+        return { x: held.x - startX, y: held.y - startY };
+      };
+      if (moveSnap) moveSnap.adjust(delta, event.altKey, clamp);
+      else clamp(delta);
       previewX = held.x;
       previewY = held.y;
     } else {
@@ -133,11 +153,13 @@
     if (!gesture || event.pointerId !== gesture.pointerId) return;
     if (gesture.kind === "move") onMove?.({ x: previewX, y: previewY });
     else onScale?.(previewScale);
+    moveSnap?.end();
     gesture = null;
   }
 
   function cancel(event: PointerEvent) {
     if (!gesture || event.pointerId !== gesture.pointerId) return;
+    moveSnap?.end();
     gesture = null;
     previewX = x;
     previewY = y;

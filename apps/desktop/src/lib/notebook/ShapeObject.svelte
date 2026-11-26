@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from "../i18n";
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import ShapeMarks from "./ShapeMarks.svelte";
   import type { Point } from "../geometry/coordinates";
   import {
@@ -21,6 +21,7 @@
   import { describeShape, shapeBounds, shapeCaps, shapePath } from "../shape/geometry";
   import { toLocalPoint, toPagePoint } from "../shape/hit";
   import { SNAP_RADIUS_SCREEN_PT, snapPoint, snapTargets } from "../shape/snap";
+  import type { ObjectMoveSnap } from "../geometry/alignSnap";
   import type { ShapeEditCommit, ShapeView } from "./pageView";
 
   import { nearbyPorts, type Port } from "./addonPorts";
@@ -50,6 +51,7 @@
     zoom = 1,
     endSnap = false,
     snapShapes = [],
+    moveSnap,
     toPageDelta,
     onSelect,
     onChange,
@@ -73,6 +75,8 @@
     /// Whether a dragged line end meets the ends and corners of `snapShapes`; Alt bypasses it.
     endSnap?: boolean;
     snapShapes?: readonly ShapeView[];
+    /// Pulls a dragged shape onto other objects' edges, centres and ports; Alt bypasses it.
+    moveSnap?: ObjectMoveSnap;
     toPageDelta: (screenDx: number, screenDy: number) => Point;
     onSelect?: () => void;
     onChange?: (shape: ShapeView, commit?: ShapeEditCommit) => void;
@@ -142,6 +146,7 @@
         ? snapTargets(snapShapes, preview.id)
         : [],
     };
+    if (kind === "move") moveSnap?.begin([preview.id]);
   }
 
   function update(event: PointerEvent) {
@@ -149,7 +154,7 @@
     event.preventDefault();
     const page = toPageDelta(event.clientX - gesture.clientX, event.clientY - gesture.clientY);
     if (gesture.kind === "move") {
-      preview = moveShape(gesture.start, page);
+      preview = moveShape(gesture.start, moveSnap ? moveSnap.adjust(page, event.altKey) : page);
       return;
     }
     // Rotation is decided in page space, because the angle is between the pointer and the shape
@@ -234,7 +239,14 @@
     clearGesture();
   }
 
+  // A drag the shape never gets to end (undo, delete or a page change unmounts it) must not leave
+  // its guides on the page.
+  onDestroy(() => {
+    if (gesture?.kind === "move") moveSnap?.end();
+  });
+
   function clearGesture() {
+    moveSnap?.end();
     gesture = null;
     snapRing = null;
     portRings = [];

@@ -263,6 +263,17 @@ export function settingGroups(t: Translator = translate, fonts: string[] = [], a
         },
       },
       {
+        id: "snapToObjects",
+        label: t("settings.snapToObjects"),
+        hint: t("settings.snapToObjectsHint"),
+        keywords: t("settings.snapToObjectsSearch").split(" "),
+        control: {
+          kind: "toggle",
+          read: (settings) => settings.snapToObjects,
+          write: (settings, value) => ({ ...settings, snapToObjects: value }),
+        },
+      },
+      {
         id: "pullToAddPage",
         label: t("workspace.pullPastTheLastPageToAdd"),
         hint: t("workspace.keepScrollingAtTheEndOfThe"),

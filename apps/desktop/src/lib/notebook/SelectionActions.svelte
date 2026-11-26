@@ -7,6 +7,7 @@
   import OverflowMenu from "../workspace/OverflowMenu.svelte";
   import { populated, type MenuAction, type MenuSection } from "../workspace/menu";
   import { placeFloatingToolbar } from "../geometry/placement";
+  import type { AlignMode, DistributeAxis } from "../geometry/align";
 
   /**
    * The bar beside a selection.
@@ -51,6 +52,12 @@
     onPaste?: () => void;
     pasteDisabled?: boolean;
     onDuplicate?: () => void;
+    /** Two or more objects: line them up or space them evenly. `count` is how many move as one. */
+    align?: {
+      count: number;
+      onAlign: (mode: AlignMode) => void;
+      onDistribute: (axis: DistributeAxis) => void;
+    };
     shapeCaps?: {
       startCap?: ShapeCap;
       endCap?: ShapeCap;
@@ -86,6 +93,7 @@
     onPaste,
     pasteDisabled = false,
     onDuplicate,
+    align,
     shapeCaps,
     element = $bindable(),
   }: Props = $props();
@@ -145,29 +153,65 @@
     },
   ]));
 
-  let moreOpen = $state(false);
-  let moreButton = $state<HTMLButtonElement>();
-  let morePopover = $state<HTMLElement>();
+  const ALIGN_ICONS = {
+    left: "M4 4v16M8 7h12M8 14h7",
+    centre: "M12 4v16M6 8h12M8.5 15h7",
+    right: "M20 4v16M4 7h12M9 14h7",
+    top: "M4 4h16M7 8v12M14 8v7",
+    middle: "M4 12h16M8 6v12M15 8.5v7",
+    bottom: "M4 20h16M7 4v12M14 9v7",
+    horizontal: "M4 4v16M20 4v16M9 8h6v8H9z",
+    vertical: "M4 4h16M4 20h16M8 9h8v6H8z",
+  };
 
-  async function toggleMore() {
-    if (moreOpen) { closeMore(); return; }
-    moreOpen = true;
+  /** Align and Distribute as a menu of its own, so the bar keeps one button for eight actions. */
+  const alignMenu = $derived<MenuSection[]>(align && align.count >= 2 ? populated([
+    {
+      entries: [
+        ...entry("align-left", $t("selectionMenu.alignLeft"), ALIGN_ICONS.left, () => align.onAlign("left")),
+        ...entry("align-centre", $t("selectionMenu.alignCentre"), ALIGN_ICONS.centre, () => align.onAlign("centre")),
+        ...entry("align-right", $t("selectionMenu.alignRight"), ALIGN_ICONS.right, () => align.onAlign("right")),
+        ...entry("align-top", $t("selectionMenu.alignTop"), ALIGN_ICONS.top, () => align.onAlign("top")),
+        ...entry("align-middle", $t("selectionMenu.alignMiddle"), ALIGN_ICONS.middle, () => align.onAlign("middle")),
+        ...entry("align-bottom", $t("selectionMenu.alignBottom"), ALIGN_ICONS.bottom, () => align.onAlign("bottom")),
+      ],
+    },
+    {
+      entries: [
+        ...entry("distribute-horizontal", $t("selectionMenu.distributeHorizontally"), ALIGN_ICONS.horizontal,
+          () => align.onDistribute("horizontal"), { disabled: align.count < 3 }),
+        ...entry("distribute-vertical", $t("selectionMenu.distributeVertically"), ALIGN_ICONS.vertical,
+          () => align.onDistribute("vertical"), { disabled: align.count < 3 }),
+      ],
+    },
+  ]) : []);
+
+  let openMenu = $state<"more" | "align" | null>(null);
+  let moreButton = $state<HTMLButtonElement>();
+  let alignButton = $state<HTMLButtonElement>();
+  let popover = $state<HTMLElement>();
+
+  async function toggleMenu(kind: "more" | "align") {
+    if (openMenu === kind) { closeMenu(); return; }
+    openMenu = kind;
     await tick();
-    const menu = morePopover?.querySelector<HTMLElement>(".overflow-menu");
-    if (!morePopover || !menu || !moreButton) return;
+    const button = kind === "align" ? alignButton : moreButton;
+    const menu = popover?.querySelector<HTMLElement>(".overflow-menu");
+    if (!popover || !menu || !button) return;
     // The top layer, so a bar near the edge of the page cannot clip its own menu.
-    morePopover.showPopover();
-    const placed = placeFloatingToolbar(moreButton.getBoundingClientRect(), menu.getBoundingClientRect(),
+    popover.showPopover();
+    const placed = placeFloatingToolbar(button.getBoundingClientRect(), menu.getBoundingClientRect(),
       { left: 0, top: 0, right: innerWidth, bottom: innerHeight, width: innerWidth, height: innerHeight }, 6);
-    morePopover.style.left = `${placed.left}px`;
-    morePopover.style.top = `${placed.top}px`;
+    popover.style.left = `${placed.left}px`;
+    popover.style.top = `${placed.top}px`;
     menu.querySelector<HTMLElement>("button:not(:disabled)")?.focus();
   }
 
-  function closeMore() {
+  function closeMenu() {
     const restore = element?.contains(document.activeElement);
-    moreOpen = false;
-    if (restore) moreButton?.focus();
+    const button = openMenu === "align" ? alignButton : moreButton;
+    openMenu = null;
+    if (restore) button?.focus();
   }
 </script>
 
@@ -229,24 +273,42 @@
       </svg>
     </button>
   {/if}
+  {#if alignMenu.length}
+    <button
+      bind:this={alignButton}
+      type="button"
+      class:active={openMenu === "align"}
+      title={$t("selectionMenu.align")}
+      aria-label={$t("selectionMenu.align")}
+      aria-haspopup="menu"
+      aria-expanded={openMenu === "align"}
+      onclick={() => void toggleMenu("align")}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d={ALIGN_ICONS.left} /><path d="M8 18h9" /></svg>
+    </button>
+  {/if}
   {#if more.length}
     <button
       bind:this={moreButton}
       type="button"
-      class:active={moreOpen}
+      class:active={openMenu === "more"}
       title={$t("selectionMenu.more")}
       aria-label={$t("selectionMenu.more")}
       aria-haspopup="menu"
-      aria-expanded={moreOpen}
-      onclick={() => void toggleMore()}
+      aria-expanded={openMenu === "more"}
+      onclick={() => void toggleMenu("more")}
     >
       <svg class="solid" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="19" cy="12" r="1.7"></circle></svg>
     </button>
-    {#if moreOpen}
-      <div class="more-popover" popover="manual" bind:this={morePopover}>
-        <OverflowMenu compact title={$t("selectionMenu.more")} sections={more} onClose={closeMore} trigger={moreButton} />
-      </div>
-    {/if}
+  {/if}
+  {#if openMenu}
+    <div class="more-popover" popover="manual" bind:this={popover}>
+      {#if openMenu === "align"}
+        <OverflowMenu compact title={$t("selectionMenu.align")} sections={alignMenu} onClose={closeMenu} trigger={alignButton} />
+      {:else}
+        <OverflowMenu compact title={$t("selectionMenu.more")} sections={more} onClose={closeMenu} trigger={moreButton} />
+      {/if}
+    </div>
   {/if}
 </div>
 
