@@ -11,8 +11,9 @@
     const subscription = listen("addon-update-available", () => {
       addonNotice = notice("addons.manager.updateAvailable");
     });
+    const skipped = listen("addon-update-needs-app", () => { addonNotice = notice("addons.store.skippedUpdate"); });
     void subscription.catch(() => {}).then(() => checkAddonRegistry("startup")).catch(() => {});
-    return () => { void subscription.then(unlisten => unlisten()).catch(() => {}); };
+    return () => { void skipped.then(unlisten => unlisten()).catch(() => {}); void subscription.then(unlisten => unlisten()).catch(() => {}); };
   });
 </script>
 

@@ -18,7 +18,7 @@
   import ReadmeView from "./ReadmeView.svelte";
   import { addonAction, downloadPercent, matchesAddon } from "./storeModel";
 
-  let { onClose }: { onClose: () => void } = $props();
+  let { onClose, onUpdateApp, beta = false }: { onClose: () => void; onUpdateApp: () => void; beta?: boolean } = $props();
   let contributions = $state.raw<AddonContribution[]>([]);
   let manager = $state.raw<AddonManager>();
   let packs = $state.raw<ContentPack[]>([]);
@@ -500,6 +500,11 @@
             <div class="tile-content">
               <button type="button" class="tile-open" bind:this={tileButtons[addon.id]} onclick={() => void openDetail(addon)}>{name}</button>
               <p class="tile-summary">{summary(addon, $locale)}</p>
+              {#if addon.needsNewerApp}
+                <p role="status">{addon.minGoodtype ? $t("addons.store.minimumApp", { version: addon.minGoodtype }) : $t("addons.store.newerApp")}</p>
+                {#if !beta}<p>{$t("addons.store.minimumBeta")}</p>{/if}
+                <button type="button" style="position: relative; z-index: 1" onclick={onUpdateApp}>{$t("addons.store.updateApp")}</button>
+              {/if}
               <div class="tile-bottom">
                 <span class="meta">
                   {[kindLabel, release?.version ?? addon.installed, release && megabytes(release.sizeBytes),

@@ -3597,7 +3597,7 @@
     </div>
   {/each}
 {/snippet}
-{#if addonsOpen}<AddonStore onClose={closeAddons} />{/if}
+{#if addonsOpen}<AddonStore onClose={closeAddons} beta={settings.includeBetaReleases} onUpdateApp={() => { closeAddons(); settingsInitialGroup = "updates"; settingsOpen = true; }} />{/if}
 {#if shapeGhost}
   {@const pen = shapePen()}
   {@const margin = previewMargin(shapeGhost, pen.widthPt)}
