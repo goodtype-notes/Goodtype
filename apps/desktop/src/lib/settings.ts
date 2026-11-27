@@ -110,7 +110,7 @@ export type HelperPermissions = { pages: HelperPermission; presets: HelperPermis
 
 export type AppSettings = {
   themeId: string;
-  aiHelper: { enabled: boolean; usage: "low" | "balanced" | "detailed"; webSearch: boolean; codexPath: string | null; codexModel: string | null; allowedMcpServers: string[]; permissions: HelperPermissions };
+  aiHelper: { enabled: boolean; usage: "low" | "balanced" | "detailed"; webSearch: boolean; codexPath: string | null; codexModel: string | null; allowedMcpServers: string[]; permissions: HelperPermissions; pageLimit: number };
   uiLanguage: "en" | "de";
   /** Resolved into ordinary Typst source when a new movable text block is created. */
   inlineTextFont: string;
@@ -194,7 +194,7 @@ export type AppSettings = {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   themeId: "",
-  aiHelper: { enabled: false, usage: "balanced", webSearch: true, codexPath: null, codexModel: null, allowedMcpServers: [], permissions: { pages: "ask", presets: "ask", pageNames: "allow" } },
+  aiHelper: { enabled: false, usage: "balanced", webSearch: true, codexPath: null, codexModel: null, allowedMcpServers: [], permissions: { pages: "ask", presets: "ask", pageNames: "allow" }, pageLimit: 8 },
   uiLanguage: "en",
   inlineTextFont: "",
   penPresets: [
@@ -345,6 +345,12 @@ export function withRecentColor(recent: string[], color: string): string[] {
   );
 }
 
+/** Pages one AI request may hand over: a whole number from 1 to 100, 8 when unset. Rust clamps too. */
+export function clampPageLimit(value: unknown): number {
+  const n = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : DEFAULT_SETTINGS.aiHelper.pageLimit;
+  return Math.min(100, Math.max(1, n));
+}
+
 export async function loadSettings(tauriAvailable: boolean): Promise<AppSettings> {
   if (!tauriAvailable) return structuredClone(DEFAULT_SETTINGS);
   try {
@@ -353,6 +359,7 @@ export async function loadSettings(tauriAvailable: boolean): Promise<AppSettings
     aiHelper.permissions = { ...DEFAULT_SETTINGS.aiHelper.permissions, ...loaded.aiHelper?.permissions };
     // Null is the Goodtype Luna default; preserve every nonblank explicit choice.
     if (!aiHelper.codexModel?.trim()) aiHelper.codexModel = null;
+    aiHelper.pageLimit = clampPageLimit(aiHelper.pageLimit);
     return { ...loaded, aiHelper };
   } catch {
     return structuredClone(DEFAULT_SETTINGS);
