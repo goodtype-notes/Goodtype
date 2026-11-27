@@ -9,7 +9,15 @@
 // Steps are computed as `first + index * spacing` rather than accumulated, so the two
 // implementations agree bit for bit instead of drifting one rounding error at a time.
 
-import type { Area, PageGeometry, PageTemplate, TemplateElement } from "../model";
+import type { PageBackground, Area, PageGeometry, PageTemplate, TemplateElement } from "../model";
+
+/** Keep every ruling parameter when only the paper colour changes. Imported pages stay intact. */
+export function recolorBackground(background: PageBackground, color: string): PageBackground {
+  if (background.kind === "pdf") return background;
+  return background.kind === "template"
+    ? { ...background, template: { ...background.template, backgroundColor: color } }
+    : { ...background, color };
+}
 
 /** Matches `MIN_SPACING_PT`: below this a template stops being paper and becomes a fill pattern. */
 export const MIN_SPACING_PT = 3;

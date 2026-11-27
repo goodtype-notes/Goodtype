@@ -1303,6 +1303,29 @@ export function createSession(env: SessionEnvironment) {
     }
   }
 
+  async function paperBefore(position: PagePosition) {
+    const manifest = notebookManifest;
+    if (!manifest) return null;
+    const index = position.kind === "last" ? manifest.pages.length :
+      manifest.pages.findIndex(page => page.id === position.pageId) + (position.kind === "after" ? 1 : 0);
+    for (const page of manifest.pages.slice(0, index).reverse()) {
+      const snapshot = page.id === activePageId ? buildSnapshot() : await openPage(root, page.id);
+      if (snapshot.page.background.kind !== "pdf") return { background: snapshot.page.background, geometry: snapshot.page.geometry };
+    }
+    return manifest.defaultPage;
+  }
+
+  async function changeBackground(background: PageBackground) {
+    if (busy || transactionFailed || !pageOpen || activeSnapshot?.page.calculation ||
+        activeBackground.kind === "pdf" || background.kind === "pdf") return;
+    await replacingPage(async () => {
+      if (!(await persist())) return;
+      activeBackground = background;
+      queueCommit(notice("workspace.changedBackground"));
+      await transactionQueue;
+    });
+  }
+
   /**
    * Add one page, or a run of them.
    *
@@ -2681,6 +2704,8 @@ export function createSession(env: SessionEnvironment) {
     routeHistory,
     scrollToPage,
     persist,
+    changeBackground,
+    paperBefore,
     exportPdf,
     closePage,
     showLibrary,

@@ -21,6 +21,8 @@
    * Position and paper are remembered by the caller rather than reset each time it opens.
    */
   let {
+    editBackground = false,
+    trigger,
     generators,
     where,
     groups,
@@ -41,6 +43,8 @@
     onOrientationChange,
     onClose,
   }: {
+    editBackground?: boolean;
+    trigger?: HTMLElement;
     generators?: Snippet<[import("../model").PagePosition]>;
     where: AddPageWhere;
     groups: AddPageGroup[];
@@ -143,7 +147,7 @@
   );
 
   const addLabel = $derived(
-    behavior.pdf ? $t("workspace.importPDF")
+    editBackground ? $t("workspace.applyBackground") : behavior.pdf ? $t("workspace.importPDF")
       : behavior.kind === "calculation-import" ? $t("calculation.import")
       : behavior.calculation ? (selected?.id === "calculation-part" ? $t("calculation.continuePage") : $t("calculation.addPage"))
       : count > 1 ? $t("workspace.addPages", { count }) : $t("workspace.addPage"),
@@ -153,12 +157,12 @@
     {
       key: "size",
       label: $t("workspace.size"),
-      value: behavior.calculation ? $t("calculation.geometry") : behavior.pdf ? $t("calculation.fromPDF") : `${sizes.find((size) => size.id === sizeId)?.name ?? ""} ${orientation === "portrait" ? $t("library.portrait") : $t("library.landscape")} · ${readout}`,
+      value: editBackground ? readout : behavior.calculation ? $t("calculation.geometry") : behavior.pdf ? $t("calculation.fromPDF") : `${sizes.find((size) => size.id === sizeId)?.name ?? ""} ${orientation === "portrait" ? $t("library.portrait") : $t("library.landscape")} · ${readout}`,
     },
     { key: "paper", label: $t("workspace.paper"), value: behavior.paper ? tones.find((tone) => tone.id === toneId)?.name ?? "" : behavior.calculation ? $t("calculation.cellContent") : $t("calculation.fromPDF") },
     { key: "ruling", label: $t("calculation.source"), value: behavior.pdf ? $t("calculation.fromPDF") : (selected?.label ?? "") },
     { key: "where", label: $t("workspace.where"), value: CHOICES.find(choice => choice.value === (canPlaceRelative ? where : "last"))?.label ?? "" },
-  ]);
+  ].filter(row => !editBackground || row.key !== "where"));
 
   function commit(keepOpen: boolean) {
     if (!selected || blocked) return;
@@ -167,7 +171,7 @@
       effectiveCount,
       behavior.pdf ? { pdfPages: pdfPages.trim() } : undefined,
     );
-    if (keepOpen) added += effectiveCount;
+    if (keepOpen && !editBackground) added += effectiveCount;
     else onClose();
   }
 
@@ -240,26 +244,27 @@
 <div
   bind:this={panel}
  
-  use:dismissable={onClose}
+  use:dismissable={{ onClose, trigger }}
   class="add-page-panel"
   role="dialog"
   tabindex="-1"
-  aria-label={$t("workspace.addPage")}
+  aria-label={$t(editBackground ? "workspace.pageBackground" : "workspace.addPage")}
   onkeydown={keydown}
 >
   <header>
     <div class="subject">
-      <strong>{$t("workspace.addPage")}</strong>
-      <span class="destination">{destination}</span>
+      <strong>{$t(editBackground ? "workspace.pageBackground" : "workspace.addPage")}</strong>
+      {#if !editBackground}<span class="destination">{destination}</span>{/if}
     </div>
 
-    <div class="run" role="group" aria-label={$t("workspace.howManyPages")}>
+    {#if !editBackground}<div class="run" role="group" aria-label={$t("workspace.howManyPages")}>
       <span class="run-label">{$t("workspace.pages")}</span>
       <button type="button" aria-label={$t("workspace.oneFewerPage")} disabled={behavior.single || count <= 1} onclick={() => step(-1)}>−</button>
       <output aria-live="polite">{effectiveCount}</output>
       <button type="button" aria-label={$t("workspace.oneMorePage")} disabled={behavior.single || count >= MAX_RUN} onclick={() => step(1)}>+</button>
     </div>
 
+    {/if}
     <button type="button" class="close" aria-label={$t("library.close")} onclick={onClose}>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
     </button>
@@ -268,7 +273,7 @@
   <div class="body">
     <!-- Column A. Everything that decides the shape of the page, visible at once. -->
     <div class="settings">
-      <section>
+      {#if !editBackground}<section>
         <div class="eyebrow">{$t("workspace.where")}</div>
         <div class="row" role="radiogroup" aria-label={$t("workspace.whereTheNewPageGoes")}>
           {#each CHOICES as choice (choice.value)}
@@ -329,6 +334,7 @@
         {/each}
       </div>
 
+      {/if}
       <section inert={!behavior.paper} class:muted={!behavior.paper}>
         <div class="eyebrow">{$t("workspace.paper")}</div>
         <div class="row" role="radiogroup" aria-label={$t("library.paperColour")}>
@@ -492,17 +498,18 @@
           disabled={blocked}
           onclick={(event) => commit(event.shiftKey)}
         >{addLabel}</button>
-        <span class="note">
+        {#if !editBackground}<span class="note">
           {added > 0 ? $t("workspace.addedPanelStillOpen", { "added": added }) : $t("workspace.holdShiftToAddAndKeepThis")}
         </span>
+        {/if}
       </div>
     </div>
   </div>
 
-  <footer>
+  {#if !editBackground}<footer>
     <span>{$t("workspace.addAddAndKeepOpenEscClose")}</span>
     <span>{importing ? $t("workspace.pdfImportPaperIgnored") : `${selected?.label ?? ""} · ${sizes.find((size) => size.id === sizeId)?.name ?? ""}`}</span>
-  </footer>
+  </footer>{/if}
 </div>
 
 <style>
