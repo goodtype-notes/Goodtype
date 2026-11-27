@@ -278,10 +278,15 @@ pub async fn helper_codex_run(
             ));
         }
     };
-    let (usage, capture_generation) = {
+    let (usage, capture_generation, page_limit) = {
         let state = helper.inner.lock().unwrap_or_else(|e| e.into_inner());
-        (state.settings.usage, state.generation)
+        (
+            state.settings.usage,
+            state.generation,
+            state.settings.page_limit(),
+        )
     };
+    snapshot::check_page_limit(&intent.page_ids, page_limit)?;
     let override_applied = request_usage(usage, request.usage_override)? != usage;
     let usage = request_usage(usage, request.usage_override)?;
     let mut captured = snapshot::capture(

@@ -2020,12 +2020,36 @@ mod request_grants {
     fn request_capture_deduplicates_caps_refuses_missing_and_foreign_and_shares_python_cells() {
         let f = Fixture::new(10);
         assert_eq!(f.capture(f.intent(&[1, 1, 1])).unwrap().pages.len(), 1);
+        // The user's limit (AI settings) is checked before capture; capture keeps the hard ceiling.
+        let ids = |n: usize| (0..n).map(|i| format!("p{i}")).collect::<Vec<_>>();
+        let refused = super::snapshot::check_page_limit(&ids(9), 8).unwrap_err();
         assert_eq!(
-            f.capture(f.intent(&(0..9).collect::<Vec<_>>()))
-                .err()
+            (refused.code.as_str(), refused.params["count"].as_str()),
+            ("attachment_limit", "8")
+        );
+        assert!(super::snapshot::check_page_limit(&[ids(8), ids(8)].concat(), 8).is_ok());
+        assert!(super::snapshot::check_page_limit(&ids(MAX_PAGE_LIMIT), MAX_PAGE_LIMIT).is_ok());
+        assert!(
+            super::snapshot::check_page_limit(&ids(MAX_PAGE_LIMIT + 1), MAX_PAGE_LIMIT).is_err()
+        );
+        let limit = |page_limit| {
+            HelperSettings {
+                page_limit,
+                ..Default::default()
+            }
+            .page_limit()
+        };
+        assert_eq!(
+            (limit(0), limit(8), limit(100), limit(255)),
+            (1, 8, 100, 100)
+        );
+        assert_eq!(HelperSettings::default().page_limit(), 8);
+        assert_eq!(
+            f.capture(f.intent(&(0..10).collect::<Vec<_>>()))
                 .unwrap()
-                .code,
-            "attachment_limit"
+                .pages
+                .len(),
+            10
         );
         assert_eq!(
             f.capture(f.intent(&(0..8).collect::<Vec<_>>()))

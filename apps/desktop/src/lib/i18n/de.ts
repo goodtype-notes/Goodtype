@@ -629,6 +629,8 @@ export const de = {
     "detailedHint": "Bilder bis 2048 px, 256 KiB Text und 60 Aufrufe pro Zeitabschnitt.",
     "webSearch": "Websuche standardmäßig erlauben",
     "webHint": "Websuche für neue Unterhaltungen in der App erlauben. Du kannst dies vor dem Senden ändern.",
+    "pageLimit": "Seitenlimit pro Anfrage",
+    "pageLimitHint": "Höchstens so viele Seiten kann eine Anfrage an den Assistenten übergeben, ob von dir angehängt oder von ihm angefragt. Von 1 bis 100. Mehr Seiten machen Antworten langsamer und verbrauchen mehr Kontingent deines Assistenten.",
     "permissionPages": "Andere Seiten lesen",
     "permissionPagesHint": "Wenn der Assistent nach Seiten oder Python-Zellen fragt, die du nicht angehängt hast.",
     "permissionPresets": "Notizbuchvorlagen lesen",

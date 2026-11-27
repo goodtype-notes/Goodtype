@@ -597,12 +597,18 @@ pub async fn capture(
 fn capture_problem(code: &str) -> super::UiProblem {
     super::UiProblem {
         code: code.into(),
-        params: if code == "attachment_limit" {
-            std::collections::HashMap::from([("count".into(), "8".into())])
-        } else {
-            Default::default()
-        },
+        params: Default::default(),
     }
+}
+/// Refuses more distinct pages than `limit`, naming the limit for the notice.
+pub(super) fn check_page_limit(ids: &[String], limit: usize) -> Result<(), super::UiProblem> {
+    if ids.len() <= 10000 && ids.iter().collect::<HashSet<_>>().len() <= limit {
+        return Ok(());
+    }
+    Err(super::UiProblem {
+        code: "attachment_limit".into(),
+        params: std::collections::HashMap::from([("count".into(), limit.to_string())]),
+    })
 }
 pub(super) fn capture_locked(
     roots: &crate::workspace::AllowedRoots,
@@ -623,13 +629,8 @@ pub(super) fn capture_under_lock(
     if intent.intent_version.is_empty() || intent.intent_version.len() > 128 {
         return Err(fail("invalid_context_intent"));
     }
-    if intent.page_ids.len() > 10000 {
-        return Err(fail("attachment_limit"));
-    }
+    check_page_limit(&intent.page_ids, super::MAX_PAGE_LIMIT)?;
     let ids: HashSet<_> = intent.page_ids.into_iter().collect();
-    if ids.len() > 8 {
-        return Err(fail("attachment_limit"));
-    }
     let root = crate::workspace::ensure_allowed(roots, &intent.destination.root)
         .map_err(|_| fail("context_root_denied"))?;
     (|| {

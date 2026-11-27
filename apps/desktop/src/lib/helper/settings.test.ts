@@ -8,12 +8,13 @@ describe("helper settings migration", () => {
     const off = settingGroups().filter(group => group.id === "aiHelper");
     expect(off).toHaveLength(0);
     expect(settingGroups().find(group => group.id === "appearance")?.items.map(item => item.id)).toContain("helperEnabled");
-    expect(settingGroups(undefined, [], true).find(group => group.id === "aiHelper")?.items.map(item => item.id)).toEqual(["helperEnabled", "helperUsage", "helperWebSearch", "helperPermissionPages", "helperPermissionPresets", "helperPermissionNames"]);
+    expect(settingGroups(undefined, [], true).find(group => group.id === "aiHelper")?.items.map(item => item.id)).toEqual(["helperEnabled", "helperUsage", "helperWebSearch", "helperPageLimit", "helperPermissionPages", "helperPermissionPresets", "helperPermissionNames"]);
     expect(searchSettings("web", settingGroups()).some(hit => hit.group.id === "aiHelper")).toBe(false);
   });
-  it("defaults to disabled, balanced and web search enabled", async () => { expect((await loadSettings(false)).aiHelper).toEqual({ enabled: false, usage: "balanced", webSearch: true, codexPath: null, codexModel: null, allowedMcpServers: [], permissions: { pages: "ask", presets: "ask", pageNames: "allow" } }); });
+  it("defaults to disabled, balanced and web search enabled", async () => { expect((await loadSettings(false)).aiHelper).toEqual({ enabled: false, usage: "balanced", webSearch: true, codexPath: null, codexModel: null, allowedMcpServers: [], permissions: { pages: "ask", presets: "ask", pageNames: "allow" }, pageLimit: 8 }); });
   it("loads old settings", async () => { const { aiHelper: _, ...old } = DEFAULT_SETTINGS; load.mockResolvedValue(old); expect((await loadSettings(true)).aiHelper).toEqual(DEFAULT_SETTINGS.aiHelper); });
-  it("preserves choices and fills missing fields", async () => { load.mockResolvedValue({ ...DEFAULT_SETTINGS, aiHelper: { enabled: true, usage: "low" } }); expect((await loadSettings(true)).aiHelper).toEqual({ enabled: true, usage: "low", webSearch: true, codexPath: null, codexModel: null, allowedMcpServers: [], permissions: { pages: "ask", presets: "ask", pageNames: "allow" } }); });
+  it("preserves choices and fills missing fields", async () => { load.mockResolvedValue({ ...DEFAULT_SETTINGS, aiHelper: { enabled: true, usage: "low" } }); expect((await loadSettings(true)).aiHelper).toEqual({ enabled: true, usage: "low", webSearch: true, codexPath: null, codexModel: null, allowedMcpServers: [], permissions: { pages: "ask", presets: "ask", pageNames: "allow" }, pageLimit: 8 }); });
+  it("clamps the page limit to whole pages from 1 to 100", async () => { for (const [saved, loaded] of [[0, 1], [12.4, 12], [100, 100], [250, 100], ["9", 8], [undefined, 8]] as const) { load.mockResolvedValue({ ...DEFAULT_SETTINGS, aiHelper: { pageLimit: saved } }); expect((await loadSettings(true)).aiHelper.pageLimit).toBe(loaded); } });
   it("keeps saved permissions and fills missing ones", async () => { load.mockResolvedValue({ ...DEFAULT_SETTINGS, aiHelper: { permissions: { presets: "never" } } }); expect((await loadSettings(true)).aiHelper.permissions).toEqual({ pages: "ask", presets: "never", pageNames: "allow" }); });
   it("searches catalog keywords without exposing disabled AI categories", () => { expect(searchSettings("MCP").some(h => h.item.id === "helperEnabled")).toBe(true); });
 });

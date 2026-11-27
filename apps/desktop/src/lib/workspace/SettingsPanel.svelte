@@ -135,7 +135,7 @@
     const control = item.control;
     if (control.kind === "toggle") onChange(control.write(settings, value as boolean));
     else if (control.kind === "choice" || control.kind === "select") onChange(control.write(settings, value as string));
-    else if (control.kind === "slider") onChange(control.write(settings, value as number));
+    else if (control.kind === "slider" || control.kind === "number") onChange(control.write(settings, value as number));
   }
 
   /// Arrow keys walk the category list, the way they walk every other group in this app.
@@ -252,6 +252,25 @@
       />
       <output>{item.control.format(value)}</output>
     </div>
+  {:else if item.control.kind === "number"}
+    {@const control = item.control}
+    <!-- Applied on change (blur or Enter), so typing "25" never saves a 2 on the way. -->
+    <input
+      class="number"
+      type="number"
+      inputmode="numeric"
+      min={control.min}
+      max={control.max}
+      step="1"
+      value={control.read(settings)}
+      aria-label={item.label}
+      onchange={(event) => {
+        const input = event.currentTarget;
+        const value = input.valueAsNumber;
+        if (Number.isFinite(value)) apply(item, value);
+        input.value = String(control.read(settings));
+      }}
+    />
   {/if}
 {/snippet}
 
@@ -681,6 +700,8 @@
 
   .slider input { flex: 1; accent-color: var(--blueprint); }
 
+  .number { box-sizing: border-box; width: 96px; height: var(--control); padding: 0 8px 0 12px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--inset); color: var(--text); color-scheme: dark; font: inherit; font-size: var(--text-md); font-variant-numeric: tabular-nums; }
+
   .slider output {
     min-width: 48px;
     color: var(--text);
@@ -705,7 +726,8 @@
   .choice:focus-visible,
   .settings :global(.run:focus-visible),
   .setting-select:focus-visible,
-  .slider input:focus-visible {
+  .slider input:focus-visible,
+  .number:focus-visible {
     outline: 2px solid var(--blueprint-light);
     outline-offset: 2px;
   }
@@ -719,7 +741,7 @@
   }
 
   @media (pointer: coarse) {
-    .nav button, .close, .run, .search, .setting-select { min-height: var(--control-touch); }
+    .nav button, .close, .run, .search, .setting-select, .number { min-height: var(--control-touch); }
     .close { min-width: var(--control-touch); }
     .choice { min-height: calc(var(--control-touch) - 8px); }
   }
