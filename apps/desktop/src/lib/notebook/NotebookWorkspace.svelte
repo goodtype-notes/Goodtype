@@ -924,6 +924,22 @@
       : chipBox.left + chipBox.width / 2 - barBox.left;
   }
   let moreOpen = $state(false);
+  let inheritedPaper = $state<PageDefaults | null>(null);
+  $effect(() => {
+    if (!addPageOpen) return;
+    inheritedPaper = null;
+    const pageId = session.activePageId;
+    const position: PagePosition = addPageWhere === "last" ? { kind: "last" } : { kind: addPageWhere, pageId };
+    let cancelled = false;
+    void session.paperBefore(position).then(paper => { if (!cancelled) inheritedPaper = paper; }).catch(() => {});
+    return () => { cancelled = true; };
+  });
+  let backgroundOpen = $state(false);
+  let backgroundTrigger = $state<HTMLButtonElement>();
+  function closeBackground() {
+    backgroundOpen = false;
+    void tick().then(() => backgroundTrigger?.focus());
+  }
   let addPageOpen = $state(false);
   let addPageTrigger = $state<HTMLButtonElement>();
   let exportOpen = $state(false);
@@ -1572,20 +1588,21 @@
    * still looks like itself on a machine that never had this build's library — the same rule a
    * stroke follows when it stores its resolved nib parameters instead of a pen name.
    */
-  function addPageGroups(): AddPageGroup[] {
+  function addPageGroups(editBackground = false): AddPageGroup[] {
     // Previews are drawn at the size the new page will be, so a swatch of A5 squared paper shows
     // the same 5mm cells at A5's proportions rather than A4's.
-    const geometry = addPageGeometry;
+    const geometry = editBackground ? session.activeGeometry : addPageGeometry;
     const template = (source: PageTemplate): AddPageSource => ({
       id: source.id,
       label: source.name,
       preview: templatePreviewSvg(source, geometry),
       onSelect: (position, count) =>
-        void session.addPage(position, { kind: "template", template: source }, geometry, count),
+        editBackground
+          ? void session.changeBackground({ kind: "template", template: source })
+          : void session.addPage(position, { kind: "template", template: source }, geometry, count),
     });
-    // The notebook's paper for new pages: what it was created with, then whatever was added last
-    // (Rust moves it on every add with a chosen paper). The panel opens on it.
-    const next = session.notebookManifest?.defaultPage ?? null;
+    // Preview the inherited paper; Rust resolves it again at commit time.
+    const next = editBackground ? { background: session.activeBackground, geometry } : inheritedPaper ?? session.notebookManifest?.defaultPage ?? null;
     const nextUsable = next && next.background.kind !== "pdf" ? next : null;
     const paperPreview = (paper: PageDefaults) =>
       paper.background.kind === "template"
@@ -1634,18 +1651,18 @@
       },
       {
         id: "current",
-        title: $t("workspace.notebookPaper"),
+        title: $t(editBackground ? "workspace.currentBackground" : "workspace.inheritedBackground"),
         lane: "current",
         sources: [
           ...(nextUsable
             ? [
                 {
                   id: "next",
-                  label: $t("workspace.notebookPaper"),
+                  label: $t(editBackground ? "workspace.currentBackground" : "workspace.inheritedBackground"),
                   detail: `${paperName(nextUsable)}, ${describeGeometry(nextUsable.geometry, $t)}`,
                   preview: paperPreview(nextUsable),
                   onSelect: (position: PagePosition, count: number) =>
-                    void session.addPage(position, nextUsable.background, nextUsable.geometry, count),
+                    editBackground ? void session.changeBackground(nextUsable.background) : void session.addPage(position, null, nextUsable.geometry, count),
                 } satisfies AddPageSource,
               ]
             : []),
@@ -2702,12 +2719,28 @@
         </button>
       {/if}
       {#if session.pageOpen}
+        {#if session.activeBackground.kind !== "pdf" && !session.activeCalculation}
+          <button bind:this={backgroundTrigger} class="text-action" type="button" disabled={session.busy} aria-expanded={backgroundOpen} onclick={() => { addPageOpen = false; backgroundOpen = !backgroundOpen; }}>{$t("workspace.pageBackground")}</button>
+          {#if backgroundOpen}
+            {#key session.activePageId}<AddPageMenu editBackground trigger={backgroundTrigger}
+              where="after" groups={addPageGroups(true).filter(group => group.lane !== "import")}
+              tones={paperTones($t)} toneId={addPageToneId}
+              sizes={pageSizes($t)} sizeId={addPageSizeId} orientation={addPageOrientation}
+              previewAspect={session.activeGeometry.widthPt / session.activeGeometry.heightPt}
+              geometry={session.activeGeometry} currentPageId={session.activePageId}
+              pageNumber={session.pageNumber} pageCount={session.pageCount} canPlaceRelative={false}
+              onWhereChange={() => {}} onSizeChange={() => {}} onOrientationChange={() => {}}
+              onToneChange={next => addPageToneId = next} onClose={closeBackground}
+            />{/key}
+          {/if}
+        {/if}
         <div class="add-page-anchor">
           <button bind:this={addPageTrigger} class="icon-button" class:active={addPageOpen} type="button" aria-label={$t("workspace.addPage")} aria-expanded={addPageOpen} title={$t("workspace.addPage")} disabled={session.busy} onclick={() => (addPageOpen = !addPageOpen)}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6"></path><path d="M18 9.5v9"></path><path d="M13.5 14h9"></path></svg>
           </button>
           {#if addPageOpen}
             <AddPageMenu
+              trigger={addPageTrigger}
               where={addPageWhere}
               groups={addPageGroups()}
               tones={paperTones($t)}

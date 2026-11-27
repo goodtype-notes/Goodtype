@@ -997,6 +997,11 @@ export const de = {
     "unchanged": "Das Notizbuch selbst bleibt unverändert"
   },
   "workspace": {
+    "currentBackground": "Aktueller Hintergrund",
+    "inheritedBackground": "Papier der vorherigen Seite",
+    "pageBackground": "Seitenhintergrund…",
+    "applyBackground": "Hintergrund anwenden",
+    "changedBackground": "Seitenhintergrund geändert",
     "saturationAndBrightness": "Sättigung und Helligkeit",
     "hue": "Farbton",
     "use": "{{value2}} verwenden",

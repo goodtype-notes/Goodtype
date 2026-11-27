@@ -996,6 +996,11 @@ export const en = {
     "unchanged": "The notebook itself is not changed"
   },
   "workspace": {
+    "currentBackground": "Current background",
+    "inheritedBackground": "Paper from page above",
+    "pageBackground": "Page background…",
+    "applyBackground": "Apply background",
+    "changedBackground": "Changed page background",
     "saturationAndBrightness": "Saturation and brightness",
     "hue": "Hue",
     "use": "Use {{value2}}",
