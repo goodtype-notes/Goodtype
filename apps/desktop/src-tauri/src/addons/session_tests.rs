@@ -1199,3 +1199,44 @@ fn real_connectors_session_round_trips_path_edits() {
     let _ = child.kill();
     let _ = child.wait();
 }
+
+#[test]
+fn scoped_reads_roundtrip_during_invocation_and_do_not_survive_it() {
+    let mut session = spawn(|mut fake| {
+        fake.initialize(&["page-batch-v0", "scoped-reads-v0"]);
+        let invocation = fake.read();
+        for (method, params) in [
+            ("group/descendants", json!({"revision":7,"groupId":"symbol"})),
+            ("region/obstacles", json!({"revision":7,"bounds":{"x":20,"y":20,"width":100,"height":100}})),
+        ] {
+            fake.write(&json!({"jsonrpc":"2.0","id":"addon-read","method":method,"params":params}).to_string());
+            let response = fake.read();
+            assert_eq!(response["id"], "addon-read");
+            assert_eq!(response["result"]["revision"], 7);
+            assert!(!response.to_string().contains("private"));
+        }
+        fake.write(&json!({"jsonrpc":"2.0","id":"stale","method":"group/descendants","params":{"revision":8,"groupId":"symbol"}}).to_string());
+        assert_eq!(fake.read()["error"]["message"], "revision-mismatch");
+        fake.reply(&invocation["id"], batch());
+        let _next = fake.read();
+        fake.write(&json!({"jsonrpc":"2.0","id":"old","method":"group/descendants","params":{"revision":7,"groupId":"symbol"}}).to_string());
+    }).unwrap();
+    let (_, reads) = super::super::objects::scoped_reads::fixture();
+    assert_eq!(
+        session
+            .call_scoped(
+                "command/invoke",
+                scope(),
+                Duration::from_secs(5),
+                || false,
+                Some(reads)
+            )
+            .unwrap()
+            .unwrap(),
+        batch()
+    );
+    assert_eq!(
+        call(&mut session, Duration::from_secs(5)).err(),
+        Some(Failure::Protocol)
+    );
+}

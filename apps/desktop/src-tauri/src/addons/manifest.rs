@@ -204,7 +204,13 @@ pub(super) enum Error {
 }
 
 pub(super) fn supported_feature(feature: &str) -> bool {
-    ["end-caps", "group-stretch", "path-edit-v0"].contains(&feature)
+    [
+        "end-caps",
+        "group-stretch",
+        "path-edit-v0",
+        "scoped-reads-v0",
+    ]
+    .contains(&feature)
 }
 
 pub(super) fn release_version(version: &str) -> bool {
