@@ -36,6 +36,7 @@
     zIndex?: number;
     readingOrder?: number;
     selected?: boolean;
+    zoom?: number;
     toPageDelta?: (screenDx: number, screenDy: number) => Position;
     /** Pulls a dragged image onto other objects' edges, centres and ports; Alt bypasses it. */
     moveSnap?: ObjectMoveSnap;
@@ -60,6 +61,7 @@
     zIndex = 0,
     readingOrder = 0,
     selected = false,
+    zoom = 1,
     moveSnap,
     toPageDelta = (screenDx, screenDy) => ({ x: screenDx, y: screenDy }),
     pageWidthPt,
@@ -205,6 +207,7 @@
   style:width={`${widthPt}px`}
   style:height={`${heightPt}px`}
   style:transform={`rotate(${rotation}deg) scale(${previewScale})`}
+  style:--selection-scale={1 / (zoom * previewScale)}
   style:z-index={zIndex}
   aria-label={$t("workspace.readingPosition2", { "alt": alt, "value2": readingOrder + 1 })}
 >
@@ -222,8 +225,9 @@
     <img {src} {alt} draggable="false" />
   </button>
   {#if selected}
+    <svg class="selection-frame" aria-hidden="true"><rect class="selection-box" width="100%" height="100%" /></svg>
     <button
-      class="scale-handle"
+      class="scale-handle selection-html-handle"
       type="button"
       aria-label={$t("workspace.scale", { "alt": alt })}
       onpointerdown={beginScale}
@@ -243,11 +247,6 @@
     user-select: none;
   }
 
-  .image-object.selected {
-    outline: 1.5px solid var(--blueprint);
-    outline-offset: 0;
-  }
-
   .move-surface {
     display: block;
     width: 100%;
@@ -258,10 +257,9 @@
     cursor: move;
   }
 
-  .move-surface:focus-visible,
-  .scale-handle:focus-visible {
-    outline: 2px solid var(--blueprint);
-    outline-offset: 2px;
+  .move-surface:focus-visible {
+    outline: calc(var(--selection-focus-stroke) * var(--selection-scale)) solid var(--selection-color);
+    outline-offset: 0;
   }
 
   img {
@@ -273,13 +271,9 @@
 
   .scale-handle {
     position: absolute;
-    right: -6px;
-    bottom: -6px;
-    width: 12px;
-    height: 12px;
-    padding: 0;
-    border: 1.5px solid white;
-    background: var(--blueprint);
+    right: calc(-1 * var(--selection-hit-radius));
+    bottom: calc(-1 * var(--selection-hit-radius));
+    transform: scale(var(--selection-scale));
     cursor: nwse-resize;
   }
 </style>
