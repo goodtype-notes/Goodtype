@@ -316,7 +316,7 @@ independently and retain at most 16 KiB locally for explicit diagnostics.
 
 | Method | Direction and payload |
 | --- | --- |
-| `initialize` | Host request. Params and result contain `apiVersion`, `capabilities` and `addon` (`id` and `version`). Both sides MUST match the API and verified identity. The child returns a unique subset of the host's capability offer (`progress`, `cancel`, `page-batch-v0`, `path-edit-v0`). |
+| `initialize` | Host request. Params and result contain `apiVersion`, `capabilities` and `addon` (`id` and `version`). Both sides MUST match the API and verified identity. The child returns a unique subset of the host's capability offer (`progress`, `cancel`, `page-batch-v0`, `path-edit-v0`, `scoped-reads-v0`). |
 | `command/invoke` | Host request after initialization. Params contain `command`, `scope` and validated addon `settings` keyed by descriptor ID. The first result has `batch.operations`. Selection commands require `page-batch-v0`. |
 | `command/progress` | Child notification only with negotiated `progress`. Params contain the outstanding `id`, a catalog-defined `phase` and integer `completed` and `total` with `0 ≤ completed ≤ total` and `total > 0`. Host UI updates MUST be coalesced to at most four per second. |
 | `command/cancel` | Host notification with `params.id`, only with negotiated `cancel`. Cancellation precludes publication even if a result races it. The host waits at most 1 s for cooperative shutdown, then terminates the job and ends the session. |
@@ -649,13 +649,14 @@ free endpoint releases follow proposal review or the two direct-apply opt-ins.
 
 ## Minimum host features
 
-Manifests may declare `requires: ["end-caps", "group-stretch", "path-edit-v0"]`.
+Manifests may declare `requires: ["end-caps", "group-stretch", "path-edit-v0", "scoped-reads-v0"]`.
 The field is optional and omitted when empty. The host accepts at most 16 unique
 identifier-safe feature names (lowercase ASCII letters/digits separated by hyphens,
 using the same bounded identifier validation as contribution IDs). Unknown requirements
 refuse installation and enablement with "Needs a newer Goodtype" and the feature names.
 An installed incompatible package stays on disk but contributes nothing and cannot launch.
-Content packs use the same gate. `wasm-v0` is not supported.
+Content packs use the same gate. `wasm-v0` is accepted only by builds with the
+`wasm-tier` Cargo feature (see the gated Wasm tier); other builds refuse it the same way.
 
 This host implements caps through core ShapeStyle and shared frontend/export cap geometry,
 stretch through core stretch rules and frontend stretch gestures, and path edits through
@@ -668,12 +669,12 @@ Released v0.3 hosts deserialize Manifest with `deny_unknown_fields`, so even `re
 is refused there with their existing generic manifest error. Keep the field absent for packages
 that need no new feature and should work on those hosts.
 
-The signed registry index and its releases use `deny_unknown_fields`; adding requirements
-there would break released stores. The signed update descriptor tolerates extra fields, but
-has no requirement producer or pre-download selection contract today. Neither format changes
-here: the downloaded package manifest is the installation gate. Handshake negotiation stays
-unchanged. Shared manifest conformance inputs and expected outcomes live in
-`fixtures/addon-requires`; sibling repositories can copy or fetch them at a pinned commit.
+Released format 1 indexes stay strict. [Index format 2](addon-index-v2.md) carries
+per-release requirements and minimum host versions for pre-download selection.
+The package manifest remains the installation gate. Scoped reads additionally
+negotiate `scoped-reads-v0` at handshake. Shared manifest conformance inputs and
+expected outcomes live in `fixtures/addon-requires`; sibling repositories can copy
+or fetch them at a pinned commit.
 
 ### Reaction fan-out
 
@@ -684,6 +685,89 @@ object snapshot. Each call sees only changed snapshots and deleted IDs reference
 objects (a referenced snapshot carries its ports); unknown dependencies disclose nothing. Each reply still has the 32-operation ceiling and may only modify its
 chunk's owned objects. All replies are validated before one history amendment is published;
 a failed chunk leaves the user's change intact. A late reaction is retried once on idle.
+
+
+### Scoped geometry reads (`scoped-reads-v0`)
+
+Native sessions MUST declare `requires: ["scoped-reads-v0"]` (alongside any other
+requirements) and negotiate the capability of the same name. Only object commands,
+tools, path edits and reaction chunks receive reads. The host adds a `reads` object
+to their invocation params:
+
+```json
+{"reads":{"revision":7,"groups":["symbol"],"region":{"x":0,"y":0,"width":214,"height":204},"maxObjects":256,"maxBytes":65536,"maxCalls":16,"maxTotalBytes":262144,"maxRegionSidePt":1024.0}}
+```
+
+`groups` lists only group IDs already present in this invocation's admitted object
+snapshots (selected owned objects and admitted references/changed objects). A group
+read grants no writes or independent grant on a newly discovered nested group.
+`region` is the axis-aligned envelope of admitted objects and completed gesture
+points, expanded by 144 page points (two inches) and clipped to the captured page.
+With no such geometry it is empty. Queries MUST fit wholly inside this region and
+have positive width/height of at most 1024 points each. Bounds and ports are in page
+points; boxes include object transforms and groups enclose their explicit members.
+
+While the invocation is pending, the addon MAY send these JSON-RPC requests over
+its existing stdout and read the response from stdin. IDs MUST be nonempty strings
+of at most 80 bytes; use an addon prefix to distinguish host request IDs. Calls are
+sequential; finish a read before sending the invocation result.
+
+```json
+{"jsonrpc":"2.0","id":"addon-read-1","method":"group/descendants","params":{"revision":7,"groupId":"symbol"}}
+{"jsonrpc":"2.0","id":"addon-read-1","result":{"revision":7,"objects":[{"id":"child","type":"shape","parentId":"symbol","x":30.0,"y":40.0,"rotation":0.0,"scale":2.0,"bounds":{"x":30.0,"y":40.0,"width":40.0,"height":20.0},"ports":[{"x":30.0,"y":50.0}],"geometry":{"kind":"rectangle","widthPt":20.0,"heightPt":10.0,"cornerRadiusPt":0.0}}]}}
+```
+
+Descendants follow only explicit `childIds`, recursively. Each result identifies its
+immediate `parentId`. Siblings are emitted in child-list order, then nested groups
+are visited in reverse sibling order. The requested root itself is omitted. Only
+IDs, kinds, transforms, bounds, ports and shape geometry are returned. No source,
+text, styles, timestamps, ink samples, assets or `addonData` are exposed.
+
+```json
+{"jsonrpc":"2.0","id":"addon-read-2","method":"region/obstacles","params":{"revision":7,"bounds":{"x":20.0,"y":20.0,"width":100.0,"height":100.0}}}
+{"jsonrpc":"2.0","id":"addon-read-2","result":{"revision":7,"objects":[{"id":"unrelated","type":"shape","bounds":{"x":30.0,"y":40.0,"width":40.0,"height":20.0},"ports":[{"x":30.0,"y":50.0}]}]}}
+```
+
+Obstacles include all page objects whose axis-aligned bounds intersect the query
+(inclusive edges), in page object order, including explicit group boxes and members.
+The example shows one entry; all matching entries are returned. Each entry has
+**exactly** `id`, `type`, `bounds`, `ports`; no shape geometry, source, text, ink
+points, asset paths/bytes or addon data. This bounded geometry read deliberately
+includes unrelated parts within the granted region, without granting object access.
+Loose ink strokes are not page objects and are not included.
+
+Both methods read an immutable snapshot captured for that invocation, never a newer
+page. `revision` MUST equal `reads.revision`; existing batch commit preconditions
+still reject edits if the page changed meanwhile. Grants and budgets expire when
+the invocation finishes, even for a warm session. Request objects are closed.
+
+Limits apply to both methods: at most 256 objects and 64 KiB of UTF-8 serialized
+`result` per response; at most 16 requests (including rejected requests) and 256 KiB
+of successful serialized results per invocation. These limits bound routing work,
+large symbol reads and repeated queries without approaching the 4 MiB frame limit.
+A limit failure returns no partial list: routing MUST NOT mistake truncation for a
+clear route. A semantic refusal is:
+
+```json
+{"jsonrpc":"2.0","id":"addon-read-1","error":{"code":-32004,"message":"out-of-scope"}}
+```
+
+Other fixed protocol reason tokens are `revision-mismatch`, `limit-exceeded`, and
+`invalid-params`. Malformed RPC frames, unsupported methods or reads without a live
+grant fail the session. Reads share the invocation deadline and cancellation rules.
+These are protocol diagnostics, not host UI strings.
+
+Connectors should query the completed route's bounding region with useful clearance,
+clamped to `reads.region` and `maxRegionSidePt`, and use unrelated boxes as obstacles
+and the indexed page-space ports as endpoints. Exclude its own path and handle
+endpoint objects/groups and members consistently to avoid routing into their boxes.
+On a cap failure, retry a smaller useful region within the call budget or use a
+conservative routing fallback; never assume an error means no obstacles. The host
+still validates the returned batch and its captured revision at release/commit.
+A Wasm entry receives no `reads` in this step (see the gated Wasm tier below); this feature
+changes no notebook format.
+The shared requirement fixture includes the feature; wire conformance cases are in
+`fixtures/addon-scoped-reads/requests.json`.
 
 
 ## Gated Wasm tier (`goodtype-wasm-v0`)
@@ -716,6 +800,9 @@ receives the captured chunk's changed and owned object snapshots; `refs` contain
 IDs, and `page` contains only page geometry. Both return the existing page-batch envelope. Rust
 owns revision/authorization checks and admits the result through the same batch, ownership,
 path-edit, proposal and undo rules as native replies. No executable is launched for a Wasm entry.
+Wasm entries receive no scoped reads in this step: neither payload carries `reads`, and a module
+has no way to issue `group/descendants` or `region/obstacles`. Obstacle-aware Connectors routing
+under Wasm is therefore still open; until it is designed, obstacle routing needs the native session.
 
 Admission: module <= 1 MiB; input/output <= 32 KiB each; one non-shared 32-bit memory with an
 explicit maximum <= 128 standard pages; at most one table, explicitly bounded <= 1024 entries;

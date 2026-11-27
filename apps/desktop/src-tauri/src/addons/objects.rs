@@ -10,6 +10,9 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 use tauri::Manager;
 
+#[path = "scoped_reads.rs"]
+pub(super) mod scoped_reads;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct Request {
@@ -605,13 +608,14 @@ async fn object_action(
         };
         let direct_at_start = path.is_some() && super::manager::direct_apply(&app, addon.id);
         let context = format!("{}:{}", root.display(), request.page_id);
+        let reads = scoped_reads::Reads::capture(&snapshot, &invocation);
         let reply = app
             .state::<session::Runtime>()
-            .run_at_revision(
+            .run_scoped(
                 &app,
                 addon,
                 &command,
-                invocation,
+                (invocation, reads),
                 Some(&context),
                 Some(snapshot.page.revision),
                 || cancelled() || selection::revoked(job, &authorization),
@@ -1044,11 +1048,15 @@ pub(crate) async fn addon_react(
                 let candidate = run_reaction_chunks(&root, &snapshot, addon.id, params, |params| {
                     handle
                         .state::<session::Runtime>()
-                        .run_at_revision(
+                        .run_scoped(
                             &handle,
                             addon,
                             "",
-                            Invocation::Reaction(params),
+                            {
+                                let invocation = Invocation::Reaction(params);
+                                let reads = scoped_reads::Reads::capture(&snapshot, &invocation);
+                                (invocation, reads)
+                            },
                             Some(&context),
                             Some(snapshot.page.revision),
                             || {

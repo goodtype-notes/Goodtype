@@ -66,8 +66,11 @@
   ],
   "properties": {
     "requires": {
-      "type": "array", "maxItems": 16, "uniqueItems": true,
-      "items": { "type": "string", "maxLength": 48, "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+      "description": "Host features this build understands: end-caps, group-stretch, path-edit-v0, scoped-reads-v0, and wasm-v0 only with the wasm-tier build. Any other name is refused as needing a newer Goodtype.",
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/identifier" }
     },
     "wasm": { "$ref": "#/$defs/wasm" },
     "reaction": { "$ref": "#/$defs/execution" },

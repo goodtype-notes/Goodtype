@@ -241,7 +241,13 @@ pub(super) enum Error {
 }
 
 pub(super) fn supported_feature(feature: &str) -> bool {
-    ["end-caps", "group-stretch", "path-edit-v0"].contains(&feature)
+    [
+        "end-caps",
+        "group-stretch",
+        "path-edit-v0",
+        "scoped-reads-v0",
+    ]
+    .contains(&feature)
         || (feature == "wasm-v0" && cfg!(feature = "wasm-tier"))
 }
 

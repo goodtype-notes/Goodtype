@@ -18,7 +18,13 @@ const MAX_FRAME: usize = 4 * 1024 * 1024;
 pub(super) const MAX_SCOPE: usize = MAX_FRAME - 1024;
 const STDERR_LIMIT: usize = 16 * 1024;
 const PATH_EDIT: &str = "path-edit-v0";
-const OFFER: [&str; 4] = ["progress", "cancel", "page-batch-v0", PATH_EDIT];
+const OFFER: [&str; 5] = [
+    "progress",
+    "cancel",
+    "page-batch-v0",
+    PATH_EDIT,
+    super::objects::scoped_reads::FEATURE,
+];
 const POLL: Duration = Duration::from_millis(20);
 /// Per-session scratch cap, checked while the process runs.
 const SCRATCH_LIMIT: u64 = 256 * 1024 * 1024;
@@ -577,7 +583,18 @@ impl Session {
         timeout: Duration,
         cancelled: impl Fn() -> bool,
     ) -> Result<Result<Value, CommandError>, Failure> {
-        let result = self.exchange(method, params, timeout, cancelled);
+        self.call_scoped(method, params, timeout, cancelled, None)
+    }
+
+    fn call_scoped(
+        &mut self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+        cancelled: impl Fn() -> bool,
+        reads: Option<super::objects::scoped_reads::Reads>,
+    ) -> Result<Result<Value, CommandError>, Failure> {
+        let result = self.exchange(method, params, timeout, cancelled, reads);
         self.failed |= result.is_err();
         if result.is_err() && self.exceeded() {
             return Err(Failure::StorageExceeded);
@@ -591,6 +608,7 @@ impl Session {
         params: Value,
         timeout: Duration,
         cancelled: impl Fn() -> bool,
+        mut reads: Option<super::objects::scoped_reads::Reads>,
     ) -> Result<Result<Value, CommandError>, Failure> {
         let deadline = Instant::now() + timeout;
         self.next_id = self.next_id.checked_add(1).ok_or(Failure::Protocol)?;
@@ -613,14 +631,33 @@ impl Session {
         loop {
             let wait = self.remaining(deadline, &id, &cancelled)?;
             match self.output.recv_timeout(wait) {
-                Ok(frame) => match message(frame?, &id, self.capabilities.contains("progress"))? {
-                    Message::Reply(reply) => {
-                        self.remaining(deadline, &id, &cancelled)?;
-                        self.used = Instant::now();
-                        return Ok(reply);
+                Ok(frame) => {
+                    let frame = frame?;
+                    if frame.get("method").is_some() && frame.get("id").is_some() {
+                        let reads = reads.as_mut().ok_or(Failure::Protocol)?;
+                        let response = reads.reply(frame).ok_or(Failure::Protocol)?;
+                        let (ack, written) = mpsc::sync_channel(1);
+                        self.input
+                            .try_send((encode(&response)?, ack))
+                            .map_err(|_| Failure::Protocol)?;
+                        loop {
+                            match written.recv_timeout(self.remaining(deadline, &id, &cancelled)?) {
+                                Ok(true) => break,
+                                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                                _ => return Err(Failure::Protocol),
+                            }
+                        }
+                        continue;
                     }
-                    Message::Progress => {}
-                },
+                    match message(frame, &id, self.capabilities.contains("progress"))? {
+                        Message::Reply(reply) => {
+                            self.remaining(deadline, &id, &cancelled)?;
+                            self.used = Instant::now();
+                            return Ok(reply);
+                        }
+                        Message::Progress => {}
+                    }
+                }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => return Err(Failure::Protocol),
             }
@@ -693,16 +730,28 @@ impl Runtime {
         context: Option<&str>,
         cancelled: impl Fn() -> bool,
     ) -> Result<Result<Value, CommandError>, Failure> {
-        self.run_at_revision(app, addon, command, invocation, context, None, cancelled)
+        self.run_scoped(
+            app,
+            addon,
+            command,
+            (invocation, None),
+            context,
+            None,
+            cancelled,
+        )
     }
 
+    /// `revision` binds a Wasm entry's input; scoped reads are answered only for native sessions.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn run_at_revision(
+    pub(super) fn run_scoped(
         &self,
         app: &tauri::AppHandle,
         addon: &'static super::Addon,
         command: &str,
-        invocation: super::contributions::Invocation,
+        (invocation, mut reads): (
+            super::contributions::Invocation,
+            Option<super::objects::scoped_reads::Reads>,
+        ),
         context: Option<&str>,
         revision: Option<u64>,
         cancelled: impl Fn() -> bool,
@@ -826,7 +875,26 @@ impl Runtime {
             job.state.lock().unwrap().incompatible_session = Some(version);
             return Err(Failure::NeedsUpdate);
         }
-        let reply = worker.call(method, params, Duration::from_secs(30), cancelled)?;
+        let mut params = params;
+        if manifest
+            .requires
+            .iter()
+            .any(|feature| feature == super::objects::scoped_reads::FEATURE)
+        {
+            if !worker
+                .capabilities
+                .contains(super::objects::scoped_reads::FEATURE)
+            {
+                return Err(Failure::NeedsUpdate);
+            }
+            if let Some(reads) = &reads {
+                params["reads"] = reads.offer();
+            }
+        } else {
+            reads = None;
+        }
+        let reply =
+            worker.call_scoped(method, params, Duration::from_secs(30), cancelled, reads)?;
         if let Some(context) = context {
             *slot = Some((fingerprint, context.into(), worker));
         }
