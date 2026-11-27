@@ -94,9 +94,12 @@
 
 <style>
   .mixed-selection { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 2147483647; pointer-events: none; }
-  rect { fill: transparent; stroke: var(--paper-select); stroke-width: calc(1.5px / var(--zoom)); stroke-dasharray: calc(4px / var(--zoom)) calc(3px / var(--zoom)); pointer-events: all; cursor: move; touch-action: none; }
-  circle { fill: transparent; pointer-events: all; cursor: nwse-resize; touch-action: none; }
+  /* The page is zoomed with a CSS scale, so a CSS outline here would grow with the zoom. Focus is
+     shown with strokes divided by the zoom instead, which keep their screen size. */
+  rect { fill: transparent; stroke: var(--paper-select); stroke-width: calc(1.5px / var(--zoom)); stroke-dasharray: calc(4px / var(--zoom)) calc(3px / var(--zoom)); pointer-events: all; cursor: move; touch-action: none; outline: none; }
+  circle { fill: transparent; pointer-events: all; cursor: nwse-resize; touch-action: none; outline: none; }
   .rotate { cursor: grab; }
   .visible-handle { fill: var(--paper); stroke: var(--paper-select); stroke-width: calc(1.5px / var(--zoom)); pointer-events: none; }
-  [role=button]:focus-visible { outline: 2px solid var(--paper-select); outline-offset: 2px; }
+  rect:focus-visible { stroke-width: calc(2.5px / var(--zoom)); }
+  circle[role=button]:focus-visible { stroke: var(--paper-select); stroke-width: calc(2px / var(--zoom)); }
 </style>
