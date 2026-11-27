@@ -22,6 +22,11 @@ export const PULL_MAX_SHIFT_PX = 96;
 /** How long the wheel may rest before an unfinished pull springs back, in milliseconds. */
 export const PULL_WHEEL_IDLE_MS = 450;
 
+/** A wheel stream is one gesture until it has gone quiet. Reaching the edge never arms it. */
+export function mayArmPull(alreadyAtEnd: boolean, idleMs: number): boolean {
+  return alreadyAtEnd && idleMs >= PULL_WHEEL_IDLE_MS;
+}
+
 export type PullSource = "touch" | "wheel";
 
 /** How far the page visibly moves for a raw overscroll. Grows ever more slowly toward the cap. */

@@ -20,6 +20,26 @@ function workspace() {
 }
 
 describe("viewport navigation", () => {
+  it("ignores a wheel momentum tail reaching the end until a new gesture", () => {
+    vi.useFakeTimers();
+    const { env, navigation } = workspace();
+    const addPage = vi.fn();
+    Object.assign(env, { settings: { ...DEFAULT_SETTINGS, pullToAddPage: true },
+      tauriAvailable: true, pageOpen: true, notebookManifest: {}, addPage,
+      pageViewport: { scrollTop: 800, clientHeight: 100, scrollHeight: 1000 },
+    });
+    const wheel = () => navigation.wheelZoom({ deltaY: 400, deltaMode: 0, preventDefault: vi.fn() } as unknown as WheelEvent);
+    wheel();
+    env.pageViewport!.scrollTop = 900;
+    vi.advanceTimersByTime(16);
+    wheel();
+    expect(addPage).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(450);
+    wheel();
+    expect(addPage).toHaveBeenCalledOnce();
+    navigation.dispose();
+  });
+
   it("maps pointer locations through the coordinate authority and clamps margin pastes", () => {
     const { navigation, env } = workspace();
     expect(navigation.pagePointAt(180, 300)).toEqual({ x: 40, y: 50 });

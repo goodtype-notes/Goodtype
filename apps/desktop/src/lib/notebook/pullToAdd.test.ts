@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   atScrollEnd,
+  mayArmPull,
+  PULL_WHEEL_IDLE_MS,
   PULL_FULL_PX,
   PULL_FULL_WHEEL_PX,
   PULL_MAX_SHIFT_PX,
@@ -10,6 +12,13 @@ import {
 } from "./pullToAdd";
 
 describe("pull past the last page", () => {
+  it("only arms a separate gesture that begins at the end", () => {
+    expect(mayArmPull(false, Infinity)).toBe(false);
+    expect(mayArmPull(true, PULL_WHEEL_IDLE_MS - 1)).toBe(false);
+    expect(mayArmPull(true, PULL_WHEEL_IDLE_MS)).toBe(true);
+    // The momentum tail reaches the edge, but remains part of the incoming gesture.
+    expect(mayArmPull(true, 16)).toBe(false);
+  });
   it("resists more the further it is pulled and never passes its cap", () => {
     expect(rubberBand(0)).toBe(0);
     expect(rubberBand(-20)).toBe(0);
