@@ -334,7 +334,7 @@
   style:top={`${y}px`}
   style:width={`${layoutWidthPt}px`}
   style:transform={`rotate(${rotation}deg) scale(${scale})`}
-  style:--handle-scale={1 / (zoom * scale)}
+  style:--selection-scale={1 / (zoom * scale)}
   style:z-index={editing ? 1000 : zIndex}
   aria-label={$t("workspace.typstBlockReadingPosition", { "id": id, "value2": readingOrder + 1 })}
   onpointermove={moveGesture}
@@ -373,17 +373,18 @@
     </ul>
   {/if}
 
+  <svg class="selection-frame" aria-hidden="true"><rect class="selection-box" width="100%" height="100%" /></svg>
   {#if selected}
   <button
     type="button"
-    class="handle resize"
+    class="handle resize selection-html-handle"
     aria-label={$t("workspace.changeTypstLayoutWidth")}
     title={$t("workspace.dragToChangeLineWrapping")}
     onpointerdown={(event) => startGesture(event, "reflow")}></button
   >
   <button
     type="button"
-    class="handle scale-corner"
+    class="handle scale-corner selection-html-handle"
     aria-label={$t("workspace.scaleTypstBlock")}
     title={$t("workspace.dragToScaleTypstBlock")}
     onpointerdown={(event) => startGesture(event, "scale")}></button
@@ -445,8 +446,7 @@
   .typst-block.selected::before,
   .typst-block:focus-within::before,
   .typst-block.editing::before {
-    border-color: var(--paper-select);
-    box-shadow: 0 0 0 0.5px var(--paper-select);
+    border-color: transparent;
   }
 
   .typst-block.editing {
@@ -466,10 +466,9 @@
     box-shadow: var(--shadow-panel);
   }
 
-  .preview:focus-visible,
-  .handle:focus-visible {
-    outline: 2px solid var(--blueprint);
-    outline-offset: 2px;
+  .preview:focus-visible {
+    outline: calc(var(--selection-focus-stroke) * var(--selection-scale)) solid var(--selection-color);
+    outline-offset: 0;
   }
 
   /* No padding: the content box is the block's true footprint, so what is on screen is the size
@@ -512,9 +511,6 @@
 
   .handle {
     position: absolute;
-    padding: 0;
-    border: 1.5px solid var(--paper-select);
-    background: white;
     opacity: 0;
   }
 
@@ -523,48 +519,25 @@
     opacity: 1;
   }
 
+  .selected .selection-frame,
+  .editing .selection-frame,
+  .typst-block:focus-within .selection-frame { opacity: 1; }
+  .selection-frame {
+    opacity: 0;
+    inset: calc(-1 * var(--block-gutter));
+    width: calc(100% + 2 * var(--block-gutter));
+    height: calc(100% + 2 * var(--block-gutter));
+  }
   .resize {
-    /* Straddles the frame, which the gutter has moved outward. */
-    right: calc(-14px - var(--block-gutter));
+    right: calc(-1 * var(--selection-hit-radius) - var(--block-gutter));
     top: 50%;
-    width: 28px;
-    min-width: 28px;
-    height: 44px;
-    min-height: 44px;
-    transform: translateY(-50%) scale(var(--handle-scale));
-    transform-origin: center;
-    border: 0;
-    background: transparent;
+    transform: translateY(-50%) scale(var(--selection-scale));
     cursor: ew-resize;
   }
-
-  .resize::after {
-    position: absolute;
-    top: 8px;
-    bottom: 8px;
-    left: 11px;
-    width: 4px;
-    border: 1.5px solid white;
-    border-radius: 3px;
-    background: var(--paper-select);
-    content: "";
-  }
   .scale-corner {
-    right: calc(-22px - var(--block-gutter));
-    bottom: calc(-22px - var(--block-gutter));
-    width: 44px;
-    height: 44px;
-    border: 0;
-    background: transparent;
-    transform: scale(var(--handle-scale));
+    right: calc(-1 * var(--selection-hit-radius) - var(--block-gutter));
+    bottom: calc(-1 * var(--selection-hit-radius) - var(--block-gutter));
+    transform: scale(var(--selection-scale));
     cursor: nwse-resize;
-  }
-  .scale-corner::after {
-    position: absolute;
-    inset: 16px;
-    border: 2px solid var(--paper-select);
-    border-radius: 2px;
-    background: white;
-    content: "";
   }
 </style>

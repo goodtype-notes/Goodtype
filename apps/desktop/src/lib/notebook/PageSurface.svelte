@@ -291,6 +291,7 @@
   {#each images as image (image.id)}
     <ImageObject
       id={image.id}
+      {zoom}
       src={image.url}
       alt={image.alt}
       x={image.x}

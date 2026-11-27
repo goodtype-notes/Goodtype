@@ -28,6 +28,19 @@
   /* Selection drawn on paper needs a darker blue to hold contrast against white. */
   --paper-select: #2f6fdb;
 
+  /* Selection chrome follows the single-shape blueprint accent. Values are screen pixels;
+     each overlay supplies the inverse of its page/object scale as --selection-scale. */
+  --selection-color: var(--blueprint);
+  --selection-dot-radius: 5px;
+  --selection-rotate-radius: 4.5px;
+  --selection-hit-radius: 22px;
+  --selection-stroke: 1.5px;
+  --selection-stem-stroke: 1.2px;
+  --selection-dash: 4px;
+  --selection-gap: 3px;
+  --selection-focus-stroke: 2px;
+  --selection-box-focus-stroke: 2.5px;
+
   /* Status. Each one is a signal, never decoration. */
   --oxide: #e5645e;
   --oxide-hover: #ef7a74;
@@ -85,4 +98,72 @@
   --font-code: "Cascadia Mono", Consolas, monospace;
 
   font-family: var(--font-ui);
+}
+
+/* Shared SVG chrome. CSS outlines would grow with the zoomed page. */
+.selection-box, .selection-dot, .selection-stem {
+  stroke: var(--selection-color);
+  stroke-width: calc(var(--selection-stroke) * var(--selection-scale));
+  pointer-events: none;
+}
+.selection-box {
+  fill: none;
+  stroke-dasharray: calc(var(--selection-dash) * var(--selection-scale)) calc(var(--selection-gap) * var(--selection-scale));
+}
+.selection-dot {
+  r: calc(var(--selection-dot-radius) * var(--selection-scale));
+  fill: var(--paper);
+}
+.selection-dot.rotate-dot { r: calc(var(--selection-rotate-radius) * var(--selection-scale)); }
+.selection-stem {
+  stroke-width: calc(var(--selection-stem-stroke) * var(--selection-scale));
+  opacity: 0.72;
+}
+.selection-hit {
+  r: calc(var(--selection-hit-radius) * var(--selection-scale));
+  outline: none;
+}
+.selection-hit:focus-visible {
+  stroke: var(--selection-color);
+  stroke-width: calc(var(--selection-focus-stroke) * var(--selection-scale));
+}
+.selection-box:focus-visible {
+  stroke-width: calc(var(--selection-box-focus-stroke) * var(--selection-scale));
+}
+.selection-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+/* HTML buttons retain their native keyboard semantics, with the same dot and hit diameter. */
+.selection-html-handle {
+  box-sizing: border-box;
+  width: calc(2 * var(--selection-hit-radius));
+  height: calc(2 * var(--selection-hit-radius));
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+.selection-html-handle::after {
+  content: "";
+  position: absolute;
+  box-sizing: border-box;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: calc(2 * var(--selection-dot-radius) + var(--selection-stroke));
+  height: calc(2 * var(--selection-dot-radius) + var(--selection-stroke));
+  /* Fractional HTML borders round to whole device pixels; an inset shadow retains 1.5px. */
+  box-shadow: inset 0 0 0 var(--selection-stroke) var(--selection-color);
+  border-radius: 50%;
+  background: var(--paper);
+  pointer-events: none;
+}
+.selection-html-handle:focus-visible {
+  outline: var(--selection-focus-stroke) solid var(--selection-color);
+  outline-offset: 0;
 }
