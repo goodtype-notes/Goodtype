@@ -70,10 +70,11 @@
   import { supportsShapeCaps, type ShapeDraft } from "../shape/geometry";
   import LassoPanel from "./LassoPanel.svelte";
   import HelperCrop from "../helper/HelperCrop.svelte";
-  import { viewportToPage } from "../geometry/coordinates";
+  import { pageToViewport, viewportToPage } from "../geometry/coordinates";
   import StretchHandles from "./StretchHandles.svelte";
   import type { StretchPreview } from "./stretch";
   import MixedSelection from "./MixedSelection.svelte";
+  import { beginPlacementSnap, snapPlacement, sameGuides, type SnapSession, type SnapGuide } from "../geometry/alignSnap";
   import SnapGuides from "./SnapGuides.svelte";
   import { DEFAULT_LASSO_TARGETS } from "./lasso";
   import { addonPaletteId, type PaletteCommand, type PaletteDock } from "./palette";
@@ -1084,7 +1085,7 @@
 
   /// One placement is one Rust insertion and one undo step. `at` is a client point on page
   /// `pageId`; without it the item lands in the middle of what is visible.
-  async function placePackShape(choice: ShapeChoice, at: { x: number; y: number; pageId: string } | null, select: boolean) {
+  async function placePackShape(choice: ShapeChoice, at: { x: number; y: number; pageId: string } | null, select: boolean, alt = false) {
     if (session.pageInputLocked || !session.root) return;
     shapeFailure = null;
     try {
@@ -1094,8 +1095,11 @@
         if (session.activePageId !== at.pageId) return;
       }
       if (session.activeCalculation) return;
-      const point = at ? dropPoint(navigation, pageFrame?.getBoundingClientRect(), at.x, at.y) : visiblePageCentre();
+      let point = at ? dropPoint(navigation, pageFrame?.getBoundingClientRect(), at.x, at.y) : visiblePageCentre();
       if (at && !point) return;
+      const item = shapeShelves.flatMap(shelf => shelf.items).find(row => sameShape(row.choice, choice))?.item;
+      if (at && point && item) point = placementPoint(item, point, alt).point;
+      hideShapeGhost();
       const pen = shapePen();
       await session.insertContentShape({ ...choice, scale: 1, point: point ?? undefined, penColor: pen.color, penWidthPt: pen.widthPt }, select);
       shapeRecent = rememberShape(shapeRecent, choice);
@@ -1111,15 +1115,46 @@
   let shapeGhostElement = $state<HTMLElement>();
   let shapeGhostAt = { x: 0, y: 0 };
   let shapeDragging = false;
+  let shapeDragCancelled = false;
   const placeGhost = (element: HTMLElement | undefined) => {
     if (element) element.style.transform = `translate(${shapeGhostAt.x}px, ${shapeGhostAt.y}px) translate(-50%, -50%)`;
   };
-  function showShapeGhost(item: PackShape, x: number, y: number) {
-    shapeGhostAt = { x, y };
-    if (shapeGhost !== item) shapeGhost = item;
-    placeGhost(shapeGhostElement);
+  let placementGuides = $state.raw<SnapGuide[]>([]);
+  let placementCache: { item: PackShape; pageId: string; revision: number | undefined; snap: SnapSession } | null = null;
+  let ghostFrame = 0;
+  function clearPlacementSnap() {
+    placementCache = null;
+    if (placementGuides.length) placementGuides = [];
+  }
+  function placementPoint(item: PackShape, point: { x: number; y: number }, alt: boolean) {
+    const pageId = session.activePageId, revision = session.activeSnapshot?.page.revision;
+    if (!placementCache || placementCache.item !== item || placementCache.pageId !== pageId || placementCache.revision !== revision) {
+      placementCache = { item, pageId, revision, snap: beginPlacementSnap(selection.placementSnapFrames(), item) };
+    }
+    return snapPlacement(placementCache.snap, point, zoom, settings.snapToObjects !== false, alt);
+  }
+  $effect(() => { session.activePageId; session.root; untrack(hideShapeGhost); return hideShapeGhost; });
+  function showShapeGhost(item: PackShape, x: number, y: number, alt = false) {
+    cancelAnimationFrame(ghostFrame);
+    ghostFrame = requestAnimationFrame(() => {
+      ghostFrame = 0;
+      shapeGhostAt = { x, y };
+      const overActive = stampPage(document.elementFromPoint(x, y)) === session.activePageId;
+      const point = overActive ? dropPoint(navigation, pageFrame?.getBoundingClientRect(), x, y) : null;
+      if (point) {
+        const snapped = placementPoint(item, point, alt);
+        const offset = pageToViewport({ x: snapped.point.x - point.x, y: snapped.point.y - point.y }, { pageOriginX: 0, pageOriginY: 0, zoom });
+        shapeGhostAt = { x: x + offset.x, y: y + offset.y };
+        if (!sameGuides(placementGuides, snapped.guides)) placementGuides = snapped.guides;
+      } else clearPlacementSnap();
+      if (shapeGhost !== item) shapeGhost = item;
+      placeGhost(shapeGhostElement);
+    });
   }
   function hideShapeGhost() {
+    cancelAnimationFrame(ghostFrame);
+    ghostFrame = 0;
+    clearPlacementSnap();
     if (shapeGhost) shapeGhost = null;
   }
 
@@ -1225,7 +1260,7 @@
     if (shapeStamp) {
       stampTaps.move(event.pointerId, event.clientX, event.clientY);
       if (!shapeDragging) {
-        if (stampItem && event.pointerType !== "touch" && stampPage(event.target)) showShapeGhost(stampItem, event.clientX, event.clientY);
+        if (stampItem && event.pointerType !== "touch" && stampPage(event.target)) showShapeGhost(stampItem, event.clientX, event.clientY, event.altKey);
         else hideShapeGhost();
       }
       if (stampPointer === event.pointerId) { event.stopPropagation(); return; }
@@ -1246,9 +1281,10 @@
       if (enter) enterSelectedGroup(event);
       return;
     }
+    if (event.type !== "pointerup") hideShapeGhost();
     if (stampTaps.owns(event.pointerId)) {
       const tap = stampTaps.up(event.pointerId, event.clientX, event.clientY, event.timeStamp, event.type !== "pointerup");
-      if (tap && shapeStamp) void placePackShape(shapeStamp, tap, false);
+      if (tap && shapeStamp) void placePackShape(shapeStamp, { ...tap, x: event.clientX, y: event.clientY }, false, event.altKey);
     }
     if (stampPointer === event.pointerId) {
       stampPointer = null;
@@ -1261,15 +1297,18 @@
 
   function dragPackShape(drag: ShapeDrag) {
     if (drag.phase === "move") {
+      if (shapeDragCancelled) return;
       shapeDragging = true;
-      showShapeGhost(drag.row.item, drag.x, drag.y);
+      showShapeGhost(drag.row.item, drag.x, drag.y, drag.alt);
       return;
     }
     shapeDragging = false;
     hideShapeGhost();
-    if (drag.phase !== "drop") return;
+    const cancelled = shapeDragCancelled;
+    shapeDragCancelled = false;
+    if (cancelled || drag.phase !== "drop") return;
     const pageId = stampPage(document.elementFromPoint(drag.x, drag.y));
-    if (pageId) void placePackShape(drag.row.choice, { x: drag.x, y: drag.y, pageId }, true);
+    if (pageId) void placePackShape(drag.row.choice, { x: drag.x, y: drag.y, pageId }, true, drag.alt);
   }
   let addonReturn: HTMLElement | null = null;
   let workspaceElement: HTMLElement;
@@ -2334,6 +2373,12 @@
       event.preventDefault();
       return;
     }
+    if (event.key === "Escape" && shapeDragging) {
+      event.preventDefault();
+      shapeDragCancelled = true;
+      hideShapeGhost();
+      return;
+    }
     if (event.key === "Escape" && shapeStamp) {
       event.preventDefault();
       shapeStamp = nextStamp(shapeStamp, { type: "escape" });
@@ -3106,6 +3151,9 @@
                     <MixedSelection bounds={selection.mixedSelectionBounds} {zoom}
                       onStart={selection.beginMixedTransform} onPreview={selection.previewMixedTransform} onEnd={selection.endMixedTransform}
                       onEnter={selection.selectedGroup ? enterSelectedGroup : undefined} />
+                  {/if}
+                  {#if active && placementGuides.length}
+                    <SnapGuides guides={placementGuides} {zoom} />
                   {/if}
                   {#if active && selection.snapGuides.length}
                     <SnapGuides guides={selection.snapGuides} {zoom} />

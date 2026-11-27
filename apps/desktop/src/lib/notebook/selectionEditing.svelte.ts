@@ -1376,6 +1376,7 @@ export function createSelection(env: SelectionEnvironment) {
     set groupEdits(value: typeof groupEdits) { groupEdits = value; },
     lassoSelection,
     moveSnap,
+    placementSnapFrames: () => snapFrames(objectBoxes(), new Set()),
     get snapGuides() { return snapGuides; },
     get alignCount() { return alignCount; },
     alignSelection,
