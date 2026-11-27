@@ -20,6 +20,34 @@ function workspace() {
 }
 
 describe("viewport navigation", () => {
+  it("requires a new touch drag at the end instead of pulling during the incoming drag", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("Element", class {});
+    const { env, navigation } = workspace();
+    const addPage = vi.fn();
+    Object.assign(env, { settings: { ...DEFAULT_SETTINGS, reducedMotion: true, pullToAddPage: true },
+      tauriAvailable: true, pageOpen: true, notebookManifest: {}, addPage,
+      routeObjectPointer: vi.fn(), workspace: { setPointerCapture: vi.fn() },
+      pageViewport: { scrollTop: 800, scrollLeft: 0, clientHeight: 100, scrollHeight: 1000 },
+    });
+    const event = (clientY: number, type = "pointermove") => ({ pointerId: 1, pointerType: "touch",
+      button: 0, clientX: 0, clientY, target: null, timeStamp: performance.now(), type,
+      preventDefault: vi.fn(), stopPropagation: vi.fn(),
+    }) as unknown as PointerEvent;
+    navigation.workspacePointerDown(event(400, "pointerdown"));
+    navigation.workspacePointerMove(event(100));
+    expect(navigation.pull).toBeNull();
+    navigation.workspacePointerEnd(event(100, "pointerup"));
+    expect(addPage).not.toHaveBeenCalled();
+    env.pageViewport!.scrollTop = 900;
+    navigation.workspacePointerDown(event(400, "pointerdown"));
+    navigation.workspacePointerMove(event(100));
+    expect(navigation.pull?.raw).toBe(300);
+    navigation.workspacePointerEnd(event(100, "pointerup"));
+    expect(addPage).toHaveBeenCalledOnce();
+    navigation.dispose();
+  });
+
   it("ignores a wheel momentum tail reaching the end until a new gesture", () => {
     vi.useFakeTimers();
     const { env, navigation } = workspace();
