@@ -654,8 +654,7 @@ pub fn check_contract(
     // validates every imported notebook before publishing it.
     if manifest.protocol_version != PROTOCOL_VERSION
         || (expected.imports_notebooks() && !importable_schema(manifest.notebook_schema_version))
-        || !(manifest.target == TARGET
-            || (cfg!(feature = "wasm-tier") && manifest.target == WASM_TARGET))
+        || !(manifest.target == TARGET || manifest.target == WASM_TARGET)
     {
         return Err(format!(
             "importer {} speaks protocol {} for notebook schema {} on {}; this Goodtype needs \

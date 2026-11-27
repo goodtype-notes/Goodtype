@@ -747,6 +747,11 @@ mod tests {
         }
         let parse_value = |v: &Value| parse(&serde_json::to_vec(v).unwrap(), addon, "1.2.3");
         assert_eq!(parse_value(&value).is_ok(), cfg!(feature = "wasm-tier"));
+        if !cfg!(feature = "wasm-tier") {
+            assert!(
+                matches!(parse_value(&value), Err(Error::MissingFeatures(features)) if features == ["wasm-v0"])
+            );
+        }
         for (key, bad) in [
             ("module", json!("../module.wasm")),
             ("sha256", json!("bad")),

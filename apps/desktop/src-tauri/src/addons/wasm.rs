@@ -369,17 +369,20 @@ mod tests {
             )
             .unwrap();
             let reply = serde_json::from_slice(&output).unwrap();
-            assert_eq!(
-                super::super::batch::apply_owned(
-                    &root,
-                    snapshot.clone(),
-                    "connectors",
-                    None,
-                    reply
-                )
-                .is_ok(),
-                accepted
+            let candidate = super::super::batch::apply_owned(
+                &root,
+                snapshot.clone(),
+                "connectors",
+                None,
+                reply,
             );
+            if accepted {
+                let candidate = candidate.unwrap().unwrap();
+                assert_eq!(candidate.page.objects[0].fields().x, 42.0);
+                assert_eq!(candidate.page.revision, snapshot.page.revision);
+            } else {
+                assert!(candidate.is_err());
+            }
         }
     }
 

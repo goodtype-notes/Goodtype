@@ -1,5 +1,6 @@
 import { materialItems } from "../helper/crop";
 import { invoke } from "@tauri-apps/api/core";
+import { ADDON_AVAILABILITY_CHANGED } from "../ipc/addons";
 import { previewChannel, type Mark } from "./wasmPreview";
 import type { createNavigation } from "./viewportNavigation.svelte";
 
@@ -279,6 +280,11 @@ export function createSelection(env: SelectionEnvironment) {
   $effect(() => {
     void [env.root, env.activePageId, env.activeSnapshot?.page.revision];
     return () => endWasmPreview();
+  });
+  $effect(() => {
+    if (typeof window === "undefined") return;
+    window.addEventListener(ADDON_AVAILABILITY_CHANGED, endWasmPreview);
+    return () => window.removeEventListener(ADDON_AVAILABILITY_CHANGED, endWasmPreview);
   });
   let transformPreview = $state.raw<{
     objects: ReadonlySet<string>; ink: InkPreview; rotation: number;

@@ -727,7 +727,10 @@ output never reaches persistence.
 
 Live drag previews use a dedicated bundled Worker with rehashed bytes, no Tauri bridge, a 5 s
 startup watchdog and a 16 ms call watchdog. Failure terminates the Worker and removes marks,
-leaving the ordinary drag preview. The host admits at most 128 marks and 512 total path vertices
+leaving the ordinary drag preview. Each Worker pins one digest for its gesture. Addon availability
+changes (disable, remove, rollback, install/update) terminate the preview, including pending
+module loads, so it cannot continue showing old-module marks after an addon replacement.
+The host admits at most 128 marks and 512 total path vertices
 (including spline handles), bounded finite coordinates/transforms (absolute value <= 100000,
 positive scale), and <= 32 KiB output. Marks have x/y/rotation/scale and geometry:
 `polyline {points}`, `bezier {points: [start, control1, control2, end]}`, `label {text}`,
