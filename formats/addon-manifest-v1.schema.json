@@ -51,6 +51,12 @@
     }
   ],
   "properties": {
+    "requires": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/identifier" }
+    },
     "manifestVersion": {
       "const": 1
     },
