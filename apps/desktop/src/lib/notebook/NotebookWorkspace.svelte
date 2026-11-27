@@ -30,7 +30,7 @@
   import { listRecentNotebooks, recordNotebookPage, recordNotebookSession, resumeNotebookSession, writeMetrics } from "../ipc/workspace";
   import { placeFloatingToolbar } from "../geometry/placement";
   import { dismissable } from "../workspace/dismiss";
-  import { type PageBackground, type PageDefaults, type PagePosition, type ShapeStyle, type ShapeCap, type PageTemplate, type StrokePattern } from "../model";
+  import { type PageDefaults, type PagePosition, type ShapeStyle, type ShapeCap, type PageTemplate, type StrokePattern } from "../model";
   import { TYPST_IDLE_DEBOUNCE_MS, type TypstCompileResult } from "../editor/typst";
   import { createTypstPreset, installPageTypstPreset, listenPresetChanges, readTypstPreset, pickTypstPreset, setDefaultTypstPreset } from "../ipc/presets";
   import { presetHeader, presetTargetCurrent, DEFAULT_PRESET_PATH, withPagePreset, type PresetChoice, type PresetTarget } from "../page/presets";
@@ -55,7 +55,7 @@
   import { INCLUDE_EVERYTHING, type ExportChoice } from "../workspace/exportTarget";
   import AddPageMenu from "../workspace/AddPageMenu.svelte";
   import type { AddPageGroup, AddPageSource, AddPageWhere } from "../workspace/addPage";
-  import { templatePreviewSvg } from "../page/template";
+  import { recolorBackground, templatePreviewSvg } from "../page/template";
   import { PAPER_TONES, paperTones, templateGroups } from "../page/templates";
   import { DEFAULT_PAGE_SIZE, PAGE_SIZES, pageSizes, describeGeometry, geometryOf, type Orientation } from "../page/sizes";
   import SideEditor from "./SideEditor.svelte";
@@ -925,8 +925,9 @@
   }
   let moreOpen = $state(false);
   let inheritedPaper = $state<PageDefaults | null>(null);
+  let addPageToneChanged = $state(false);
   $effect(() => {
-    if (!addPageOpen) return;
+    if (!addPageOpen) { addPageToneChanged = false; return; }
     inheritedPaper = null;
     const pageId = session.activePageId;
     const position: PagePosition = addPageWhere === "last" ? { kind: "last" } : { kind: addPageWhere, pageId };
@@ -1613,11 +1614,10 @@
     // Preview the inherited paper; Rust resolves it again at commit time.
     const current = session.activeBackground;
     const color = (PAPER_TONES.find(tone => tone.id === addPageToneId) ?? PAPER_TONES[0]).backgroundColor;
-    const background: PageBackground = editBackground && backgroundToneChanged
-      ? current.kind === "template" ? { ...current, template: { ...current.template, backgroundColor: color } }
-        : { kind: "plain", color }
-      : current;
-    const next = editBackground ? { background, geometry } : inheritedPaper ?? session.notebookManifest?.defaultPage ?? null;
+    const background = backgroundToneChanged ? recolorBackground(current, color) : current;
+    const base = inheritedPaper ?? session.notebookManifest?.defaultPage ?? null;
+    const next = editBackground ? { background, geometry } : base && addPageToneChanged
+      ? { ...base, background: recolorBackground(base.background, color) } : base;
     const nextUsable = next && next.background.kind !== "pdf" ? next : null;
     const paperPreview = (paper: PageDefaults) =>
       paper.background.kind === "template"
@@ -1677,7 +1677,7 @@
                   detail: `${paperName(nextUsable)}, ${describeGeometry(nextUsable.geometry, $t)}`,
                   preview: paperPreview(nextUsable),
                   onSelect: (position: PagePosition, count: number) =>
-                    editBackground ? void session.changeBackground(nextUsable.background) : void session.addPage(position, null, nextUsable.geometry, count),
+                    editBackground ? void session.changeBackground(nextUsable.background) : void session.addPage(position, addPageToneChanged ? nextUsable.background : null, nextUsable.geometry, count),
                 } satisfies AddPageSource,
               ]
             : []),
@@ -2770,7 +2770,7 @@
               geometry={addPageGeometry}
               canPlaceRelative={session.pageCount > 0 && Boolean(session.activePageId)}
               onWhereChange={(next) => (addPageWhere = next)}
-              onToneChange={(next) => (addPageToneId = next)}
+              onToneChange={(next) => { addPageToneId = next; addPageToneChanged = true; }}
               onSizeChange={(next) => (addPageSizeId = next)}
               onOrientationChange={(next) => (addPageOrientation = next)}
               onClose={() => (addPageOpen = false)}

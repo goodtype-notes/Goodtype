@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import cases from "../../../../../fixtures/templates/resolved.json";
 import type { PageGeometry, PageTemplate } from "../model";
-import { MAX_SHAPES, resolveTemplate, templatePreviewSvg, templateSvg, type TemplateShape } from "./template";
+import { recolorBackground, MAX_SHAPES, resolveTemplate, templatePreviewSvg, templateSvg, type TemplateShape } from "./template";
 import { render } from "svelte/server";
 import NotebookCover from "../library/NotebookCover.svelte";
 import { PAPER_TONES, templateGroups } from "./templates";
@@ -14,6 +14,19 @@ type Case = {
 };
 
 describe("template resolution", () => {
+  it("changes only the paper colour, preserving ruling and leaving PDF pages intact", () => {
+    const template = (cases as Case[]).find(item => item.template.elements.length)!.template;
+    const background = { kind: "template" as const, template };
+    expect(recolorBackground(background, "#f4efe3")).toEqual({
+      kind: "template", template: { ...template, backgroundColor: "#f4efe3" },
+    });
+    expect(background.template).toBe(template);
+    expect(recolorBackground({ kind: "plain", color: "#ffffff" }, "#f4efe3"))
+      .toEqual({ kind: "plain", color: "#f4efe3" });
+    const pdf = { kind: "pdf" as const, sourcePath: "references/test.pdf", page: 1 };
+    expect(recolorBackground(pdf, "#f4efe3")).toBe(pdf);
+  });
+
   const geometry = { widthPt: 100, heightPt: 100 };
   const area = { topPt: 0, rightPt: 0, bottomPt: 0, leftPt: 0 };
   const blank: PageTemplate = { id: "custom", name: "Custom", backgroundColor: "#fFfFfF80", elements: [] };
