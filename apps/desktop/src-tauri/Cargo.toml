@@ -39,12 +39,12 @@ getrandom = "0.3"
 typst-syntax = "=0.15.1"
 # Validate the identity and entry point in ordinary Typst package metadata.
 toml = "1"
-# ADR 0050: compiled capability-free runtime; execution requires the wasm-tier opt-in.
-extism = { version = "=1.41.0", default-features = false }
+# ADR 0050: capability-free runtime, compiled only with the wasm-tier opt-in.
+extism = { version = "=1.41.0", default-features = false, optional = true }
 # Hold Extism's runtime to the patched ADR 0050 release line.
-wasmtime = { version = "=49.0.7", default-features = false }
+wasmtime = { version = "=49.0.7", default-features = false, optional = true }
 # Inspect module declarations before either engine compiles them.
-wasmparser = { version = "=0.258.3" }
+wasmparser = { version = "=0.258.3", optional = true }
 
 [dev-dependencies]
 rmcp = { version = "=3.8.0", default-features = false, features = ["client"] }
@@ -73,6 +73,6 @@ windows = { version = "0.61", features = [
 windows-collections = "0.2"
 
 [features]
-wasm-tier = []
+wasm-tier = ["dep:extism", "dep:wasmtime", "dep:wasmparser"]
 wasm-spike = ["wasm-tier"]
 

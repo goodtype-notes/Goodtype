@@ -1,14 +1,20 @@
 //! ADR 0050: capability-free runtime; execution is gated by `wasm-tier`.
+#[cfg(feature = "wasm-tier")]
 use sha2::{Digest, Sha256};
+#[cfg(feature = "wasm-tier")]
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
+#[cfg(feature = "wasm-tier")]
 use wasmparser::{ExternalKind, Parser, Payload, TypeRef};
 
+#[cfg(feature = "wasm-tier")]
 pub const MODULE_LIMIT: usize = 1024 * 1024;
+#[cfg(feature = "wasm-tier")]
 pub const IO_LIMIT: usize = 32 * 1024;
+#[cfg(feature = "wasm-tier")]
 const KERNEL: &[&str] = &[
     "alloc",
     "free",
@@ -25,6 +31,7 @@ const KERNEL: &[&str] = &[
     "error_set",
 ];
 
+#[cfg(feature = "wasm-tier")]
 pub fn validate(bytes: &[u8], digest: &str) -> Result<(), String> {
     if bytes.len() > MODULE_LIMIT || format!("{:x}", Sha256::digest(bytes)) != digest {
         return Err("module size or digest".into());
@@ -134,18 +141,27 @@ pub fn validate(bytes: &[u8], digest: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "wasm-tier")]
 type Cache = Mutex<HashMap<String, Arc<extism::CompiledPlugin>>>;
+#[cfg(feature = "wasm-tier")]
 static CACHE: OnceLock<Cache> = OnceLock::new();
 
 pub const ENABLED: bool = cfg!(feature = "wasm-tier");
 
+/// Without the tier a Wasm entry point is a missing host feature, never a corrupt package.
+#[cfg(not(feature = "wasm-tier"))]
+pub(super) fn module_bytes(
+    _path: &std::path::Path,
+    _manifest: &super::manifest::Manifest,
+) -> Result<Vec<u8>, String> {
+    Err("addon-needs-update".into())
+}
+
+#[cfg(feature = "wasm-tier")]
 pub(super) fn module_bytes(
     path: &std::path::Path,
     manifest: &super::manifest::Manifest,
 ) -> Result<Vec<u8>, String> {
-    if !ENABLED {
-        return Err("addon-needs-update".into());
-    }
     let module = manifest.wasm.as_ref().ok_or("addon-unavailable")?;
     let bytes = crate::store::read_bounded(&path.join(&module.module), MODULE_LIMIT)?;
     validate(&bytes, &module.sha256)?;
@@ -217,6 +233,17 @@ pub fn addon_wasm_bytes(
     Err("addon-unavailable".into())
 }
 
+#[cfg(not(feature = "wasm-tier"))]
+pub(super) fn invoke(
+    path: &std::path::Path,
+    manifest: &super::manifest::Manifest,
+    _export: &str,
+    _params: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    module_bytes(path, manifest).map(|_| serde_json::Value::Null)
+}
+
+#[cfg(feature = "wasm-tier")]
 pub(super) fn invoke(
     path: &std::path::Path,
     manifest: &super::manifest::Manifest,
@@ -235,6 +262,7 @@ pub(super) fn invoke(
     Ok(result)
 }
 
+#[cfg(feature = "wasm-tier")]
 pub fn compile(bytes: &[u8], digest: &str) -> Result<Arc<extism::CompiledPlugin>, String> {
     validate(bytes, digest)?;
     let mut cache = CACHE
@@ -262,6 +290,7 @@ pub fn compile(bytes: &[u8], digest: &str) -> Result<Arc<extism::CompiledPlugin>
     Ok(compiled)
 }
 
+#[cfg(feature = "wasm-tier")]
 pub fn call(
     module: &extism::CompiledPlugin,
     export: &str,
@@ -280,6 +309,28 @@ pub fn call(
 }
 
 #[cfg(test)]
+mod gate_tests {
+    use super::*;
+    use serde_json::Value;
+    #[test]
+    fn tier_gate_is_explicit_and_off_in_normal_builds() {
+        assert_eq!(ENABLED, cfg!(feature = "wasm-tier"));
+        if !cfg!(feature = "wasm-tier") {
+            let manifest = super::super::catalog::CONNECTORS.declaration("1.2.3");
+            assert!(module_bytes(std::path::Path::new("."), &manifest).is_err());
+            assert!(!super::super::manifest::supported_feature("wasm-v0"));
+        }
+        let config: Value = serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        assert!(
+            !config["app"]["security"]["csp"]
+                .as_str()
+                .unwrap()
+                .contains("wasm-unsafe-eval")
+        );
+    }
+}
+
+#[cfg(all(test, feature = "wasm-tier"))]
 mod tests {
     use super::*;
     use serde_json::{Value, json};
@@ -302,23 +353,6 @@ mod tests {
     fn guest(body: &str) -> Vec<u8> {
         wat::parse_str(format!("(module (memory (export \"memory\") 1 128) (func (export \"preview\") (result i32) {body}) (func (export \"commit\") (result i32) i32.const 0))")).unwrap()
     }
-    #[test]
-    fn tier_gate_is_explicit_and_off_in_normal_builds() {
-        assert_eq!(ENABLED, cfg!(feature = "wasm-tier"));
-        if !cfg!(feature = "wasm-tier") {
-            let manifest = super::super::catalog::CONNECTORS.declaration("1.2.3");
-            assert!(module_bytes(std::path::Path::new("."), &manifest).is_err());
-            assert!(!super::super::manifest::supported_feature("wasm-v0"));
-        }
-        let config: Value = serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
-        assert!(
-            !config["app"]["security"]["csp"]
-                .as_str()
-                .unwrap()
-                .contains("wasm-unsafe-eval")
-        );
-    }
-
     fn output_guest(output: &str) -> Vec<u8> {
         let data = output
             .bytes()

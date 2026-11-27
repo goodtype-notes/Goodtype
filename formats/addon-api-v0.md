@@ -688,8 +688,10 @@ a failed chunk leaves the user's change intact. A late reaction is retried once 
 
 ## Gated Wasm tier (`goodtype-wasm-v0`)
 
-The first-party tier is compiled into the host but execution and `requires: ["wasm-v0"]`
-are disabled unless built with `--features wasm-tier`. Native entries default to `native`
+The first-party runtime (Extism, Wasmtime, wasmparser) is compiled only with
+`--features wasm-tier`. Without it, manifests and registry entries still parse, but a Wasm entry,
+`requires: ["wasm-v0"]` or a `wasm32-goodtype-v0` package is refused as needing a newer
+Goodtype, never as corrupt. Native entries default to `native`
 and retain their existing transport, permissions and validation. This is still API 0.1:
 execution selection does not change canonical notebook data.
 
