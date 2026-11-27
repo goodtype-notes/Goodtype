@@ -27,7 +27,21 @@
     }
   },
   "else": {
-    "required": ["entrypoint"],
+    "allOf": [
+    {
+      "if": { "required": ["wasm"] },
+      "then": {
+        "required": ["requires"],
+        "properties": {
+          "requires": { "contains": { "const": "wasm-v0" } },
+          "transport": { "const": "stdio-jsonrpc" }
+        }
+      }
+    },{
+      "if": { "properties": { "target": { "const": "wasm32-goodtype-v0" } } },
+      "then": { "required": ["wasm"], "not": { "required": ["entrypoint"] } },
+      "else": { "required": ["entrypoint"] }
+    }],
     "not": { "required": ["contents"] },
     "anyOf": [
       { "properties": { "commands": { "minItems": 1 } } },
@@ -52,11 +66,15 @@
   ],
   "properties": {
     "requires": {
+      "description": "Host features this build understands: end-caps, group-stretch, path-edit-v0, scoped-reads-v0, and wasm-v0 only with the wasm-tier build. Any other name is refused as needing a newer Goodtype.",
       "type": "array",
       "maxItems": 16,
       "uniqueItems": true,
       "items": { "$ref": "#/$defs/identifier" }
     },
+    "wasm": { "$ref": "#/$defs/wasm" },
+    "reaction": { "$ref": "#/$defs/execution" },
+    "preview": { "$ref": "#/$defs/execution" },
     "manifestVersion": {
       "const": 1
     },
@@ -72,7 +90,7 @@
       "const": "goodtype-api 0.1"
     },
     "target": {
-      "const": "x86_64-pc-windows-msvc"
+      "enum": ["x86_64-pc-windows-msvc", "wasm32-goodtype-v0"]
     },
     "entrypoint": {
       "type": "string",
@@ -132,6 +150,7 @@
         "additionalProperties": false,
         "required": ["id", "label", "icon", "kind", "snap"],
         "properties": {
+          "entry": { "$ref": "#/$defs/execution" },
           "id": { "$ref": "#/$defs/identifier" },
           "label": { "$ref": "#/$defs/identifier" },
           "kind": { "enum": ["place", "connect", "frame"] },
@@ -166,6 +185,7 @@
           "surface"
         ],
         "properties": {
+          "entry": { "$ref": "#/$defs/execution" },
           "id": {
             "$ref": "#/$defs/identifier"
           },
@@ -318,6 +338,16 @@
     }
   },
   "$defs": {
+    "execution": { "enum": ["native", "wasm"] },
+    "wasm": {
+      "type": "object", "additionalProperties": false,
+      "required": ["module", "sha256", "abi"],
+      "properties": {
+        "module": { "const": "module.wasm" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "abi": { "const": "goodtype-wasm-v0" }
+      }
+    },
     "contentFiles": {
       "type": "array",
       "maxItems": 32,

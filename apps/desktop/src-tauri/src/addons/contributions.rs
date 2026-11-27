@@ -484,17 +484,21 @@ fn preview(
     let context = format!("form:{}", root.display());
     let reply = app
         .state::<session::Runtime>()
-        .run(
+        .run_scoped(
             app,
             addon,
             &request.command,
-            Invocation::Form {
-                surface,
-                values: request.form,
-                geometry: geometry.clone(),
-                anchor: request.anchor,
-            },
+            (
+                Invocation::Form {
+                    surface,
+                    values: request.form,
+                    geometry: geometry.clone(),
+                    anchor: request.anchor,
+                },
+                None,
+            ),
             Some(&context),
+            Some(base.revision),
             cancelled,
         )
         .map_err(|error| error.code())?

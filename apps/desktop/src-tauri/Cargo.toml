@@ -39,7 +39,7 @@ getrandom = "0.3"
 typst-syntax = "=0.15.1"
 # Validate the identity and entry point in ordinary Typst package metadata.
 toml = "1"
-# ADR 0050 W1: capability-free native execution of the sideloaded router.
+# ADR 0050: capability-free runtime, compiled only with the wasm-tier opt-in.
 extism = { version = "=1.41.0", default-features = false, optional = true }
 # Hold Extism's runtime to the patched ADR 0050 release line.
 wasmtime = { version = "=49.0.7", default-features = false, optional = true }
@@ -73,5 +73,6 @@ windows = { version = "0.61", features = [
 windows-collections = "0.2"
 
 [features]
-wasm-spike = ["dep:extism", "dep:wasmtime", "dep:wasmparser"]
+wasm-tier = ["dep:extism", "dep:wasmtime", "dep:wasmparser"]
+wasm-spike = ["wasm-tier"]
 

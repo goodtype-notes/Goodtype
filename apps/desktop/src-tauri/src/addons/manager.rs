@@ -168,6 +168,9 @@ pub(super) fn installed(
     }
     check_contract(addon, &inventory, None, legacy_pin.as_ref()).map_err(|_| Error::Invalid)?;
     let declaration = manifest::load(addon, path, version, &inventory, legacy_pin.as_ref())?;
+    if verify && declaration.wasm.is_some() {
+        super::wasm::module_bytes(path, &declaration).map_err(|_| Error::Invalid)?;
+    }
     if verify && let Some(contents) = &declaration.contents {
         content::load(addon, path, &declaration.strings, contents).map_err(|_| Error::Invalid)?;
     }
@@ -712,6 +715,8 @@ pub async fn addon_list(
         // this beta, sessions run in the AppContainer.
         let isolation = if addon.is_content() {
             "content"
+        } else if declaration.wasm.is_some() && declaration.target_is_wasm() {
+            "wasm"
         } else if declaration.uses_session() {
             "sandbox"
         } else {

@@ -44,6 +44,7 @@ export const de = {
     loadFailed: "Goodtype konnte das lokale Inhaltspaket nicht laden.",
   },
   addons: {
+    "previewOwner": "Vorschaumarkierungen des Addons {{name}}",
     reactionFailed_one: "{{addon}} konnte {{count}} Objekt nicht aktualisieren. Deine Änderung wurde beibehalten.",
     reactionFailed_other: "{{addon}} konnte {{count}} Objekte nicht aktualisieren. Deine Änderung wurde beibehalten.",
     pathEndpoint: "{{addon}} kann diesen Endpunkt verbinden",
@@ -149,6 +150,7 @@ export const de = {
       "noPermissions": "Keine Berechtigungen deklariert.",
       "network": "Goodtype lädt Pakete von GitHub herunter.",
       isolation: {
+        wasm: "Wird in einer Wasm-Sandbox ohne Berechtigungen ausgeführt: kein Datei-, Prozess- oder Netzwerkzugriff.",
         content: "Enthält kein Programm. Goodtype liest nur die Formen, Vorlagen und Farben.",
         sandbox: "Läuft isoliert: kein Netzwerkzugriff, und es kann nur seine eigenen installierten Dateien lesen.",
         job: "Läuft mit dem Datei- und Netzwerkzugriff deines Benutzerkontos. Goodtype begrenzt nur Arbeitsspeicher und Laufzeit.",

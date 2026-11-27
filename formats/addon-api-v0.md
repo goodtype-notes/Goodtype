@@ -655,7 +655,8 @@ identifier-safe feature names (lowercase ASCII letters/digits separated by hyphe
 using the same bounded identifier validation as contribution IDs). Unknown requirements
 refuse installation and enablement with "Needs a newer Goodtype" and the feature names.
 An installed incompatible package stays on disk but contributes nothing and cannot launch.
-Content packs use the same gate. `wasm-v0` is not supported.
+Content packs use the same gate. `wasm-v0` is accepted only by builds with the
+`wasm-tier` Cargo feature (see the gated Wasm tier); other builds refuse it the same way.
 
 This host implements caps through core ShapeStyle and shared frontend/export cap geometry,
 stretch through core stretch rules and frontend stretch gestures, and path edits through
@@ -763,6 +764,80 @@ endpoint objects/groups and members consistently to avoid routing into their box
 On a cap failure, retry a smaller useful region within the call budget or use a
 conservative routing fallback; never assume an error means no obstacles. The host
 still validates the returned batch and its captured revision at release/commit.
-Wasm transport integration is separate; this feature changes no notebook format.
+A Wasm entry receives no `reads` in this step (see the gated Wasm tier below); this feature
+changes no notebook format.
 The shared requirement fixture includes the feature; wire conformance cases are in
 `fixtures/addon-scoped-reads/requests.json`.
+
+
+## Gated Wasm tier (`goodtype-wasm-v0`)
+
+The first-party runtime (Extism, Wasmtime, wasmparser) is compiled only with
+`--features wasm-tier`. Without it, manifests and registry entries still parse, but a Wasm entry,
+`requires: ["wasm-v0"]` or a `wasm32-goodtype-v0` package is refused as needing a newer
+Goodtype, never as corrupt. Native entries default to `native`
+and retain their existing transport, permissions and validation. This is still API 0.1:
+execution selection does not change canonical notebook data.
+
+A module descriptor is `"wasm": {"module":"module.wasm", "sha256":"<64 lowercase hex>",
+"abi":"goodtype-wasm-v0"}`. Commands and tools optionally select `"entry":"wasm"`;
+manifest-level `"reaction":"wasm"` and `"preview":"wasm"` select the corresponding exports.
+Omitted entries use native execution. Preview `native` means the ordinary host preview.
+Wasm entries require the descriptor and `wasm-v0`; a descriptor with no Wasm entries is refused.
+Only capability-free object permissions (`own-objects`, `react-to-changes`, `add-page-objects`)
+are admitted. Catalog ceilings still apply. Paths are fixed to `module.wasm` at the package root.
+
+A portable package uses target `wasm32-goodtype-v0`, omits the native `entrypoint`, and selects
+Wasm for every declared command/tool and for reactions when permitted. A hybrid Windows package
+keeps its native target/entrypoint and selects each entry independently. Inventory sizes/hashes,
+signed ZIP verification, catalog binding, staging, install approval and rollback remain in force.
+The module's bytes are checked against the manifest digest before compilation or Worker delivery.
+Declared exports must exist. No paths or URLs are accepted by the frontend module command.
+
+`commit({revision, gesture, scope, settings})` receives Rust-captured native invocation parameters
+in `scope`; `gesture` is `tool` or `command`. `react({revision, changed, owned, refs, page})`
+receives the captured chunk's changed and owned object snapshots; `refs` contains deleted dependency
+IDs, and `page` contains only page geometry. Both return the existing page-batch envelope. Rust
+owns revision/authorization checks and admits the result through the same batch, ownership,
+path-edit, proposal and undo rules as native replies. No executable is launched for a Wasm entry.
+Wasm entries receive no scoped reads in this step: neither payload carries `reads`, and a module
+has no way to issue `group/descendants` or `region/obstacles`. Obstacle-aware Connectors routing
+under Wasm is therefore still open; until it is designed, obstacle routing needs the native session.
+
+Admission: module <= 1 MiB; input/output <= 32 KiB each; one non-shared 32-bit memory with an
+explicit maximum <= 128 standard pages; at most one table, explicitly bounded <= 1024 entries;
+no start section. Only the spike's vetted `extism:host/env` kernel imports are allowed (no config,
+vars, clocks, random, logging, filesystem, HTTP, process or secrets). SIMD, threads and relaxed
+SIMD are disabled. Exported functions are `() -> i32`: preview plus commit or react; only
+preview/commit/react, memory, __data_end and __heap_base may be exported. Rust uses 1 M call fuel,
+2 M initialization fuel and a 25 ms timeout, WASI off, empty host/path lists and no custom hosts.
+Compiled modules are cached by digest with one cache entry. Malformed, trapped or over-budget
+output never reaches persistence.
+
+Live drag previews use a dedicated bundled Worker with rehashed bytes, no Tauri bridge, a 5 s
+startup watchdog and a 16 ms call watchdog. Failure terminates the Worker and removes marks,
+leaving the ordinary drag preview. Each Worker pins one digest for its gesture. Addon availability
+changes (disable, remove, rollback, install/update) terminate the preview, including pending
+module loads, so it cannot continue showing old-module marks after an addon replacement.
+The host admits at most 128 marks and 512 total path vertices
+(including spline handles), bounded finite coordinates/transforms (absolute value <= 100000,
+positive scale), and <= 32 KiB output. Marks have x/y/rotation/scale and geometry:
+`polyline {points}`, `bezier {points: [start, control1, control2, end]}`, `label {text}`,
+`ring {radius}`, or the W1 open `spline {nodes, closed:false}`. Each geometry includes `kind`.
+Labels are plain text, <= 256 UTF-16 units, without control characters; the host never inserts HTML.
+Ring radii are positive and <= 4096. Optional style `{color,width}` defaults to #2563eb/1.5;
+color is a six-digit hex or black/white/red/blue/green/orange; finite widths clamp to [0.25,8].
+The SVG accessibility name identifies the owning addon. Marks are ephemeral, never notebook data.
+
+### W1 production gate: single lifting procedure
+
+Until packaged WebView2 parity and real pen/mixed-gesture measurements in the W1 report pass,
+normal builds must not enable `wasm-tier` and must keep the normal Tauri CSP unchanged.
+Developer testing explicitly opts into **both** `--features wasm-tier` and
+`--config src-tauri/tauri.wasm-spike.conf.json` (dev URL port 1435); the old `wasm-spike`
+feature remains an alias. Production frontend bundles omit the Worker unless explicitly built
+with `VITE_WASM_TIER=1`; use that flag only with the opt-in Rust build and experimental CSP.
+The flag never enables Rust execution. There is no environment-variable sideload loader.
+After the outstanding W1 evidence is accepted, enable `wasm-tier` in the shipping build and apply
+only the experimental config's `wasm-unsafe-eval`/`worker-src 'self'` CSP additions to the normal
+config in one reviewed change. Do not claim production acceptance from Rust or Node tests.

@@ -248,6 +248,7 @@ fn verifies_install_without_probe_and_insertion_survives_removing_pack() {
     zip.finish().unwrap();
     let hash = sha256_file(&archive).unwrap();
     let release = PinnedRelease {
+        wasm: None,
         version: VERSION,
         url: "",
         size: fs::metadata(&archive).unwrap().len(),
@@ -489,6 +490,7 @@ fn real_packs_install_from_checkout_and_insert_each_shape_library() {
         let (addon, version, archive) = sideload_archive(&folder).unwrap();
         let hash = sha256_file(&archive).unwrap();
         let release = PinnedRelease {
+            wasm: None,
             version: &version,
             url: "",
             size: fs::metadata(&archive).unwrap().len(),
@@ -508,6 +510,7 @@ fn real_packs_install_from_checkout_and_insert_each_shape_library() {
         if packaged.is_file() {
             let hash = sha256_file(&packaged).unwrap();
             let release = PinnedRelease {
+                wasm: None,
                 sha256: &hash,
                 size: fs::metadata(&packaged).unwrap().len(),
                 ..release

@@ -10,6 +10,8 @@ const MAX_DESCRIPTOR: u64 = 64 * 1024;
 
 #[derive(Clone, Debug)]
 pub(super) struct VerifiedUpdate {
+    target: String,
+    wasm: Option<super::manifest::Wasm>,
     pub version: String,
     pub size: u64,
     url: String,
@@ -20,6 +22,7 @@ pub(super) struct VerifiedUpdate {
 impl VerifiedUpdate {
     pub fn pin(&self) -> PinnedRelease<'_> {
         PinnedRelease {
+            wasm: self.wasm.as_ref(),
             version: &self.version,
             size: self.size,
             url: &self.url,
@@ -32,6 +35,8 @@ impl VerifiedUpdate {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Descriptor {
+    #[serde(default)]
+    wasm: Option<super::manifest::Wasm>,
     version: String,
     protocol_version: Option<u64>,
     notebook_schema_version: Option<u32>,
@@ -136,10 +141,24 @@ fn verify(
     } else {
         true
     };
-    if !compatible || descriptor.target != TARGET {
+    if descriptor.wasm.as_ref().is_some_and(|wasm| !wasm.valid())
+        || !compatible
+        || !(descriptor.target == TARGET
+            || (super::wasm::ENABLED
+                && descriptor.target == super::WASM_TARGET
+                && descriptor
+                    .wasm
+                    .as_ref()
+                    .is_some_and(super::manifest::Wasm::valid)))
+    {
         return Err("the newest importer requires a different Goodtype version; the installed version was kept".into());
     }
-    let name = format!("{}-{}-windows-x64.zip", tool.package, descriptor.version);
+    let suffix = if descriptor.target == super::WASM_TARGET {
+        "wasm32-goodtype-v0"
+    } else {
+        "windows-x64"
+    };
+    let name = format!("{}-{}-{suffix}.zip", tool.package, descriptor.version);
     if descriptor.archive.file_name != name
         || descriptor.archive.url
             != format!("{}/v{}/{name}", tool.release_url(), descriptor.version)
@@ -149,6 +168,8 @@ fn verify(
         return Err("unexpected importer update package URL or size".into());
     }
     Ok(VerifiedUpdate {
+        target: descriptor.target,
+        wasm: descriptor.wasm,
         version: descriptor.version,
         size: descriptor.archive.size_bytes,
         url: descriptor.archive.url,
@@ -205,7 +226,9 @@ pub(super) fn descriptor_for(
         &signature,
         &tool.public_key.ok_or("no signed update key is available")?,
     )?;
-    if verified.version != release.version
+    if verified.target != release.target
+        || verified.wasm != release.wasm
+        || verified.version != release.version
         || verified.url != release.url
         || verified.size != release.size
         || !verified.sha256.eq_ignore_ascii_case(&release.sha256)
@@ -221,6 +244,32 @@ mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
     use serde_json::json;
+
+    #[test]
+    fn portable_descriptor_checks_signature_profile_and_gate() {
+        let tool = &super::super::catalog::CONNECTORS;
+        let key = SigningKey::from_bytes(&[42; 32]);
+        let mut data = descriptor(tool);
+        data["decoderCommit"] = json!("");
+        data["target"] = json!(super::super::WASM_TARGET);
+        data["wasm"] =
+            json!({"module":"module.wasm","sha256":"a".repeat(64),"abi":"goodtype-wasm-v0"});
+        let name = format!("{}-0.1.1-wasm32-goodtype-v0.zip", tool.package);
+        data["archive"]["fileName"] = json!(name);
+        data["archive"]["url"] = json!(format!("{}/v0.1.1/{name}", tool.release_url()));
+        let check = |data: &serde_json::Value| {
+            let bytes = serde_json::to_vec(data).unwrap();
+            verify(
+                tool,
+                &bytes,
+                &key.sign(&bytes).to_bytes(),
+                &key.verifying_key().to_bytes(),
+            )
+        };
+        assert_eq!(check(&data).is_ok(), super::super::wasm::ENABLED);
+        data["wasm"]["abi"] = json!("unknown");
+        assert!(check(&data).is_err());
+    }
 
     #[test]
     fn each_kind_reads_the_descriptor_its_releases_publish() {

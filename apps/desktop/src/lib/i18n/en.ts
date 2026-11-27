@@ -42,6 +42,7 @@ export const en = {
     loadFailed: "Goodtype could not load the local content pack.",
   },
   addons: {
+    "previewOwner": "Preview marks from addon {{name}}",
     reactionFailed_one: "{{addon}} could not update {{count}} object. Your change was kept.",
     reactionFailed_other: "{{addon}} could not update {{count}} objects. Your change was kept.",
     pathEndpoint: "{{addon}} can attach this endpoint",
@@ -147,6 +148,7 @@ export const en = {
       "noPermissions": "No permissions declared.",
       "network": "Goodtype downloads packages from GitHub.",
       isolation: {
+        wasm: "Runs in a capability-free Wasm sandbox: no file, process or network access.",
         content: "Contains no program. Goodtype only reads its shapes, templates and colours.",
         sandbox: "Runs isolated: no network access, and it can read only its own installed files.",
         job: "Runs with your user's file and network access. Goodtype limits only its memory and running time.",

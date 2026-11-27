@@ -59,6 +59,25 @@ pub(super) enum Snap {
     None,
 }
 
+/// Execution selection is explicit; omitted entries preserve the native protocol.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub(super) enum Entry {
+    #[default]
+    Native,
+    Wasm,
+}
+fn native(entry: &Entry) -> bool {
+    *entry == Entry::Native
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Wasm {
+    pub module: String,
+    pub sha256: String,
+    pub abi: String,
+}
+
 /// Stroke-only path data on the host's 24-unit icon grid.
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -85,6 +104,8 @@ impl Icon {
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Tool {
+    #[serde(default, skip_serializing_if = "native")]
+    pub entry: Entry,
     pub id: String,
     pub label: String,
     pub icon: Icon,
@@ -107,6 +128,8 @@ pub(super) struct PathEdit {
 #[derive(Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Command {
+    #[serde(default, skip_serializing_if = "native")]
+    pub entry: Entry,
     pub id: String,
     pub label: String,
     pub surface: Surface,
@@ -175,6 +198,20 @@ pub(super) struct Strings {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Manifest {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional"
+    )]
+    pub wasm: Option<Wasm>,
+    #[serde(default, skip_serializing_if = "native")]
+    pub reaction: Entry,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional"
+    )]
+    pub preview: Option<Entry>,
     manifest_version: u32,
     id: String,
     version: String,
@@ -211,6 +248,7 @@ pub(super) fn supported_feature(feature: &str) -> bool {
         "scoped-reads-v0",
     ]
     .contains(&feature)
+        || (feature == "wasm-v0" && cfg!(feature = "wasm-tier"))
 }
 
 pub(super) fn release_version(version: &str) -> bool {
@@ -302,6 +340,9 @@ impl Addon {
             table
         };
         Manifest {
+            wasm: None,
+            reaction: Entry::Native,
+            preview: None,
             manifest_version: 1,
             id: self.id.into(),
             version: version.into(),
@@ -324,6 +365,7 @@ impl Addon {
                 vec![]
             } else {
                 vec![Command {
+                    entry: Entry::Native,
                     path_edit: None,
                     id: id.into(),
                     label: "run".into(),
@@ -335,6 +377,7 @@ impl Addon {
             tools: objects
                 .iter()
                 .map(|(id, kind)| Tool {
+                    entry: Entry::Native,
                     id: (*id).into(),
                     label: "run".into(),
                     stroke: false,
@@ -355,7 +398,62 @@ impl Addon {
     }
 }
 
+impl Wasm {
+    pub(super) fn valid(&self) -> bool {
+        self.abi == "goodtype-wasm-v0"
+            && self.module == "module.wasm"
+            && update::is_hash(&self.sha256, 64)
+            && !self.sha256.bytes().any(|b| b.is_ascii_uppercase())
+    }
+}
 impl Manifest {
+    fn valid_wasm(&self) -> bool {
+        let used = self.reaction == Entry::Wasm
+            || self.preview == Some(Entry::Wasm)
+            || self.commands.iter().any(|c| c.entry == Entry::Wasm)
+            || self.tools.iter().any(|t| t.entry == Entry::Wasm);
+        if let Some(wasm) = &self.wasm {
+            if !used
+                || !self.requires.iter().any(|f| f == "wasm-v0")
+                || !wasm.valid()
+                || !matches!(self.transport, Transport::StdioJsonrpc)
+                || self.permissions.iter().any(|p| {
+                    !matches!(
+                        p,
+                        Permission::OwnObjects
+                            | Permission::ReactToChanges
+                            | Permission::AddPageObjects
+                    )
+                })
+            {
+                return false;
+            }
+        } else if used {
+            return false;
+        }
+        self.target != WASM_TARGET
+            || (self.entrypoint.is_none()
+                && self.commands.iter().all(|c| c.entry == Entry::Wasm)
+                && self.tools.iter().all(|t| t.entry == Entry::Wasm)
+                && (!self.has(Permission::ReactToChanges) || self.reaction == Entry::Wasm))
+    }
+    pub(super) fn target_is_wasm(&self) -> bool {
+        self.target == WASM_TARGET
+    }
+    pub(super) fn wasm_entry(&self, method: &str, command: &str) -> bool {
+        match method {
+            "page/changed" => self.reaction == Entry::Wasm,
+            "tool/apply" => self
+                .tools
+                .iter()
+                .any(|t| t.id == command && t.entry == Entry::Wasm),
+            _ => self
+                .commands
+                .iter()
+                .any(|c| c.id == command && c.entry == Entry::Wasm),
+        }
+    }
+
     pub(super) fn selection_labels(&self) -> impl Iterator<Item = (&str, &str, &str)> {
         self.commands
             .iter()
@@ -393,7 +491,10 @@ impl Manifest {
     }
 
     pub(super) fn same_scope(&self, other: &Self) -> bool {
-        self.transport == other.transport
+        self.wasm == other.wasm
+            && self.reaction == other.reaction
+            && self.preview == other.preview
+            && self.transport == other.transport
             && self.permissions.len() == other.permissions.len()
             && self
                 .permissions
@@ -402,8 +503,11 @@ impl Manifest {
             && self
                 .tools
                 .iter()
-                .map(|tool| (&tool.id, tool.kind))
-                .eq(other.tools.iter().map(|tool| (&tool.id, tool.kind)))
+                .map(|tool| (&tool.id, tool.kind, tool.entry))
+                .eq(other
+                    .tools
+                    .iter()
+                    .map(|tool| (&tool.id, tool.kind, tool.entry)))
             && self
                 .commands
                 .iter()
@@ -413,6 +517,7 @@ impl Manifest {
                         command.surface,
                         command.format.as_ref().is_some_and(|f| f.assets),
                         &command.path_edit,
+                        command.entry,
                     )
                 })
                 .eq(other.commands.iter().map(|command| {
@@ -421,6 +526,7 @@ impl Manifest {
                         command.surface,
                         command.format.as_ref().is_some_and(|f| f.assets),
                         &command.path_edit,
+                        command.entry,
                     )
                 }))
     }
@@ -455,8 +561,11 @@ pub(super) fn parse(bytes: &[u8], addon: &Addon, version: &str) -> Result<Manife
         || !release_version(version)
         || (!manifest.uses_session() && !manifest.settings.is_empty())
         || !valid_fields(&manifest.settings, &manifest.strings.en, true)
-        || manifest.target != TARGET
-        || manifest.entrypoint != ceiling.entrypoint
+        || !(manifest.target == TARGET
+            || (manifest.target == WASM_TARGET && manifest.wasm.is_some()))
+        || (manifest.entrypoint != ceiling.entrypoint
+            && !(manifest.target == WASM_TARGET && manifest.entrypoint.is_none()))
+        || !manifest.valid_wasm()
         || manifest.transport != ceiling.transport
         || manifest.permissions.iter().any(|permission| {
             !ceiling.permissions.contains(permission) || !permissions.insert(permission)
@@ -605,7 +714,11 @@ pub(super) fn load(
     match fs::symlink_metadata(&file) {
         Ok(_) => {
             let bytes = read_bounded(&file, MAX_BYTES).map_err(|_| Error::Invalid)?;
-            parse(&bytes, addon, version)
+            let declaration = parse(&bytes, addon, version)?;
+            if declaration.target != inventory.target {
+                return Err(Error::Invalid);
+            }
+            Ok(declaration)
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             if !addon.is_legacy_release(version, inventory, release)
@@ -623,6 +736,43 @@ pub(super) fn load(
 mod tests {
     use super::*;
     use serde_json::{Value, json};
+
+    #[test]
+    fn wasm_manifest_requires_a_valid_profile_and_explicit_gate() {
+        let addon = &catalog::CONNECTORS;
+        let mut value = serde_json::to_value(addon.declaration("1.2.3")).unwrap();
+        value["requires"] = json!(["wasm-v0", "path-edit-v0"]);
+        value["target"] = json!(WASM_TARGET);
+        value.as_object_mut().unwrap().remove("entrypoint");
+        value["wasm"] =
+            json!({"module":"module.wasm","sha256":"a".repeat(64),"abi":"goodtype-wasm-v0"});
+        value["reaction"] = json!("wasm");
+        value["preview"] = json!("wasm");
+        for tool in value["tools"].as_array_mut().unwrap() {
+            tool["entry"] = json!("wasm");
+        }
+        let parse_value = |v: &Value| parse(&serde_json::to_vec(v).unwrap(), addon, "1.2.3");
+        assert_eq!(parse_value(&value).is_ok(), cfg!(feature = "wasm-tier"));
+        if !cfg!(feature = "wasm-tier") {
+            assert!(
+                matches!(parse_value(&value), Err(Error::MissingFeatures(features)) if features == ["wasm-v0"])
+            );
+        }
+        for (key, bad) in [
+            ("module", json!("../module.wasm")),
+            ("sha256", json!("bad")),
+            ("abi", json!("other")),
+        ] {
+            let mut broken = value.clone();
+            broken["wasm"][key] = bad;
+            assert!(matches!(parse_value(&broken), Err(Error::Invalid)));
+        }
+        let mut missing = value.clone();
+        missing["requires"] = json!([]);
+        assert!(matches!(parse_value(&missing), Err(Error::Invalid)));
+        value["tools"][0]["entry"] = json!("native");
+        assert!(matches!(parse_value(&value), Err(Error::Invalid)));
+    }
 
     #[test]
     fn shared_requirement_fixtures_use_real_loader() {
@@ -782,6 +932,7 @@ mod tests {
             assert!(load(addon, home.path(), pin.version, &inventory, Some(&pin)).is_ok());
             assert!(load(addon, home.path(), pin.version, &inventory, None).is_err());
             let wrong_archive = PinnedRelease {
+                wasm: None,
                 sha256: "different",
                 ..pin
             };

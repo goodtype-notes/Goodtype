@@ -111,6 +111,27 @@
                     "maxLength": 48,
                     "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
                   }
+                },
+                "wasm": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "module",
+                    "sha256",
+                    "abi"
+                  ],
+                  "properties": {
+                    "module": {
+                      "const": "module.wasm"
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "abi": {
+                      "const": "goodtype-wasm-v0"
+                    }
+                  }
                 }
               },
               "description": "Unknown release fields or unsupported requirements make only this release incompatible. Index and addon entries remain strict."

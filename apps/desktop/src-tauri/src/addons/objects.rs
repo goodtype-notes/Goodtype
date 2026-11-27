@@ -617,6 +617,7 @@ async fn object_action(
                 &command,
                 (invocation, reads),
                 Some(&context),
+                Some(snapshot.page.revision),
                 || cancelled() || selection::revoked(job, &authorization),
             )
             .map_err(|failure| error(failure.code()))?
@@ -1057,6 +1058,7 @@ pub(crate) async fn addon_react(
                                 (invocation, reads)
                             },
                             Some(&context),
+                            Some(snapshot.page.revision),
                             || {
                                 Instant::now() >= deadline
                                     || selection::revoked(job, &authorization)

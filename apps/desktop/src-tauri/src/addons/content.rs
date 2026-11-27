@@ -1096,7 +1096,7 @@ fn sideload_archive(folder: &Path) -> Result<(&'static Addon, String, tempfile::
                 .into_iter()
                 .map(|path| format!("content/{path}")),
         );
-    } else {
+    } else if !declaration.target_is_wasm() {
         let executable = addon.executable();
         // A package folder holds the executable beside the manifest; a source checkout holds it
         // in its release build output.
@@ -1119,6 +1119,15 @@ fn sideload_archive(folder: &Path) -> Result<(&'static Addon, String, tempfile::
         }
         sources.insert(executable.clone(), path);
         files.push(executable);
+    }
+    if let Some(wasm) = &declaration.wasm {
+        let path = folder.join(&wasm.module);
+        let metadata = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+        if !metadata.is_file() || is_package_link(&metadata) {
+            return Err("invalid local module".into());
+        }
+        super::wasm::module_bytes(folder, &declaration)?;
+        files.push(wasm.module.clone());
     }
     if files.len() > MAX_ARCHIVE_ENTRIES {
         return Err("content folder has too many files".into());
@@ -1158,6 +1167,7 @@ fn sideload(app: &tauri::AppHandle, folder: &Path) -> Result<(), String> {
     let size = fs::metadata(&temp).map_err(|err| err.to_string())?.len();
     let hash = sha256_file(&temp)?;
     let release = PinnedRelease {
+        wasm: None,
         version: &version,
         url: "",
         size,
