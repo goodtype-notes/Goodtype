@@ -59,7 +59,7 @@
       press.dragging = true;
     }
     event.preventDefault();
-    onDrag({ phase: "move", row: press.row, x: event.clientX, y: event.clientY });
+    onDrag({ phase: "move", row: press.row, x: event.clientX, y: event.clientY, alt: event.altKey });
   }
 
   function releaseTile(event: PointerEvent) {
@@ -69,7 +69,7 @@
     if (!done.dragging) return;
     swallowClick = true;
     setTimeout(() => (swallowClick = false), 0);
-    onDrag({ phase: event.type === "pointerup" ? "drop" : "cancel", row: done.row, x: event.clientX, y: event.clientY });
+    onDrag({ phase: event.type === "pointerup" ? "drop" : "cancel", row: done.row, x: event.clientX, y: event.clientY, alt: event.altKey });
   }
 
   function clickTile(row: Row) {

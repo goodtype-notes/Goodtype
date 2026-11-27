@@ -2,7 +2,7 @@ import type { Point } from "../../geometry/coordinates";
 import type { PackShape, ShapeChoice, ShapeLibraryModel } from "./content";
 
 export type ShapeRow = ShapeLibraryModel[number]["items"][number];
-export type ShapeDrag = { phase: "move" | "drop" | "cancel"; row: ShapeRow; x: number; y: number };
+export type ShapeDrag = { phase: "move" | "drop" | "cancel"; row: ShapeRow; x: number; y: number; alt?: boolean };
 
 export const RECENT_LIMIT = 8;
 const RECENT_KEY = "goodtype.shapePanel.recent";

@@ -109,15 +109,15 @@
   });
 </script>
 
-<svg class="stretch-handles" style:--zoom={zoom}>
+<svg class="stretch-handles" style:--selection-scale={1 / zoom}>
   {#each group.stretch?.axis ?? [] as port, index (port)}
-    <circle class="hit" class:disabled role="button" tabindex={disabled ? -1 : 0}
+    <circle class="hit selection-hit" class:disabled role="button" tabindex={disabled ? -1 : 0}
       aria-disabled={disabled}
       aria-label={$t(index === 0 ? "workspace.stretchStartPort" : "workspace.stretchEndPort")}
-      cx={ports[port].x} cy={ports[port].y} r={14 / zoom}
+      cx={ports[port].x} cy={ports[port].y}
       onkeydown={event => keydown(event, port)} onpointerdown={event => begin(event, port)}
       onpointermove={move} onpointerup={end} onpointercancel={end} onlostpointercapture={end} />
-    <circle class="dot" cx={ports[port].x} cy={ports[port].y} r={4 / zoom} />
+    <circle class="selection-dot" cx={ports[port].x} cy={ports[port].y} />
   {/each}
 </svg>
 
@@ -125,7 +125,4 @@
   svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 2147483647; pointer-events: none; }
   .hit { fill: transparent; pointer-events: all; touch-action: none; cursor: grab; outline: none; }
   .hit.disabled { pointer-events: none; }
-  /* A CSS outline would scale with the page zoom; a zoom-divided stroke keeps its screen size. */
-  .hit:focus-visible { stroke: var(--paper-select); stroke-width: calc(2px / var(--zoom)); }
-  .dot { pointer-events: none; fill: var(--paper); stroke: var(--paper-select); stroke-width: calc(1.5px / var(--zoom)); }
 </style>

@@ -73,18 +73,19 @@
   }
 </script>
 
-<svg class="mixed-selection" role="group" aria-label={$t(onEnter ? "workspace.shapeGroupSelected" : "workspace.mixedCanvasSelection")} style:--zoom={zoom}>
-  <rect role="button" tabindex="0" aria-label={$t(onEnter ? "workspace.shapeGroupSelected" : "workspace.moveSelectedItems")} use:focusOnMount
+<svg class="mixed-selection" role="group" aria-label={$t(onEnter ? "workspace.shapeGroupSelected" : "workspace.mixedCanvasSelection")} style:--selection-scale={1 / zoom}>
+  <rect class="selection-box" role="button" tabindex="0" aria-label={$t(onEnter ? "workspace.shapeGroupSelected" : "workspace.moveSelectedItems")} use:focusOnMount
     x={bounds.left} y={bounds.top} width={Math.max(1, bounds.right - bounds.left)} height={Math.max(1, bounds.bottom - bounds.top)}
     onkeydown={keydown} onpointerdown={event => begin(event)} onpointermove={move} onpointerup={end} onpointercancel={end} onlostpointercapture={end} />
-  <circle role="button" tabindex="0" aria-label={$t("workspace.scaleSelectedItems")} cx={handles.scale.x} cy={handles.scale.y} r={22 / zoom}
+  <circle class="selection-hit" role="button" tabindex="0" aria-label={$t("workspace.scaleSelectedItems")} cx={handles.scale.x} cy={handles.scale.y}
     onkeydown={keydown} onpointerdown={event => begin(event, "scale")} onpointermove={move} onpointerup={end} onpointercancel={end} onlostpointercapture={end} />
-  <circle class="visible-handle" cx={handles.scale.x} cy={handles.scale.y} r={6 / zoom} />
+  <circle class="selection-dot" cx={handles.scale.x} cy={handles.scale.y} />
   {#if onEnter}
-    <circle class="rotate" role="button" tabindex="0" aria-label={$t("workspace.rotateShapeGroup")}
-      cx={handles.rotate.x} cy={handles.rotate.y} r={22 / zoom}
+    <line class="selection-stem" x1={handles.rotate.x} y1={bounds.top} x2={handles.rotate.x} y2={handles.rotate.y} />
+    <circle class="selection-hit rotate" role="button" tabindex="0" aria-label={$t("workspace.rotateShapeGroup")}
+      cx={handles.rotate.x} cy={handles.rotate.y}
       onpointerdown={event => begin(event, "rotate")} onpointermove={move} onpointerup={end} onpointercancel={end} onlostpointercapture={end} />
-    <circle class="visible-handle" cx={handles.rotate.x} cy={handles.rotate.y} r={6 / zoom} />
+    <circle class="selection-dot rotate-dot" cx={handles.rotate.x} cy={handles.rotate.y} />
   {/if}
 </svg>
 
@@ -96,10 +97,7 @@
   .mixed-selection { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 2147483647; pointer-events: none; }
   /* The page is zoomed with a CSS scale, so a CSS outline here would grow with the zoom. Focus is
      shown with strokes divided by the zoom instead, which keep their screen size. */
-  rect { fill: transparent; stroke: var(--paper-select); stroke-width: calc(1.5px / var(--zoom)); stroke-dasharray: calc(4px / var(--zoom)) calc(3px / var(--zoom)); pointer-events: all; cursor: move; touch-action: none; outline: none; }
-  circle { fill: transparent; pointer-events: all; cursor: nwse-resize; touch-action: none; outline: none; }
+  rect { fill: transparent; pointer-events: all; cursor: move; touch-action: none; outline: none; }
+  .selection-hit { fill: transparent; pointer-events: all; cursor: nwse-resize; touch-action: none; outline: none; }
   .rotate { cursor: grab; }
-  .visible-handle { fill: var(--paper); stroke: var(--paper-select); stroke-width: calc(1.5px / var(--zoom)); pointer-events: none; }
-  rect:focus-visible { stroke-width: calc(2.5px / var(--zoom)); }
-  circle[role=button]:focus-visible { stroke: var(--paper-select); stroke-width: calc(2px / var(--zoom)); }
 </style>
