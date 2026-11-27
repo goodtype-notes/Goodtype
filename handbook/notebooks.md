@@ -60,3 +60,7 @@ Arrange pages in the order you want to read them, then choose **Export PDF**. Ex
 *The pendulum demo uses the Windows desktop app with its embedded Typst compiler. The graph and paper picker use the frontend preview. Both use sample content and simulated pen input.*
 
 [Import and store notebooks](files.md)
+
+Shapes placed from the shape palette also snap to nearby edges, centres and connection ports.
+The placement preview and alignment guides show where the shape will land. Hold Alt to place
+freely, or disable object snapping in Settings. Touch stamps snap when placed.

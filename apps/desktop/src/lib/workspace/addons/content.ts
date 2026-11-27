@@ -8,6 +8,7 @@ export type PackShape = {
   search: string;
   widthPt: number;
   heightPt: number;
+  ports?: { x: number; y: number }[];
   objects: (
     | { type: "shape"; x: number; y: number; geometry: ShapeGeometry; style: Partial<ShapeStyle> }
     | { type: "typst"; x: number; y: number; source: string; layoutWidthPt: number; scale: number }

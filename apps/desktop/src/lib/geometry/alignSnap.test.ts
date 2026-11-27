@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  beginSnap, createMoveSnapper, snapMoveDelta, snapThresholdPt, ALIGN_SNAP_SCREEN_PX,
+  beginPlacementSnap, snapPlacement, beginSnap, createMoveSnapper, snapMoveDelta, snapThresholdPt, ALIGN_SNAP_SCREEN_PX,
   type SnapFrame, type SnapGuide,
 } from "./alignSnap";
 
@@ -185,5 +185,27 @@ describe("move snapper", () => {
     snapper.adjust({ x: 102, y: 0 }, false);
     snapper.adjust({ x: 103, y: 0 }, false);
     expect(onGuides).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe("palette placement snapping", () => {
+  const item = { widthPt: 20, heightPt: 30, ports: [{ x: 3, y: 7 }] };
+  it("snaps the centred candidate box and returns its insertion centre", () => {
+    const session = beginPlacementSnap([frame("target", box(100, 100, 140, 140))], item);
+    expect(session.moving.box).toEqual(box(-10, -15, 10, 15));
+    const result = snapPlacement(session, { x: 111, y: 117 }, 1, true, false);
+    expect(result.point).toEqual({ x: 110, y: 115 });
+    expect(result.guides.length).toBeGreaterThan(0);
+  });
+  it("translates item ports from the item origin and snaps them to page ports", () => {
+    const session = beginPlacementSnap([frame("target", box(300, 300, 340, 340), [{ x: 80, y: 70 }])], item);
+    expect(session.moving.ports).toEqual([{ x: -7, y: -8 }]);
+    expect(snapPlacement(session, { x: 88, y: 79 }, 2, true, false).point).toEqual({ x: 87, y: 78 });
+  });
+  it.each([[false, false], [true, true]])("leaves the centre unchanged when enabled=%s and Alt=%s", (enabled, alt) => {
+    const session = beginPlacementSnap([frame("target", box(100, 100, 140, 140))], item);
+    expect(snapPlacement(session, { x: 111, y: 117 }, 1, enabled, alt))
+      .toEqual({ point: { x: 111, y: 117 }, guides: [] });
   });
 });
