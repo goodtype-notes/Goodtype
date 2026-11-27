@@ -55,6 +55,15 @@ pub struct HelperSettings {
     pub codex_model: Option<String>,
     pub allowed_mcp_servers: Vec<String>,
     pub permissions: HelperPermissions,
+    /// Most pages one request may hand over, attached or asked for. Clamped by `page_limit()`.
+    pub page_limit: u8,
+}
+/// Hard ceiling for pages in one request, whatever the setting says.
+pub const MAX_PAGE_LIMIT: usize = 100;
+impl HelperSettings {
+    pub fn page_limit(&self) -> usize {
+        usize::from(self.page_limit).clamp(1, MAX_PAGE_LIMIT)
+    }
 }
 impl Default for HelperSettings {
     fn default() -> Self {
@@ -66,6 +75,7 @@ impl Default for HelperSettings {
             codex_model: None,
             allowed_mcp_servers: Vec::new(),
             permissions: HelperPermissions::default(),
+            page_limit: 8,
         }
     }
 }

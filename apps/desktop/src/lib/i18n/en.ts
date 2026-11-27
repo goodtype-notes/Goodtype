@@ -628,6 +628,8 @@ export const en = {
     "detailedHint": "Images up to 2048 px, 256 KiB of text and 60 calls per epoch.",
     "webSearch": "Web search by default",
     "webHint": "Allow web search for new in-app conversations. You can change this before sending.",
+    "pageLimit": "Page limit per request",
+    "pageLimitHint": "The most pages one request can hand over to the assistant, attached by you or asked for by it. From 1 to 100. More pages make answers slower and use more of your assistant's quota.",
     "permissionPages": "Reading other pages",
     "permissionPagesHint": "When the assistant asks for pages or Python cells you did not attach.",
     "permissionPresets": "Reading notebook presets",

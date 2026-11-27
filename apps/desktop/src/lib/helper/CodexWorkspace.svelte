@@ -65,12 +65,13 @@
     }
   });
   // "Ask AI about this page" adds the page to the tray like any attachment, Python pages included.
-  $effect(() => { if (summary) { const id = summary.pageId; untrack(() => { if (!pageIds.includes(id) && pageIds.length < 8) pageIds = [...pageIds, id]; if (!pages.find(p => p.id === id)?.calculation) destinationPageId = id; intentVersion++; }); } });
+  $effect(() => { if (summary) { const id = summary.pageId; untrack(() => { if (!pageIds.includes(id) && pageIds.length < pageLimit) pageIds = [...pageIds, id]; if (!pages.find(p => p.id === id)?.calculation) destinationPageId = id; intentVersion++; }); } });
   let suggestionVersion = $state(0);
   function suggest(key: "codex.suggestSummaryPrompt" | "codex.suggestExplainPrompt" | "codex.suggestCheckPrompt") { initialPrompt = $t(key); suggestionVersion++; }
   $effect(() => { if (entry) { destinationPageId = share.pageId; pageIds = entry.pageId ? [entry.pageId] : []; initialPrompt = ""; } });
   let cells = $state<import("../ipc/helper").CellGrantIntent>();
   $effect(() => { cells = cellEntry?.grant; if (cellEntry) destinationPageId = cellEntry.pageId; intentVersion = untrack(() => intentVersion) + 1; });
+  const pageLimit = $derived(defaults.pageLimit ?? 8);
   const pixelsOff = $derived(defaults.usage === "low" && (needsPixels || pageIds.some(id => { const page = pages.find(p => p.id === id)?.snapshot; return page && helperSelectionNeedsPixels([...page.page.objects.map(o => o.type), ...(page.inkLayers.some(l => l.strokes.length) ? ["ink_group"] : [])], page.page.background.kind === "pdf", false); })));
   function updateCells(next: typeof cells) { if (next?.cellIds.length) { try { validateCellContext(next); } catch { error = notice("helper.cell_grant_denied"); return; } } cells = next; intentVersion++; if (conversationId && requestId) void helperRevokeAttachment(conversationId, requestId, "@cells").catch(problem => error = codexProblem(problem)); }
   function intent(): RequestContextIntent {
@@ -99,9 +100,9 @@
         try { await helperRevokeAttachment(conversationId, requestId, id); info = notice("codex.removedContext"); }
         catch (problem) { error = codexProblem(problem); }
       }
-    } else if (pageIds.length >= 8) attachmentNotice = notice("codex.attachmentLimit", { count: "8" });
+    } else if (pageIds.length >= pageLimit) attachmentNotice = notice("codex.attachmentLimit", { count: String(pageLimit) });
     else { pageIds = [...pageIds, id]; intentVersion++; }
-    if (pageIds.length < 8) attachmentNotice = "";
+    if (pageIds.length < pageLimit) attachmentNotice = "";
   }
   let sending = $state(false), listening = $state(false), stopping = $state(false), closing = $state(false);
   let attachmentNotice = $state<UiText>("");

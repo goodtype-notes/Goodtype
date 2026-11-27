@@ -84,7 +84,7 @@ pub(super) fn parse_scope(
             numbers.push(number);
         }
     }
-    if ids.is_empty() || ids.len() > 8 {
+    if ids.is_empty() || ids.len() > super::MAX_PAGE_LIMIT {
         return Err(invalid());
     }
     Ok(Scope::Pages(ids, numbers))
@@ -117,19 +117,36 @@ impl bridge::Bridge {
         if names && old.share_page_names {
             return Err("already granted: page names".into());
         }
-        let permission = {
+        let (permission, limit) = {
             let state = self.helper.inner.lock().unwrap_or_else(|e| e.into_inner());
             let p = state.settings.permissions;
-            if presets {
+            let permission = if presets {
                 p.presets
             } else if names {
                 p.page_names
             } else {
                 p.pages
-            }
+            };
+            (permission, state.settings.page_limit())
         };
         if permission == Permission::Never {
             return Err("scope denied: blocked in Goodtype settings".into());
+        }
+        let held = old
+            .pages
+            .keys()
+            .chain(
+                old.cells
+                    .keys()
+                    .filter(|id| **id != old.destination.page.id),
+            )
+            .chain(ids.iter())
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        if held > limit {
+            return Err(format!(
+                "page limit: Goodtype hands over at most {limit} pages per request (set in the AI settings)"
+            ));
         }
         let bridge = self.clone();
         let root = old.root.clone();

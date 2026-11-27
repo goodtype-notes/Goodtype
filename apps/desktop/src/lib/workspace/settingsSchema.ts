@@ -1,5 +1,5 @@
 import { contributionText, type AddonContribution } from "../ipc/addons";
-import type { AppSettings, HelperPermission } from "../settings";
+import { clampPageLimit, type AppSettings, type HelperPermission } from "../settings";
 import { LANGUAGES, translate, formatNumber, type Translator } from "../i18n";
 import { addonPaletteId, paletteTools } from "../notebook/palette";
 
@@ -54,6 +54,13 @@ export type SettingControl =
       step: number;
       /** How the number is shown. A raw 0.35 means nothing to the writer on its own. */
       format: (value: number) => string;
+      read: (settings: AppSettings) => number;
+      write: (settings: AppSettings, value: number) => AppSettings;
+    }
+  | {
+      kind: "number";
+      min: number;
+      max: number;
       read: (settings: AppSettings) => number;
       write: (settings: AppSettings, value: number) => AppSettings;
     };
@@ -403,6 +410,7 @@ export function settingGroups(t: Translator = translate, fonts: string[] = [], a
       { id: "helperEnabled", label: t("helper.enable"), keywords: [...t("helper.search").split(" "), ...t("codex.search").split(" ")], control: { kind: "toggle", read: s => s.aiHelper.enabled, write: (s, enabled) => ({ ...s, aiHelper: { ...s.aiHelper, enabled } }) } },
       { id: "helperUsage", label: t("helper.usage"), hint: t("helper.usageHint"), control: { kind: "choice", options: [{ value: "low", label: t("helper.low"), hint: t("helper.lowHint") }, { value: "balanced", label: t("helper.balanced"), hint: t("helper.balancedHint") }, { value: "detailed", label: t("helper.detailed"), hint: t("helper.detailedHint") }], read: s => s.aiHelper.usage, write: (s, usage) => ({ ...s, aiHelper: { ...s.aiHelper, usage: usage as AppSettings["aiHelper"]["usage"] } }) } },
       { id: "helperWebSearch", label: t("helper.webSearch"), hint: t("helper.webHint"), control: { kind: "toggle", read: s => s.aiHelper.webSearch, write: (s, webSearch) => ({ ...s, aiHelper: { ...s.aiHelper, webSearch } }) } },
+      { id: "helperPageLimit", label: t("helper.pageLimit"), hint: t("helper.pageLimitHint"), control: { kind: "number", min: 1, max: 100, read: s => s.aiHelper.pageLimit, write: (s, pageLimit) => ({ ...s, aiHelper: { ...s.aiHelper, pageLimit: clampPageLimit(pageLimit) } }) } },
       ...(["pages", "presets", "pageNames"] as const).map(key => {
         const name = ({ pages: "Pages", presets: "Presets", pageNames: "Names" } as const)[key];
         return { id: `helperPermission${name}`, label: t(`helper.permission${name}`), hint: t(`helper.permission${name}Hint`), control: { kind: "choice" as const, options: (["allow", "ask", "never"] as const).map(value => {
