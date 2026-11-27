@@ -515,7 +515,8 @@
   function beginSelectionGesture(event: PointerEvent): void {
     const point = pagePoint(event);
     const bounds = selectionBounds(localStrokes, localSelection);
-    const handleRadius = 10 / zoom;
+    if (!surface) return;
+    const handleRadius = parseFloat(getComputedStyle(surface).getPropertyValue("--selection-hit-radius")) / zoom;
     if (
       bounds &&
       Math.hypot(point.x - bounds.right, point.y - bounds.bottom) <= handleRadius
@@ -1180,7 +1181,7 @@
   function drawSnapRing(context: CanvasRenderingContext2D, point: Point): void {
     if (!surface) return;
     context.save();
-    context.strokeStyle = getComputedStyle(surface).getPropertyValue("--paper-select").trim();
+    context.strokeStyle = getComputedStyle(surface).getPropertyValue("--selection-color").trim();
     context.lineWidth = 1.5 / zoom;
     context.beginPath();
     context.arc(point.x, point.y, 4 / zoom, 0, Math.PI * 2);
@@ -1224,6 +1225,7 @@
 <div
   bind:this={surface}
   class="ink-surface"
+  style:--selection-scale={1 / zoom}
   class:eraser-active={tool === "eraser" || eraserCursor !== null}
   class:shape-active={tool === "shape"}
   style:width={`${pageWidthPt}px`}
@@ -1246,25 +1248,22 @@
   {#if showSelectionBounds && selectedBounds}
     <svg
       class="selection-overlay"
+      style:--selection-scale={1 / zoom}
       viewBox={`0 0 ${pageWidthPt} ${pageHeightPt}`}
       width={pageWidthPt}
       height={pageHeightPt}
       aria-hidden="true"
     >
-      <rect
+      <rect class="selection-box"
         x={selectedBounds.left}
         y={selectedBounds.top}
         width={selectedBounds.right - selectedBounds.left}
         height={selectedBounds.bottom - selectedBounds.top}
         fill="none"
-        stroke-width={1.5 / zoom}
-        stroke-dasharray={`${4 / zoom} ${3 / zoom}`}
       />
-      <circle
+      <circle class="selection-dot"
         cx={selectedBounds.right}
         cy={selectedBounds.bottom}
-        r={6 / zoom}
-        stroke-width={1.5 / zoom}
       />
     </svg>
   {/if}
@@ -1310,8 +1309,8 @@
   }
 
   .ink-surface:focus-visible {
-    outline: 2px solid var(--paper-select);
-    outline-offset: 2px;
+    outline: calc(var(--selection-focus-stroke) * var(--selection-scale)) solid var(--selection-color);
+    outline-offset: calc(var(--selection-focus-stroke) * var(--selection-scale));
   }
 
   .ink-surface.eraser-active {
@@ -1341,8 +1340,6 @@
   }
 
   .selection-overlay {
-    fill: var(--paper);
-    stroke: var(--blueprint);
     pointer-events: none;
   }
 

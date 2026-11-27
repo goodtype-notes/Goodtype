@@ -392,6 +392,7 @@
 {#if selected}
 <svg
   class="shape-object shape-controls"
+  style:--selection-scale={controlScale}
   class:grabbable
   class:editing
   viewBox={`0 0 ${pageWidthPt} ${pageHeightPt}`}
@@ -408,24 +409,20 @@
         y={bounds.top}
         width={Math.max(bounds.right - bounds.left, controlScale)}
         height={Math.max(bounds.bottom - bounds.top, controlScale)}
-        stroke-width={1.5 * controlScale}
-        stroke-dasharray={`${4 * controlScale} ${3 * controlScale}`}
       ></rect>
       {/if}
       {#if !editing && !endsOnly}
         <line
-          class="handle-line"
+          class="selection-stem"
           x1={(bounds.left + bounds.right) / 2}
           y1={bounds.top}
           x2={rotationHandle.x}
           y2={rotationHandle.y}
-          stroke-width={1.2 * controlScale}
         ></line>
         <circle
-          class="control-hit rotate"
+          class="selection-hit control-hit rotate"
           cx={rotationHandle.x}
           cy={rotationHandle.y}
-          r={22 * controlScale}
           role="button"
           tabindex={grabbable ? 0 : -1}
           aria-label={$t("workspace.rotateCurrentlyDegreesHoldShiftToSnap", { "value1": describeShape(preview.geometry, $t), "value2": Math.round(preview.rotation) })}
@@ -435,15 +432,14 @@
           onpointercancel={cancel}
           onkeydown={objectKeydown}
         ></circle>
-        <circle class="control" cx={rotationHandle.x} cy={rotationHandle.y} r={4.5 * controlScale}></circle>
+        <circle class="selection-dot rotate-dot control" cx={rotationHandle.x} cy={rotationHandle.y}></circle>
       {/if}
       <!-- Rectangles and ellipses resize from their own corners and sides; a curve has only knots. -->
       {#if !editing && spline}
         <circle
-          class="control-hit"
+          class="selection-hit control-hit"
           cx={bounds.right}
           cy={bounds.bottom}
-          r={22 * controlScale}
           role="button"
           tabindex={grabbable ? 0 : -1}
           aria-label={$t("workspace.resizeHoldShiftToKeepProportions", { "value1": describeShape(preview.geometry, $t) })}
@@ -453,19 +449,18 @@
           onpointercancel={cancel}
           onkeydown={objectKeydown}
         ></circle>
-        <circle class="control" cx={bounds.right} cy={bounds.bottom} r={5 * controlScale}></circle>
+        <circle class="selection-dot control" cx={bounds.right} cy={bounds.bottom}></circle>
       {/if}
         {#each anchors as item, index (`${anchorName(item.anchor)}-${index}`)}
           {#if typeof item.anchor !== "string" && "handle" in item.anchor}
             {@const knot = nodePoint(item.anchor)}
             {#if knot}
               <line
-                class="handle-line"
+                class="selection-stem"
                 x1={knot.x}
                 y1={knot.y}
                 x2={item.point.x}
                 y2={item.point.y}
-                stroke-width={1.2 * controlScale}
               ></line>
             {/if}
           {/if}
@@ -473,10 +468,9 @@
         {#each anchors as item, index (`${anchorName(item.anchor)}-${index}`)}
           {@const handle = typeof item.anchor !== "string" && "handle" in item.anchor}
           <circle
-            class="control-hit anchor"
+            class="selection-hit control-hit anchor"
             cx={item.point.x}
             cy={item.point.y}
-            r={(spline && !editing ? 14 : 22) * controlScale}
             role="button"
             tabindex={grabbable ? 0 : -1}
             aria-label={$t("workspace.move2", { "value1": anchorName(item.anchor) })}
@@ -493,10 +487,9 @@
           </circle>
           <circle
             class:handle
-            class="control"
+            class="selection-dot control"
             cx={item.point.x}
             cy={item.point.y}
-            r={(handle ? 3.5 : 5) * controlScale}
           ></circle>
         {/each}
   </g>
@@ -518,7 +511,7 @@
 <svelte:window onkeydowncapture={cancelOnEscape} />
 
 <style>
-  .port-winner { fill: var(--paper-select); }
+  .port-winner { fill: var(--selection-color); }
   .port-name { fill: var(--ink); pointer-events: none; }
   .shape-object { position: absolute; inset: 0; display: block; overflow: visible; pointer-events: none; touch-action: none; user-select: none; }
   .shape-controls { z-index: 2147483647; }
@@ -526,15 +519,11 @@
   .grabbable .shape-hit { pointer-events: stroke; }
   .grabbable .shape-hit.closed { pointer-events: all; }
   .shape-hit:focus-visible { stroke: var(--blueprint-light); opacity: 0.32; }
-  .selection-box { fill: none; stroke: var(--blueprint); pointer-events: none; }
   .control-hit { fill: transparent; pointer-events: none; cursor: nwse-resize; outline: none; }
   .grabbable .control-hit { pointer-events: all; }
   .control-hit.rotate { cursor: grab; }
   .control-hit.rotate:active { cursor: grabbing; }
   .control-hit.anchor, .editing .control-hit { cursor: move; }
-  .control-hit:focus-visible { fill: var(--accent-fill); }
-  .control { fill: var(--paper); stroke: var(--blueprint); stroke-width: 1.5px; pointer-events: none; }
-  .control.handle { fill: var(--blueprint); }
-  .handle-line { stroke: var(--blueprint); opacity: 0.72; pointer-events: none; }
-  .snap-ring { fill: none; stroke: var(--paper-select); pointer-events: none; }
+  .control.handle { fill: var(--selection-color); }
+  .snap-ring { fill: none; stroke: var(--selection-color); pointer-events: none; }
 </style>
