@@ -213,3 +213,21 @@ export type ObjectMoveSnap = {
   adjust: (delta: Point, alt: boolean, constrain?: (delta: Point) => Point) => Point;
   end: () => void;
 };
+
+/** A palette item starts at centre zero; reuse this index while its pointer moves. */
+export function beginPlacementSnap(frames: readonly SnapFrame[], item: {
+  widthPt: number; heightPt: number; ports?: readonly Point[];
+}): SnapSession {
+  const left = -item.widthPt / 2, top = -item.heightPt / 2;
+  return beginSnap(frames, { ids: new Set(),
+    box: { left, top, right: -left, bottom: -top },
+    ports: item.ports?.map(port => ({ x: left + port.x, y: top + port.y })),
+  });
+}
+
+/** Returns the insertion centre and guides, using the same lookup as an object move. */
+export function snapPlacement(session: SnapSession, centre: Point, zoom: number, enabled: boolean, alt: boolean) {
+  if (!enabled || alt) return { point: centre, guides: [] as SnapGuide[] };
+  const result = snapMoveDelta(session, centre, snapThresholdPt(zoom));
+  return { point: result.delta, guides: result.guides };
+}
