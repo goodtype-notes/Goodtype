@@ -133,9 +133,11 @@ impl Docs {
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct Release {
+    #[serde(default)]
+    pub wasm: Option<manifest::Wasm>,
     pub version: String,
     api: String,
-    target: String,
+    pub target: String,
     pub url: String,
     pub size: u64,
     pub sha256: String,
@@ -149,8 +151,12 @@ pub(super) struct Release {
 
 impl Release {
     fn compatible(&self, runtime: Option<&str>) -> bool {
-        self.api == manifest::API
-            && self.target == TARGET
+        self.wasm.as_ref().is_none_or(manifest::Wasm::valid)
+            && (self.target != WASM_TARGET
+                || (self.wasm.is_some() && self.requires.iter().any(|f| f == "wasm-v0")))
+            && self.api == manifest::API
+            && (self.target == TARGET
+                || (cfg!(feature = "wasm-tier") && self.target == WASM_TARGET))
             && self.unknown.is_empty()
             && self.requires.len() <= 16
             && self.requires.iter().collect::<HashSet<_>>().len() == self.requires.len()
@@ -326,7 +332,8 @@ fn verify(bytes: &[u8], sig: &[u8], key: &[u8; 32]) -> Result<Index, Problem> {
         let mut versions = HashSet::new();
         for release in &entry.versions {
             if index.format == 1
-                && (release.min_goodtype.is_some()
+                && (release.wasm.is_some()
+                    || release.min_goodtype.is_some()
                     || !release.requires.is_empty()
                     || !release.unknown.is_empty())
             {

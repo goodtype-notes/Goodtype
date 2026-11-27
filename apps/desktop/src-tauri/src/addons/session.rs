@@ -693,6 +693,20 @@ impl Runtime {
         context: Option<&str>,
         cancelled: impl Fn() -> bool,
     ) -> Result<Result<Value, CommandError>, Failure> {
+        self.run_at_revision(app, addon, command, invocation, context, None, cancelled)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn run_at_revision(
+        &self,
+        app: &tauri::AppHandle,
+        addon: &'static super::Addon,
+        command: &str,
+        invocation: super::contributions::Invocation,
+        context: Option<&str>,
+        revision: Option<u64>,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<Result<Value, CommandError>, Failure> {
         use tauri::Manager;
 
         let state = app.state::<super::Importers>();
@@ -730,6 +744,34 @@ impl Runtime {
             > MAX_SCOPE
         {
             return Err(Failure::Protocol);
+        }
+        if manifest.wasm_entry(method, command) {
+            if cancelled() {
+                return Err(Failure::Cancelled);
+            }
+            let revision = revision.ok_or(Failure::Unavailable)?;
+            let payload = if method == "page/changed" {
+                json!({"revision":revision,"changed":params["changed"],"owned":params["own"],
+                    "refs":params["deleted"],"page":params["page"]})
+            } else {
+                json!({"revision":revision,"gesture":if method == "tool/apply" { "tool" } else { "command" },
+                    "settings":params["settings"],"scope":params})
+            };
+            let result = super::wasm::invoke(
+                &path,
+                &manifest,
+                if method == "page/changed" {
+                    "react"
+                } else {
+                    "commit"
+                },
+                &payload,
+            )
+            .map_err(|_| Failure::Protocol)?;
+            if cancelled() {
+                return Err(Failure::Cancelled);
+            }
+            return Ok(Ok(result));
         }
         let fingerprint = format!(
             "{}:{}:{}",

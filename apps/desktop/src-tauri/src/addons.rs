@@ -37,7 +37,6 @@ pub(crate) mod registry;
 pub(crate) mod selection;
 pub(crate) mod session;
 pub(crate) mod update;
-#[cfg(feature = "wasm-spike")]
 pub(crate) mod wasm;
 
 use catalog::CATALOG;
@@ -51,6 +50,7 @@ use import::ImportResult;
 /// the release is not trusted on its own: a compromised release could replace both.
 #[derive(Clone, Copy, Debug)]
 pub struct PinnedRelease<'a> {
+    wasm: Option<&'a manifest::Wasm>,
     pub version: &'a str,
     pub url: &'a str,
     pub size: u64,
@@ -168,6 +168,7 @@ impl Addon {
 
 const PROTOCOL_VERSION: u64 = 1;
 const PACKAGE_MANIFEST: &str = "importer-manifest.json";
+const WASM_TARGET: &str = "wasm32-goodtype-v0";
 const TARGET: &str = "x86_64-pc-windows-msvc";
 /// The only hosts a release download may be redirected to.
 pub(crate) const ASSET_HOSTS: [&str; 3] = [
@@ -617,7 +618,8 @@ pub fn verify_package(tool: &Addon, dir: &Path) -> Result<PackageManifest, Strin
         }
         return Err(format!("`{file}` is not listed in the package manifest"));
     }
-    if !tool.is_content() && !listed.contains(&tool.executable()) {
+    if !tool.is_content() && !listed.contains(&tool.executable()) && manifest.target != WASM_TARGET
+    {
         return Err("the package has no importer executable".into());
     }
     Ok(manifest)
@@ -652,7 +654,8 @@ pub fn check_contract(
     // validates every imported notebook before publishing it.
     if manifest.protocol_version != PROTOCOL_VERSION
         || (expected.imports_notebooks() && !importable_schema(manifest.notebook_schema_version))
-        || manifest.target != TARGET
+        || !(manifest.target == TARGET
+            || (cfg!(feature = "wasm-tier") && manifest.target == WASM_TARGET))
     {
         return Err(format!(
             "importer {} speaks protocol {} for notebook schema {} on {}; this Goodtype needs \
@@ -724,7 +727,7 @@ impl InstallDir {
 
     fn installed_version(&self, version: String) -> Option<(String, PathBuf)> {
         let dir = self.version_dir(&version).ok()?;
-        let entry = if self.1.is_content() {
+        let entry = if self.1.is_content() || dir.join(manifest::FILE).is_file() {
             manifest::FILE.to_owned()
         } else {
             self.1.executable()
@@ -850,11 +853,26 @@ fn install_with_policy(
                     })
                 })
                 .collect::<Result<Vec<_>, String>>()?;
+            let target = if staging.join(manifest::FILE).is_file() {
+                let declaration = manifest::parse(
+                    &read_bounded(&staging.join(manifest::FILE), 64 * 1024)?,
+                    dir.1,
+                    release.version,
+                )
+                .map_err(manager::manifest_problem)?;
+                if declaration.target_is_wasm() {
+                    WASM_TARGET
+                } else {
+                    TARGET
+                }
+            } else {
+                TARGET
+            };
             let manifest = PackageManifest {
                 version: release.version.into(),
                 protocol_version: 1,
                 notebook_schema_version: 0,
-                target: TARGET.into(),
+                target: target.into(),
                 decoder_commit: String::new(),
                 files,
             };
@@ -882,8 +900,15 @@ fn install_with_policy(
         if let Some(contents) = &declaration.contents {
             content::load(dir.1, &staging, &declaration.strings, contents)?;
         }
+        if release.wasm.is_some() && release.wasm != declaration.wasm.as_ref() {
+            return Err("signed module descriptor differs from manifest".into());
+        }
+        if declaration.wasm.is_some() {
+            wasm::module_bytes(&staging, &declaration)?;
+        }
         approve(&declaration)?;
-        if declaration.contents.is_none()
+        if declaration.wasm.is_none()
+            && declaration.contents.is_none()
             && !matches!(dir.1.kind, Kind::Objects { .. })
             && !(release.url.is_empty() && declaration.uses_session())
         {
@@ -1666,6 +1691,7 @@ fn start_install(
             }
             let release = candidate
                 .map(|release| PinnedRelease {
+                    wasm: None,
                     version: &release.version,
                     url: &release.url,
                     size: release.size,
@@ -1687,6 +1713,7 @@ fn start_install(
                 .map(|release| update::descriptor_for(tool, release))
                 .transpose()?;
             let release = PinnedRelease {
+                wasm: None,
                 decoder_commit: verified
                     .as_ref()
                     .map_or(release.decoder_commit, |descriptor| {

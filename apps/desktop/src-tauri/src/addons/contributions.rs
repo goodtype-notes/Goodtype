@@ -484,7 +484,7 @@ fn preview(
     let context = format!("form:{}", root.display());
     let reply = app
         .state::<session::Runtime>()
-        .run(
+        .run_at_revision(
             app,
             addon,
             &request.command,
@@ -495,6 +495,7 @@ fn preview(
                 anchor: request.anchor,
             },
             Some(&context),
+            Some(base.revision),
             cancelled,
         )
         .map_err(|error| error.code())?

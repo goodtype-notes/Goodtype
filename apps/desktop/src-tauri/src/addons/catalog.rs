@@ -21,6 +21,7 @@ pub static GOODNOTES: Addon = Addon {
         0x5b, 0x3c,
     ]),
     pinned: Some(PinnedRelease {
+        wasm: None,
         version: "0.1.1",
         url: "https://github.com/goodtype-notes/Goodtype-Goodnotes-Importer/releases/download/v0.1.1/goodtype-goodnotes-importer-0.1.1-windows-x64.zip",
         size: 14_881_982,
@@ -56,6 +57,7 @@ pub static ONENOTE: Addon = Addon {
         0x6c, 0x3b,
     ]),
     pinned: Some(PinnedRelease {
+        wasm: None,
         version: "0.1.0",
         url: "https://github.com/goodtype-notes/Goodtype-OneNote-Importer/releases/download/v0.1.0/goodtype-onenote-importer-0.1.0-windows-x64.zip",
         size: 1_927_930,

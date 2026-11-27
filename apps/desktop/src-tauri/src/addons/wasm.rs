@@ -1,5 +1,4 @@
-//! ADR 0050 W1: experimental only, without registry admission.
-#![cfg_attr(not(test), allow(dead_code))] // W1 executes commit only in the gate harness.
+//! ADR 0050: capability-free runtime; execution is gated by `wasm-tier`.
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
@@ -106,7 +105,7 @@ pub fn validate(bytes: &[u8], digest: &str) -> Result<(), String> {
                             preview = true;
                             entrypoints.push(export.index);
                         }
-                        ("commit", ExternalKind::Func) => {
+                        ("commit" | "react", ExternalKind::Func) => {
                             commit = true;
                             entrypoints.push(export.index);
                         }
@@ -138,35 +137,102 @@ pub fn validate(bytes: &[u8], digest: &str) -> Result<(), String> {
 type Cache = Mutex<HashMap<String, Arc<extism::CompiledPlugin>>>;
 static CACHE: OnceLock<Cache> = OnceLock::new();
 
-// Release builds have no sideload path at all.
-#[cfg(debug_assertions)]
-pub fn sideload() -> Result<(Vec<u8>, String), String> {
-    let path = std::env::var_os("GOODTYPE_WASM_MODULE").ok_or("no sideload")?;
-    let digest = std::env::var("GOODTYPE_WASM_SHA256").map_err(|_| "no pinned digest")?;
-    let bytes = crate::store::read_bounded(std::path::Path::new(&path), MODULE_LIMIT)?;
-    validate(&bytes, &digest)?;
-    Ok((bytes, digest))
+pub const ENABLED: bool = cfg!(feature = "wasm-tier");
+
+pub(super) fn module_bytes(
+    path: &std::path::Path,
+    manifest: &super::manifest::Manifest,
+) -> Result<Vec<u8>, String> {
+    if !ENABLED {
+        return Err("addon-needs-update".into());
+    }
+    let module = manifest.wasm.as_ref().ok_or("addon-unavailable")?;
+    let bytes = crate::store::read_bounded(&path.join(&module.module), MODULE_LIMIT)?;
+    validate(&bytes, &module.sha256)?;
+    let mut exports = std::collections::HashSet::new();
+    for payload in Parser::new(0).parse_all(&bytes) {
+        if let Payload::ExportSection(section) = payload.map_err(|e| e.to_string())? {
+            for export in section {
+                exports.insert(export.map_err(|e| e.to_string())?.name.to_owned());
+            }
+        }
+    }
+    use super::manifest::Entry;
+    for (required, name) in [
+        (manifest.reaction == Entry::Wasm, "react"),
+        (manifest.preview == Some(Entry::Wasm), "preview"),
+        (
+            manifest.tools.iter().any(|t| t.entry == Entry::Wasm)
+                || manifest.commands.iter().any(|c| c.entry == Entry::Wasm),
+            "commit",
+        ),
+    ] {
+        if required && !exports.contains(name) {
+            return Err("missing declared export".into());
+        }
+    }
+    Ok(bytes)
 }
 
-#[cfg(debug_assertions)]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewModule {
+    bytes: Vec<u8>,
+    digest: String,
+    addon_id: String,
+}
+
 #[tauri::command]
 pub fn addon_wasm_bytes(
     app: tauri::AppHandle,
-    addon_id: String,
-    digest: String,
-) -> Result<Vec<u8>, String> {
+    addon_ids: Vec<String>,
+) -> Result<PreviewModule, String> {
     use tauri::Manager;
-    if addon_id != "connectors" {
+    if !ENABLED || addon_ids.len() > 32 {
         return Err("addon-unavailable".into());
     }
     let importers = app.state::<super::Importers>();
-    let (job, addon) = importers.get(&addon_id)?;
-    super::selection::authorization(&app, job, addon)?;
-    let (bytes, pinned) = sideload()?;
-    if digest != pinned {
-        return Err("module digest".into());
+    for id in addon_ids {
+        let Ok((job, addon)) = importers.get(&id) else {
+            continue;
+        };
+        let Ok(auth) = super::selection::authorization(&app, job, addon) else {
+            continue;
+        };
+        let manifest = super::manager::installed(addon, &auth.path, &auth.version, true)
+            .map_err(|_| "addon-unavailable")?;
+        if manifest.preview != Some(super::manifest::Entry::Wasm) {
+            continue;
+        }
+        let bytes = module_bytes(&auth.path, &manifest)?;
+        if super::selection::revoked(job, &auth) {
+            return Err("addon-cancelled".into());
+        }
+        return Ok(PreviewModule {
+            bytes,
+            digest: manifest.wasm.unwrap().sha256,
+            addon_id: id,
+        });
     }
-    Ok(bytes)
+    Err("addon-unavailable".into())
+}
+
+pub(super) fn invoke(
+    path: &std::path::Path,
+    manifest: &super::manifest::Manifest,
+    export: &str,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let bytes = module_bytes(path, manifest)?;
+    let compiled = compile(&bytes, &manifest.wasm.as_ref().unwrap().sha256)?;
+    let output = call(
+        &compiled,
+        export,
+        &serde_json::to_vec(params).map_err(|e| e.to_string())?,
+    )?;
+    let super::session::Strict(result) =
+        serde_json::from_slice(&output).map_err(|e| e.to_string())?;
+    Ok(result)
 }
 
 pub fn compile(bytes: &[u8], digest: &str) -> Result<Arc<extism::CompiledPlugin>, String> {
@@ -201,7 +267,7 @@ pub fn call(
     export: &str,
     input: &[u8],
 ) -> Result<Vec<u8>, String> {
-    if !matches!(export, "preview" | "commit") || input.len() > IO_LIMIT {
+    if !matches!(export, "preview" | "commit" | "react") || input.len() > IO_LIMIT {
         return Err("input ceiling".into());
     }
     let mut plugin = extism::Plugin::new_from_compiled(module).map_err(|e| e.to_string())?;
@@ -236,6 +302,87 @@ mod tests {
     fn guest(body: &str) -> Vec<u8> {
         wat::parse_str(format!("(module (memory (export \"memory\") 1 128) (func (export \"preview\") (result i32) {body}) (func (export \"commit\") (result i32) i32.const 0))")).unwrap()
     }
+    #[test]
+    fn tier_gate_is_explicit_and_off_in_normal_builds() {
+        assert_eq!(ENABLED, cfg!(feature = "wasm-tier"));
+        if !cfg!(feature = "wasm-tier") {
+            let manifest = super::super::catalog::CONNECTORS.declaration("1.2.3");
+            assert!(module_bytes(std::path::Path::new("."), &manifest).is_err());
+            assert!(!super::super::manifest::supported_feature("wasm-v0"));
+        }
+        let config: Value = serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        assert!(
+            !config["app"]["security"]["csp"]
+                .as_str()
+                .unwrap()
+                .contains("wasm-unsafe-eval")
+        );
+    }
+
+    fn output_guest(output: &str) -> Vec<u8> {
+        let data = output
+            .bytes()
+            .map(|b| format!("\\{b:02x}"))
+            .collect::<String>();
+        wat::parse_str(format!(
+            r#"(module
+          (import "extism:host/env" "alloc" (func $alloc (param i64) (result i64)))
+          (import "extism:host/env" "store_u8" (func $store (param i64 i32)))
+          (import "extism:host/env" "output_set" (func $output (param i64 i64)))
+          (memory (export "memory") 1 128) (data (i32.const 0) "{data}")
+          (func (export "preview") (result i32) i32.const 0)
+          (func (export "react") (result i32) (local $ptr i64) (local $i i32)
+            i64.const {len} call $alloc local.set $ptr
+            (loop $copy
+              local.get $ptr local.get $i i64.extend_i32_u i64.add
+              local.get $i i32.load8_u call $store
+              local.get $i i32.const 1 i32.add local.tee $i i32.const {len} i32.lt_u br_if $copy)
+            local.get $ptr i64.const {len} call $output i32.const 0))"#,
+            len = output.len()
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn react_round_trip_is_admitted_only_by_owned_batch_validation() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../fixtures/notebooks/minimal");
+        let mut snapshot = goodtype_core::storage::open_notebook(&root).unwrap();
+        let id = snapshot.page.objects[0].fields().id.clone();
+        snapshot.page.objects[0].fields_mut().addon_data =
+            Some(serde_json::from_value(json!({"connectors":{"data":{},"refs":[]}})).unwrap());
+        let valid =
+            json!({"batch":{"operations":[{"op":"updateObject","id":id,"x":42}]}}).to_string();
+        for (reply, accepted) in [
+            (valid.as_str(), true),
+            (
+                r#"{"batch":{"operations":[{"op":"updateObject","id":"foreign","x":1}]}}"#,
+                false,
+            ),
+        ] {
+            let bytes = output_guest(reply);
+            let compiled = compile(&bytes, &hash(&bytes)).unwrap();
+            let output = call(
+                &compiled,
+                "react",
+                br#"{"revision":1,"changed":[],"owned":[],"refs":[]}"#,
+            )
+            .unwrap();
+            let reply = serde_json::from_slice(&output).unwrap();
+            assert_eq!(
+                super::super::batch::apply_owned(
+                    &root,
+                    snapshot.clone(),
+                    "connectors",
+                    None,
+                    reply
+                )
+                .is_ok(),
+                accepted
+            );
+        }
+    }
+
     #[test]
     fn rejects_bad_digest_and_size() {
         let bytes = guest("i32.const 0");
@@ -301,6 +448,18 @@ mod tests {
         }
         let bytes = guest("i32.const 0");
         validate(&bytes, &hash(&bytes)).unwrap();
+    }
+
+    #[test]
+    fn rejects_wrong_signatures_exports_and_simd() {
+        for extra in [
+            "(func (export \"evil\"))",
+            "(func (export \"react\") (result i64) i64.const 0)",
+            "(func (export \"react\") (result i32) v128.const i32x4 0 0 0 0 drop i32.const 0)",
+        ] {
+            let bytes = wat::parse_str(format!("(module (memory 1 128) (func (export \"preview\") (result i32) i32.const 0) (func (export \"commit\") (result i32) i32.const 0) {extra})")).unwrap();
+            assert!(validate(&bytes, &hash(&bytes)).is_err());
+        }
     }
 
     #[test]

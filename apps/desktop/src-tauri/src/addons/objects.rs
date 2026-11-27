@@ -607,9 +607,15 @@ async fn object_action(
         let context = format!("{}:{}", root.display(), request.page_id);
         let reply = app
             .state::<session::Runtime>()
-            .run(&app, addon, &command, invocation, Some(&context), || {
-                cancelled() || selection::revoked(job, &authorization)
-            })
+            .run_at_revision(
+                &app,
+                addon,
+                &command,
+                invocation,
+                Some(&context),
+                Some(snapshot.page.revision),
+                || cancelled() || selection::revoked(job, &authorization),
+            )
             .map_err(|failure| error(failure.code()))?
             .map_err(|failure| ActionError {
                 code: failure.code,
@@ -1038,12 +1044,13 @@ pub(crate) async fn addon_react(
                 let candidate = run_reaction_chunks(&root, &snapshot, addon.id, params, |params| {
                     handle
                         .state::<session::Runtime>()
-                        .run(
+                        .run_at_revision(
                             &handle,
                             addon,
                             "",
                             Invocation::Reaction(params),
                             Some(&context),
+                            Some(snapshot.page.revision),
                             || {
                                 Instant::now() >= deadline
                                     || selection::revoked(job, &authorization)

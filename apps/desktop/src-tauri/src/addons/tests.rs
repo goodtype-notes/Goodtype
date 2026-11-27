@@ -69,6 +69,7 @@ fn package(tool: &Addon, version: &str, tamper: bool, extra: Option<(&str, &[u8]
 
 fn pin(tool: &Addon, bytes: &[u8]) -> PinnedRelease<'static> {
     PinnedRelease {
+        wasm: None,
         version: VERSION,
         url: Box::leak(format!("{}/v9.9.9/x.zip", tool.release_url()).into_boxed_str()),
         size: bytes.len() as u64,
@@ -217,6 +218,7 @@ fn installs_a_verified_package_and_keeps_it_when_a_later_one_is_bad() {
             (
                 good.clone(),
                 PinnedRelease {
+                    wasm: None,
                     sha256: "00",
                     ..pin(tool, &good)
                 },
@@ -314,6 +316,7 @@ fn a_verified_update_retains_the_previous_release_for_local_rollback() {
         fs::write(&archive, &bytes).unwrap();
         let approved = std::cell::Cell::new(false);
         let release = PinnedRelease {
+            wasm: None,
             version,
             ..pin(tool, &bytes)
         };
@@ -518,6 +521,7 @@ fn contract_needs_matching_protocol_schema_and_pin() {
         );
         assert!(check(&manifest(1, newest), None, None).is_ok());
         let other_release = PinnedRelease {
+            wasm: None,
             version: "1.0.0",
             ..release
         };
@@ -763,6 +767,7 @@ fn real_math_release_installs_and_checks() {
     let sha256 = std::env::var("MATH_RECOGNIZER_RELEASE_SHA256")
         .expect("set MATH_RECOGNIZER_RELEASE_SHA256");
     let release = PinnedRelease {
+        wasm: None,
         version: "0.1.0",
         url: "",
         size: fs::metadata(&archive).unwrap().len(),
@@ -1356,4 +1361,60 @@ fn installed_unmet_requirements_disable_loading_without_deleting_package() {
     assert!(usable_installation(&dir).is_err());
     assert_eq!(dir.active().unwrap().0, VERSION);
     assert!(path.join(manifest::FILE).is_file());
+}
+
+#[test]
+#[cfg(feature = "wasm-tier")]
+fn portable_wasm_install_checks_module_without_executable_and_keeps_previous_on_failure() {
+    use serde_json::json;
+    let addon = &catalog::CONNECTORS;
+    let home = tempfile::tempdir().unwrap();
+    let dir = InstallDir(home.path().join("install"), addon);
+    let module = wat::parse_str(
+        r#"(module (memory (export "memory") 1 128)
+      (func (export "preview") (result i32) i32.const 0)
+      (func (export "commit") (result i32) i32.const 0)
+      (func (export "react") (result i32) i32.const 0))"#,
+    )
+    .unwrap();
+    for (version, digest_ok) in [("1.2.3", true), ("1.2.4", false)] {
+        let mut declaration = serde_json::to_value(addon.declaration(version)).unwrap();
+        declaration["requires"] = json!(["wasm-v0", "path-edit-v0"]);
+        declaration["target"] = json!(WASM_TARGET);
+        declaration.as_object_mut().unwrap().remove("entrypoint");
+        declaration["wasm"] = json!({"module":"module.wasm", "sha256":if digest_ok {sha(&module)} else {"0".repeat(64)}, "abi":"goodtype-wasm-v0"});
+        declaration["reaction"] = json!("wasm");
+        declaration["preview"] = json!("wasm");
+        for tool in declaration["tools"].as_array_mut().unwrap() {
+            tool["entry"] = json!("wasm");
+        }
+        let top = package_folder(addon, version);
+        let manifest_path = format!("{top}/{}", manifest::FILE);
+        let module_path = format!("{top}/module.wasm");
+        let bytes = serde_json::to_vec(&declaration).unwrap();
+        let archive = zip_bytes(&[(&manifest_path, &bytes), (&module_path, &module)]);
+        let file = home.path().join("addon.zip");
+        fs::write(&file, &archive).unwrap();
+        let hash = sha(&archive);
+        let wasm: manifest::Wasm = serde_json::from_value(declaration["wasm"].clone()).unwrap();
+        let pin = PinnedRelease {
+            wasm: Some(&wasm),
+            version,
+            url: "",
+            size: archive.len() as u64,
+            sha256: &hash,
+            decoder_commit: "",
+        };
+        assert_eq!(
+            install_archive(&dir, &file, &pin, &|_| panic!(
+                "Wasm must not probe an executable"
+            ))
+            .is_ok(),
+            digest_ok
+        );
+        assert_eq!(dir.active().unwrap().0, "1.2.3");
+    }
+    let (_, path) = dir.active().unwrap();
+    assert!(manager::installed(addon, &path, "1.2.3", true).is_ok());
+    assert!(!path.join(addon.executable()).exists());
 }

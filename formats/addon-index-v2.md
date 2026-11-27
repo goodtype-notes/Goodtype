@@ -23,3 +23,16 @@ App updates and checking through the existing updater. A beta caveat appears whe
 Installed versions remain available; automatic discovery reports skipped incompatible updates.
 Rollback refuses a previous version that the index lists as needing a newer Goodtype; versions the
 index does not list are left to the manifest checks.
+
+
+Portable Wasm releases use target `wasm32-goodtype-v0`, `requires` containing `wasm-v0`, and
+`wasm: {module: "module.wasm", sha256: "<64 lowercase hex>", abi: "goodtype-wasm-v0"}`.
+The same module descriptor appears in the package manifest and signed `addon-update.json`;
+the host binds index to signed descriptor and descriptor to staged manifest before activation.
+The archive name is `<package>-<version>-wasm32-goodtype-v0.zip` (hybrids keep windows-x64).
+The ZIP retains the existing `<package>-<version>-windows-x64/` internal root so extraction,
+staging and rollback paths stay unchanged even for portable archives. Archive sha256 remains the ZIP digest. Module sha256 covers the raw module bytes, not the ZIP.
+Normal builds regard `wasm-v0` as unsupported until the gate described in addon-api-v0.md is lifted.
+Format 1 must not publish Wasm releases. The registry repository must add `wasm-v0` to its
+feature-to-first-shipping-version table when an accepted host release actually ships the tier;
+do not assign a production version while W1 remains open.
