@@ -30,7 +30,7 @@
   import { listRecentNotebooks, recordNotebookPage, recordNotebookSession, resumeNotebookSession, writeMetrics } from "../ipc/workspace";
   import { placeFloatingToolbar } from "../geometry/placement";
   import { dismissable } from "../workspace/dismiss";
-  import { type PageDefaults, type PagePosition, type ShapeStyle, type ShapeCap, type PageTemplate, type StrokePattern } from "../model";
+  import { type PageBackground, type PageDefaults, type PagePosition, type ShapeStyle, type ShapeCap, type PageTemplate, type StrokePattern } from "../model";
   import { TYPST_IDLE_DEBOUNCE_MS, type TypstCompileResult } from "../editor/typst";
   import { createTypstPreset, installPageTypstPreset, listenPresetChanges, readTypstPreset, pickTypstPreset, setDefaultTypstPreset } from "../ipc/presets";
   import { presetHeader, presetTargetCurrent, DEFAULT_PRESET_PATH, withPagePreset, type PresetChoice, type PresetTarget } from "../page/presets";
@@ -935,6 +935,15 @@
     return () => { cancelled = true; };
   });
   let backgroundOpen = $state(false);
+  let backgroundToneChanged = $state(false);
+  function toggleBackground() {
+    addPageOpen = false;
+    backgroundToneChanged = false;
+    const background = session.activeBackground;
+    const color = background.kind === "template" ? background.template.backgroundColor : background.kind === "plain" ? background.color : "";
+    addPageToneId = PAPER_TONES.find(tone => tone.backgroundColor.toLowerCase() === color.toLowerCase())?.id ?? PAPER_TONES[0].id;
+    backgroundOpen = !backgroundOpen;
+  }
   let backgroundTrigger = $state<HTMLButtonElement>();
   function closeBackground() {
     backgroundOpen = false;
@@ -1602,7 +1611,13 @@
           : void session.addPage(position, { kind: "template", template: source }, geometry, count),
     });
     // Preview the inherited paper; Rust resolves it again at commit time.
-    const next = editBackground ? { background: session.activeBackground, geometry } : inheritedPaper ?? session.notebookManifest?.defaultPage ?? null;
+    const current = session.activeBackground;
+    const color = (PAPER_TONES.find(tone => tone.id === addPageToneId) ?? PAPER_TONES[0]).backgroundColor;
+    const background: PageBackground = editBackground && backgroundToneChanged
+      ? current.kind === "template" ? { ...current, template: { ...current.template, backgroundColor: color } }
+        : { kind: "plain", color }
+      : current;
+    const next = editBackground ? { background, geometry } : inheritedPaper ?? session.notebookManifest?.defaultPage ?? null;
     const nextUsable = next && next.background.kind !== "pdf" ? next : null;
     const paperPreview = (paper: PageDefaults) =>
       paper.background.kind === "template"
@@ -2720,7 +2735,7 @@
       {/if}
       {#if session.pageOpen}
         {#if session.activeBackground.kind !== "pdf" && !session.activeCalculation}
-          <button bind:this={backgroundTrigger} class="text-action" type="button" disabled={session.busy} aria-expanded={backgroundOpen} onclick={() => { addPageOpen = false; backgroundOpen = !backgroundOpen; }}>{$t("workspace.pageBackground")}</button>
+          <button bind:this={backgroundTrigger} class="text-action" type="button" disabled={session.busy} aria-expanded={backgroundOpen} onclick={toggleBackground}>{$t("workspace.pageBackground")}</button>
           {#if backgroundOpen}
             {#key session.activePageId}<AddPageMenu editBackground trigger={backgroundTrigger}
               where="after" groups={addPageGroups(true).filter(group => group.lane !== "import")}
@@ -2730,7 +2745,7 @@
               geometry={session.activeGeometry} currentPageId={session.activePageId}
               pageNumber={session.pageNumber} pageCount={session.pageCount} canPlaceRelative={false}
               onWhereChange={() => {}} onSizeChange={() => {}} onOrientationChange={() => {}}
-              onToneChange={next => addPageToneId = next} onClose={closeBackground}
+              onToneChange={next => { addPageToneId = next; backgroundToneChanged = true; }} onClose={closeBackground}
             />{/key}
           {/if}
         {/if}
