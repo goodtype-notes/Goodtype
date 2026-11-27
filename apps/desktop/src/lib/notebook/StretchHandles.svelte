@@ -123,8 +123,9 @@
 
 <style>
   svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 2147483647; pointer-events: none; }
-  .hit { fill: transparent; pointer-events: all; touch-action: none; cursor: grab; }
+  .hit { fill: transparent; pointer-events: all; touch-action: none; cursor: grab; outline: none; }
   .hit.disabled { pointer-events: none; }
-  .hit:focus-visible { outline: 2px solid var(--paper-select); }
+  /* A CSS outline would scale with the page zoom; a zoom-divided stroke keeps its screen size. */
+  .hit:focus-visible { stroke: var(--paper-select); stroke-width: calc(2px / var(--zoom)); }
   .dot { pointer-events: none; fill: var(--paper); stroke: var(--paper-select); stroke-width: calc(1.5px / var(--zoom)); }
 </style>
