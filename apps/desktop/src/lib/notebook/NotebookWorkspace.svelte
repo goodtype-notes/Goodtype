@@ -2735,7 +2735,9 @@
       {/if}
       {#if session.pageOpen}
         {#if session.activeBackground.kind !== "pdf" && !session.activeCalculation}
-          <button bind:this={backgroundTrigger} class="text-action" type="button" disabled={session.busy} aria-expanded={backgroundOpen} onclick={toggleBackground}>{$t("workspace.pageBackground")}</button>
+          <button bind:this={backgroundTrigger} class="icon-button" class:active={backgroundOpen} type="button" aria-label={$t("workspace.pageBackground")} aria-expanded={backgroundOpen} title={$t("workspace.pageBackground")} disabled={session.busy} onclick={toggleBackground}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3.5" width="14" height="17" rx="2" /><path class="paper-dots" d="M9 8.5h.01M12 8.5h.01M15 8.5h.01M9 12h.01M12 12h.01M15 12h.01M9 15.5h.01M12 15.5h.01M15 15.5h.01" /></svg>
+          </button>
           {#if backgroundOpen}
             {#key session.activePageId}<AddPageMenu editBackground trigger={backgroundTrigger}
               where="after" groups={addPageGroups(true).filter(group => group.lane !== "import")}
@@ -3742,6 +3744,8 @@
   }
 
   .command-actions svg { width: var(--icon); height: var(--icon); }
+  /* Round caps on zero-length strokes draw the paper dots; a heavier weight keeps them legible. */
+  .command-actions .paper-dots { stroke-width: calc(var(--stroke) * 1.25); }
   /* Filled glyphs — the overflow dots, the pen nib — are shapes, not line drawings; everything
      else is a stroke at the one weight. */
   .command-actions svg:not(.solid-icon) {
