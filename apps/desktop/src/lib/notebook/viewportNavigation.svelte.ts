@@ -11,11 +11,12 @@ import { type InkTool } from "../ink/pipeline";
 
 import { createTouchTaps, type TouchHistoryAction } from "./touchTaps";
 
-import { atScrollEnd, PULL_WHEEL_IDLE_MS, pullProgress, rubberBand, wheelPixels, type PullSource } from "./pullToAdd";
+import { atScrollEnd, mayArmPull, PULL_WHEEL_IDLE_MS, pullProgress, rubberBand, wheelPixels, type PullSource } from "./pullToAdd";
 
 import { type AppSettings } from "../settings";
 type PinchStart = { distance: number; zoom: number; pagePoint: Point };
 type TouchPanStart = {
+    pullAllowed: boolean;
     pointerId: number;
     pointer: Point;
     scroll: Point;
@@ -81,7 +82,7 @@ export function createNavigation(env: NavigationEnvironment) {
    * rather than going through `zoomAt`, because a pan does not change scale and so needs none of
    * the anchoring that a zoom does.
    */
-  let panFrom = $state<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(
+  let panFrom = $state<{ pointerId: number; x: number; y: number; left: number; top: number; pullAllowed: boolean } | null>(
     null,
   );
 
@@ -95,6 +96,7 @@ export function createNavigation(env: NavigationEnvironment) {
       y: event.clientY,
       left: env.pageViewport.scrollLeft,
       top: env.pageViewport.scrollTop,
+      pullAllowed: atScrollEnd(env.pageViewport.scrollTop, env.pageViewport.clientHeight, env.pageViewport.scrollHeight),
     };
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
     // Middle-press is "autoscroll" on Windows; without this the browser drops its own scroll
@@ -107,7 +109,13 @@ export function createNavigation(env: NavigationEnvironment) {
   function continuePan(event: PointerEvent): boolean {
     if (!panFrom || event.pointerId !== panFrom.pointerId || !env.pageViewport) return false;
     env.pageViewport.scrollLeft = panFrom.left - (event.clientX - panFrom.x);
-    env.pageViewport.scrollTop = panFrom.top - (event.clientY - panFrom.y);
+    const nextTop = panFrom.top - (event.clientY - panFrom.y);
+    const end = env.pageViewport.scrollHeight - env.pageViewport.clientHeight;
+    if (panFrom.pullAllowed && canPull()) {
+      const raw = nextTop - end;
+      pull = raw > 0 ? { raw, source: "touch" } : null;
+    }
+    env.pageViewport.scrollTop = Math.min(nextTop, end);
     event.preventDefault();
     event.stopPropagation();
     return true;
@@ -116,6 +124,7 @@ export function createNavigation(env: NavigationEnvironment) {
   function endPan(event: PointerEvent): boolean {
     if (!panFrom || event.pointerId !== panFrom.pointerId) return false;
     panFrom = null;
+    if (pull?.source === "touch") releasePull(event.type === "pointerup");
     event.preventDefault();
     event.stopPropagation();
     return true;
@@ -214,6 +223,7 @@ export function createNavigation(env: NavigationEnvironment) {
     if (touchPoints.size === 1 && !env.directObjectInput && env.pageViewport && env.workspace) {
       automaticPageFocusLocked = false;
       touchPanStart = {
+        pullAllowed: atScrollEnd(env.pageViewport.scrollTop, env.pageViewport.clientHeight, env.pageViewport.scrollHeight),
         pointerId: event.pointerId,
         pointer: { x: event.clientX, y: event.clientY },
         scroll: { x: env.pageViewport.scrollLeft, y: env.pageViewport.scrollTop },
@@ -297,7 +307,7 @@ export function createNavigation(env: NavigationEnvironment) {
       touchPanStart.lastTime = now;
       // Past the end the finger pulls against resistance instead of scrolling into nothing.
       const end = env.pageViewport.scrollHeight - env.pageViewport.clientHeight;
-      if (canPull() && (next.y > end || pull?.source === "touch")) {
+      if (touchPanStart.pullAllowed && canPull() && (next.y > end || pull?.source === "touch")) {
         const raw = next.y - end;
         pull = raw > 0 ? { raw, source: "touch" } : null;
         next.y = Math.min(next.y, end);
@@ -550,6 +560,8 @@ export function createNavigation(env: NavigationEnvironment) {
   let pullIdleTimer: ReturnType<typeof setTimeout> | undefined;
 
   let pullDisarmed = false;
+  let lastWheelAt = -Infinity;
+  let wheelPullAllowed = false;
 
   const pullFill = $derived(pull ? pullProgress(pull.raw, pull.source) : 0);
 
@@ -568,12 +580,17 @@ export function createNavigation(env: NavigationEnvironment) {
     const viewport = env.pageViewport;
     if (!viewport) return;
     const delta = wheelPixels(event.deltaY, event.deltaMode, viewport.clientHeight);
+    const now = performance.now();
+    if (now - lastWheelAt >= PULL_WHEEL_IDLE_MS) {
+      wheelPullAllowed = mayArmPull(atScrollEnd(viewport.scrollTop, viewport.clientHeight, viewport.scrollHeight), now - lastWheelAt);
+    }
+    lastWheelAt = now;
     clearTimeout(pullIdleTimer);
     pullIdleTimer = setTimeout(() => {
       pullDisarmed = false;
       if (pull?.source === "wheel") pull = null;
     }, PULL_WHEEL_IDLE_MS);
-    if (pullDisarmed || !canPull()) return;
+    if (pullDisarmed || !wheelPullAllowed || !canPull()) return;
     if (pull?.source === "wheel") {
       const raw = pull.raw + delta;
       pull = raw > 0 ? { raw, source: "wheel" } : null;
@@ -600,7 +617,7 @@ export function createNavigation(env: NavigationEnvironment) {
   }
 
   async function addPageFromPull() {
-    await env.addPage({ kind: "last" }, pullPaper?.background ?? null, pullPaper?.geometry ?? null);
+    await env.addPage({ kind: "last" }, null, pullPaper?.geometry ?? null);
   }
 
   function wheelZoom(event: WheelEvent) {

@@ -55,7 +55,7 @@
   import { INCLUDE_EVERYTHING, type ExportChoice } from "../workspace/exportTarget";
   import AddPageMenu from "../workspace/AddPageMenu.svelte";
   import type { AddPageGroup, AddPageSource, AddPageWhere } from "../workspace/addPage";
-  import { templatePreviewSvg } from "../page/template";
+  import { recolorBackground, templatePreviewSvg } from "../page/template";
   import { PAPER_TONES, paperTones, templateGroups } from "../page/templates";
   import { DEFAULT_PAGE_SIZE, PAGE_SIZES, pageSizes, describeGeometry, geometryOf, type Orientation } from "../page/sizes";
   import SideEditor from "./SideEditor.svelte";
@@ -924,6 +924,32 @@
       : chipBox.left + chipBox.width / 2 - barBox.left;
   }
   let moreOpen = $state(false);
+  let inheritedPaper = $state<PageDefaults | null>(null);
+  let addPageToneChanged = $state(false);
+  $effect(() => {
+    if (!addPageOpen) { addPageToneChanged = false; return; }
+    inheritedPaper = null;
+    const pageId = session.activePageId;
+    const position: PagePosition = addPageWhere === "last" ? { kind: "last" } : { kind: addPageWhere, pageId };
+    let cancelled = false;
+    void session.paperBefore(position).then(paper => { if (!cancelled) inheritedPaper = paper; }).catch(() => {});
+    return () => { cancelled = true; };
+  });
+  let backgroundOpen = $state(false);
+  let backgroundToneChanged = $state(false);
+  function toggleBackground() {
+    addPageOpen = false;
+    backgroundToneChanged = false;
+    const background = session.activeBackground;
+    const color = background.kind === "template" ? background.template.backgroundColor : background.kind === "plain" ? background.color : "";
+    addPageToneId = PAPER_TONES.find(tone => tone.backgroundColor.toLowerCase() === color.toLowerCase())?.id ?? PAPER_TONES[0].id;
+    backgroundOpen = !backgroundOpen;
+  }
+  let backgroundTrigger = $state<HTMLButtonElement>();
+  function closeBackground() {
+    backgroundOpen = false;
+    void tick().then(() => backgroundTrigger?.focus());
+  }
   let addPageOpen = $state(false);
   let addPageTrigger = $state<HTMLButtonElement>();
   let exportOpen = $state(false);
@@ -1572,20 +1598,26 @@
    * still looks like itself on a machine that never had this build's library — the same rule a
    * stroke follows when it stores its resolved nib parameters instead of a pen name.
    */
-  function addPageGroups(): AddPageGroup[] {
+  function addPageGroups(editBackground = false): AddPageGroup[] {
     // Previews are drawn at the size the new page will be, so a swatch of A5 squared paper shows
     // the same 5mm cells at A5's proportions rather than A4's.
-    const geometry = addPageGeometry;
+    const geometry = editBackground ? session.activeGeometry : addPageGeometry;
     const template = (source: PageTemplate): AddPageSource => ({
       id: source.id,
       label: source.name,
       preview: templatePreviewSvg(source, geometry),
       onSelect: (position, count) =>
-        void session.addPage(position, { kind: "template", template: source }, geometry, count),
+        editBackground
+          ? void session.changeBackground({ kind: "template", template: source })
+          : void session.addPage(position, { kind: "template", template: source }, geometry, count),
     });
-    // The notebook's paper for new pages: what it was created with, then whatever was added last
-    // (Rust moves it on every add with a chosen paper). The panel opens on it.
-    const next = session.notebookManifest?.defaultPage ?? null;
+    // Preview the inherited paper; Rust resolves it again at commit time.
+    const current = session.activeBackground;
+    const color = (PAPER_TONES.find(tone => tone.id === addPageToneId) ?? PAPER_TONES[0]).backgroundColor;
+    const background = backgroundToneChanged ? recolorBackground(current, color) : current;
+    const base = inheritedPaper ?? session.notebookManifest?.defaultPage ?? null;
+    const next = editBackground ? { background, geometry } : base && addPageToneChanged
+      ? { ...base, background: recolorBackground(base.background, color) } : base;
     const nextUsable = next && next.background.kind !== "pdf" ? next : null;
     const paperPreview = (paper: PageDefaults) =>
       paper.background.kind === "template"
@@ -1634,18 +1666,18 @@
       },
       {
         id: "current",
-        title: $t("workspace.notebookPaper"),
+        title: $t(editBackground ? "workspace.currentBackground" : "workspace.inheritedBackground"),
         lane: "current",
         sources: [
           ...(nextUsable
             ? [
                 {
                   id: "next",
-                  label: $t("workspace.notebookPaper"),
+                  label: $t(editBackground ? "workspace.currentBackground" : "workspace.inheritedBackground"),
                   detail: `${paperName(nextUsable)}, ${describeGeometry(nextUsable.geometry, $t)}`,
                   preview: paperPreview(nextUsable),
                   onSelect: (position: PagePosition, count: number) =>
-                    void session.addPage(position, nextUsable.background, nextUsable.geometry, count),
+                    editBackground ? void session.changeBackground(nextUsable.background) : void session.addPage(position, addPageToneChanged ? nextUsable.background : null, nextUsable.geometry, count),
                 } satisfies AddPageSource,
               ]
             : []),
@@ -2702,12 +2734,30 @@
         </button>
       {/if}
       {#if session.pageOpen}
+        {#if session.activeBackground.kind !== "pdf" && !session.activeCalculation}
+          <button bind:this={backgroundTrigger} class="icon-button" class:active={backgroundOpen} type="button" aria-label={$t("workspace.pageBackground")} aria-expanded={backgroundOpen} title={$t("workspace.pageBackground")} disabled={session.busy} onclick={toggleBackground}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3.5" width="14" height="17" rx="2" /><path class="paper-dots" d="M9 8.5h.01M12 8.5h.01M15 8.5h.01M9 12h.01M12 12h.01M15 12h.01M9 15.5h.01M12 15.5h.01M15 15.5h.01" /></svg>
+          </button>
+          {#if backgroundOpen}
+            {#key session.activePageId}<AddPageMenu editBackground trigger={backgroundTrigger}
+              where="after" groups={addPageGroups(true).filter(group => group.lane !== "import")}
+              tones={paperTones($t)} toneId={addPageToneId}
+              sizes={pageSizes($t)} sizeId={addPageSizeId} orientation={addPageOrientation}
+              previewAspect={session.activeGeometry.widthPt / session.activeGeometry.heightPt}
+              geometry={session.activeGeometry} currentPageId={session.activePageId}
+              pageNumber={session.pageNumber} pageCount={session.pageCount} canPlaceRelative={false}
+              onWhereChange={() => {}} onSizeChange={() => {}} onOrientationChange={() => {}}
+              onToneChange={next => { addPageToneId = next; backgroundToneChanged = true; }} onClose={closeBackground}
+            />{/key}
+          {/if}
+        {/if}
         <div class="add-page-anchor">
           <button bind:this={addPageTrigger} class="icon-button" class:active={addPageOpen} type="button" aria-label={$t("workspace.addPage")} aria-expanded={addPageOpen} title={$t("workspace.addPage")} disabled={session.busy} onclick={() => (addPageOpen = !addPageOpen)}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6"></path><path d="M18 9.5v9"></path><path d="M13.5 14h9"></path></svg>
           </button>
           {#if addPageOpen}
             <AddPageMenu
+              trigger={addPageTrigger}
               where={addPageWhere}
               groups={addPageGroups()}
               tones={paperTones($t)}
@@ -2722,7 +2772,7 @@
               geometry={addPageGeometry}
               canPlaceRelative={session.pageCount > 0 && Boolean(session.activePageId)}
               onWhereChange={(next) => (addPageWhere = next)}
-              onToneChange={(next) => (addPageToneId = next)}
+              onToneChange={(next) => { addPageToneId = next; addPageToneChanged = true; }}
               onSizeChange={(next) => (addPageSizeId = next)}
               onOrientationChange={(next) => (addPageOrientation = next)}
               onClose={() => (addPageOpen = false)}
@@ -3694,6 +3744,8 @@
   }
 
   .command-actions svg { width: var(--icon); height: var(--icon); }
+  /* Round caps on zero-length strokes draw the paper dots; a heavier weight keeps them legible. */
+  .command-actions .paper-dots { stroke-width: calc(var(--stroke) * 1.25); }
   /* Filled glyphs — the overflow dots, the pen nib — are shapes, not line drawings; everything
      else is a stroke at the one weight. */
   .command-actions svg:not(.solid-icon) {

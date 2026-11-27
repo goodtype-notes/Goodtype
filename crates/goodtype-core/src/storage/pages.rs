@@ -332,9 +332,19 @@ fn create_page_inner(
     let geometry = geometry
         .cloned()
         .unwrap_or_else(|| manifest.default_page.geometry.clone());
-    let background = background
-        .cloned()
-        .unwrap_or_else(|| manifest.default_page.background.clone());
+    let background = if let Some(background) = background {
+        background.clone()
+    } else {
+        let mut inherited = None;
+        for reference in manifest.pages[..insert_at].iter().rev() {
+            let page: Page = read_json(&root, &reference.path)?;
+            if !matches!(page.background, PageBackground::Pdf { .. }) {
+                inherited = Some(page.background);
+                break;
+            }
+        }
+        inherited.unwrap_or_else(|| manifest.default_page.background.clone())
+    };
     // The paper chosen for this page becomes the notebook's paper for new pages: the writer asked
     // for whatever they added last to be what the next add offers, starting from the paper the
     // notebook was created with. A PDF page is a document, not paper, so it never becomes it.
@@ -1407,6 +1417,66 @@ mod tests {
         let redone = redo_structure(&root, "2026-10-12T10:03:00Z", &mut structure).unwrap();
         assert_eq!(redone.snapshot.manifest.pages.len(), 2);
         assert_eq!(redone.snapshot.manifest.schema_version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn new_pages_inherit_the_nearest_non_pdf_page_above_unless_explicit() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("notebook");
+        let first = snapshot();
+        create_notebook(&root, &first).unwrap();
+        let chosen = PageBackground::Plain {
+            color: "#f4efe3".into(),
+        };
+        create_page(
+            &root,
+            "2026-11-01T10:00:00Z",
+            &PagePosition::Last,
+            Some(&chosen),
+            None,
+        )
+        .unwrap();
+        // The default has changed, but an insertion after page 1 inherits page 1.
+        let inserted = create_page(
+            &root,
+            "2026-11-01T10:01:00Z",
+            &PagePosition::After {
+                page_id: first.page.id.clone(),
+            },
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(inserted.page.background, first.page.background);
+        let source = store_pdf_reference(&root, "lecture.pdf", b"%PDF-1.7 fixture").unwrap();
+        import_pdf_pages(
+            &root,
+            "2026-11-01T10:02:00Z",
+            &PagePosition::Last,
+            &source,
+            std::slice::from_ref(&first.page.geometry),
+            None,
+            None,
+        )
+        .unwrap();
+        let inherited = create_page(
+            &root,
+            "2026-11-01T10:03:00Z",
+            &PagePosition::Last,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(inherited.page.background, chosen);
+        let explicit = create_page(
+            &root,
+            "2026-11-01T10:04:00Z",
+            &PagePosition::Last,
+            Some(&first.page.background),
+            None,
+        )
+        .unwrap();
+        assert_eq!(explicit.page.background, first.page.background);
     }
 
     #[test]

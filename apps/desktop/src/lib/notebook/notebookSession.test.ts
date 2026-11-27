@@ -107,6 +107,36 @@ function workspace() {
 }
 
 describe("notebook session coordination", () => {
+  it("previews inherited paper across PDF pages and uses the default before page one", async () => {
+    const { session } = workspace();
+    const value = snapshot();
+    session.applySnapshot(value);
+    ipc.page.mockImplementation(async (_root, id) => {
+      const page = snapshot(id);
+      page.page.background = id === "page-003"
+        ? { kind: "pdf", sourcePath: "references/test.pdf", page: 1 }
+        : { kind: "plain", color: "#f4efe3" };
+      return page;
+    });
+    expect((await session.paperBefore({ kind: "last" }))?.background).toEqual({ kind: "plain", color: "#f4efe3" });
+    expect(await session.paperBefore({ kind: "before", pageId: "page-001" })).toEqual(value.manifest.defaultPage);
+  });
+
+  it("changes paper in one canonical commit and refuses PDF replacement", async () => {
+    const { session } = workspace();
+    session.applySnapshot(snapshot());
+    const background = { kind: "plain" as const, color: "#f4efe3" };
+    await session.changeBackground(background);
+    expect(ipc.commit).toHaveBeenCalledTimes(1);
+    expect(ipc.commit.mock.calls[0][1].page.background).toEqual(background);
+    expect(session.activeSnapshot?.page.background).toEqual(background);
+    const pdf = snapshot();
+    pdf.page.background = { kind: "pdf", sourcePath: "references/test.pdf", page: 1 };
+    session.applySnapshot(pdf);
+    await session.changeBackground(background);
+    expect(ipc.commit).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects free-positioned block insertion on a calculation page", () => {
     const { session } = workspace();
     const value = snapshot();
