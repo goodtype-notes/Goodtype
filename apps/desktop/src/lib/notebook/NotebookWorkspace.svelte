@@ -3098,7 +3098,7 @@
                       onCommit={crop => { if (codexSelection) codexSelection = {...codexSelection, share: {...codexSelection.share, cropPt:crop}}; if(region) region=crop; cropVersion++; }} />
                   {/if}
                   {#if active && selection.wasmMarks.length}
-                    <WasmGhost marks={selection.wasmMarks} />
+                    <WasmGhost marks={selection.wasmMarks} owner={selection.wasmOwner} />
                   {/if}
                   {#if active && selection.mixedSelectionBounds}
                     <MixedSelection bounds={selection.mixedSelectionBounds} {zoom}

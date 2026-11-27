@@ -273,6 +273,7 @@ export function createSelection(env: SelectionEnvironment) {
   let wasmMarks = $state.raw<Mark[]>([]);
   let wasmChannel: ReturnType<typeof previewChannel> | null = null;
   let wasmGesture = 0;
+  let wasmAddon = "";
   let wasmCurrent: (() => boolean) | null = null;
   let wasmPending: ShapeView[] = [];
   $effect(() => {
@@ -317,14 +318,15 @@ export function createSelection(env: SelectionEnvironment) {
     wasmChannel?.stop(); wasmChannel = null; wasmMarks = [];
     wasmCurrent = current; wasmPending = [];
     const gesture = ++wasmGesture;
-    const digest = import.meta.env.VITE_WASM_SPIKE_SHA256;
-    if (import.meta.env.DEV && typeof digest === "string" && /^[a-f0-9]{64}$/.test(digest)) {
-      void Promise.all([invoke<number[]>("addon_wasm_bytes", { addonId: "connectors", digest }), import("./wasmPreviewWorker")]).then(([bytes, { createPreviewWorker }]) => {
+    const addonIds = [...new Set(env.activeSnapshot?.page.objects.flatMap(object => Object.keys(object.addonData ?? {})) ?? [])];
+    if ((import.meta.env.DEV || import.meta.env.VITE_WASM_TIER === "1") && addonIds.length) {
+      void Promise.all([invoke<{ bytes: number[]; digest: string; addonId: string }>("addon_wasm_bytes", { addonIds }), import("./wasmPreviewWorker")]).then(([module, { createPreviewWorker }]) => {
         if (wasmGesture !== gesture || !wasmCurrent?.()) return;
+        wasmAddon = module.addonId;
         const worker = createPreviewWorker();
         wasmChannel = previewChannel(worker, marks => { if (wasmCurrent?.()) wasmMarks = marks; }, () => { wasmMarks = []; });
-        const buffer = new Uint8Array(bytes).buffer;
-        worker.postMessage({ kind: "init", bytes: buffer, digest }, [buffer]);
+        const buffer = new Uint8Array(module.bytes).buffer;
+        worker.postMessage({ kind: "init", bytes: buffer, digest: module.digest }, [buffer]);
         submitWasmPreview(wasmPending);
       }).catch(() => { wasmMarks = []; });
     }
@@ -365,7 +367,8 @@ export function createSelection(env: SelectionEnvironment) {
         if (bounds) changed.push({ id: previewGroup.id, bounds: { x: bounds.left, y: bounds.top, width: bounds.right - bounds.left, height: bounds.bottom - bounds.top }, ports: pagePorts(previewGroup) });
       }
       const ids = new Set(changed.map(object => object.id));
-      const own = page.objects.filter(object => object.addonData?.connectors?.refs.some(id => ids.has(id)));
+      const own = page.objects.filter(object => object.addonData?.[wasmAddon]?.refs.some(id => ids.has(id)))
+        .map(object => ({ ...object, addonData: { [wasmAddon]: object.addonData![wasmAddon] } }));
       if (own.length) wasmChannel.submit({ gestureId: String(wasmGesture), revision: page.revision, kind: "changed", ports: [], settings: {},
         local: { page: { widthPt: page.geometry.widthPt, heightPt: page.geometry.heightPt }, changed, own, deleted: [] } });
     }
@@ -1427,6 +1430,7 @@ export function createSelection(env: SelectionEnvironment) {
     get mixedStrokePreview() { return mixedStrokePreview; },
     get previewShapes() { return previewShapes; },
     get wasmMarks() { return wasmMarks; },
+    get wasmOwner() { return wasmAddon; },
     previewShapeGhost,
     get previewImages() { return previewImages; },
     get previewBlocks() { return previewBlocks; },
